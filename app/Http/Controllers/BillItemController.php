@@ -18,19 +18,27 @@ class BillItemController extends Controller
     {
         abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
         $data = $request->validate([
-            'type' => ['required', Rule::in(['charge', 'part', 'labor', 'discount'])],
+            'type' => ['required', Rule::in(['charge', 'part', 'labor', 'discount', 'customer_part'])],
             'part_id' => ['nullable', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'description' => ['nullable', 'string', 'max:255'],
             'quantity' => ['nullable', 'numeric', 'gt:0'],
             'unit_price' => ['nullable', 'numeric', 'min:0'],
         ]);
 
+        if ($data['type'] === 'customer_part') {
+            if (blank($data['description'] ?? null)) {
+                throw ValidationException::withMessages(['description' => ['Describe the part received from the customer.']]);
+            }
+            $data['unit_price'] = 0;
+            $data['part_id'] = null;
+        }
+
         if ($data['type'] === 'part' && empty($data['part_id'])) {
             if (blank($data['description'] ?? null)) {
-                throw ValidationException::withMessages(['description' => ['Describe the outside part when it is not from stock.']]);
+                throw ValidationException::withMessages(['description' => ['Describe the part bought outside.']]);
             }
             if (! array_key_exists('unit_price', $data) || $data['unit_price'] === null) {
-                throw ValidationException::withMessages(['unit_price' => ['Enter the cost for an outside part.']]);
+                throw ValidationException::withMessages(['unit_price' => ['Enter the cost for a part bought outside.']]);
             }
         }
 
@@ -43,7 +51,7 @@ class BillItemController extends Controller
             $quantity = 1;
         }
 
-        if ($data['type'] === 'part' && $quantity !== (float) (int) $quantity) {
+        if (in_array($data['type'], ['part', 'customer_part'], true) && $quantity !== (float) (int) $quantity) {
             throw ValidationException::withMessages(['quantity' => ['Parts must use a whole quantity.']]);
         }
 
@@ -53,7 +61,10 @@ class BillItemController extends Controller
                 throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part.']]);
             }
 
-            $unitPrice = (float) ($data['unit_price'] ?? $part?->price ?? 0);
+            $unitPrice = $data['type'] === 'customer_part'
+                ? 0.0
+                : (float) ($data['unit_price'] ?? $part?->price ?? 0);
+
             $item = $bill->items()->create([
                 'part_id' => $part?->id,
                 'type' => $data['type'],
