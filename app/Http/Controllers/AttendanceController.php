@@ -79,7 +79,7 @@ class AttendanceController extends Controller
         $employee = Employee::where('tenant_id', $data['tenant_id'])
             ->where('fingerprint_id', $data['fingerprint_id'])->where('active', true)->firstOrFail();
         abort_unless($employee->tenant?->status === 'active' && $employee->tenant->features()
-            ->where('features.key', 'employees_management')->wherePivot('is_enabled', true)->exists(), 403, 'Attendance is disabled for this business.');
+            ->where('features.key', 'attendance')->wherePivot('is_enabled', true)->exists(), 403, 'Attendance is disabled for this business.');
         $timestamp = Carbon::parse($data['timestamp']);
         $existing = Attendance::where('employee_id', $employee->id)
             ->whereBetween('date', [$timestamp->copy()->startOfDay(), $timestamp->copy()->endOfDay()])

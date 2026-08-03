@@ -83,7 +83,7 @@ class TenantUserSeeder extends Seeder
     private function featureMatrix(string $businessType): array
     {
         $keys = $businessType === 'garage'
-            ? ['admit_vehicle', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'reports']
+            ? ['admit_vehicle', 'customers', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'attendance', 'reports']
             : ['billing', 'parts_inventory', 'reports', 'balance_sheet'];
 
         return Feature::whereIn('key', $keys)->pluck('id')->mapWithKeys(fn (int $id) => [$id => ['is_enabled' => true]])->all();

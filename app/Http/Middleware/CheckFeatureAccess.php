@@ -8,9 +8,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 class CheckFeatureAccess
 {
-    public function handle(Request $request, Closure $next, string $feature): Response
+    public function handle(Request $request, Closure $next, string ...$features): Response
     {
-        abort_unless($request->user()?->canAccessFeature($feature), 403, "The {$feature} feature is not available for this account.");
+        $user = $request->user();
+        $allowed = collect($features)->contains(fn (string $feature) => $user?->canAccessFeature($feature));
+
+        abort_unless($allowed, 403, 'This feature is not available for this account.');
 
         return $next($request);
     }

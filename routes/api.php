@@ -49,8 +49,11 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::get('/dashboard', DashboardController::class);
 
         Route::middleware('feature:admit_vehicle')->group(function () {
-            Route::apiResource('customers', CustomerController::class)->except('destroy');
             Route::apiResource('vehicles', VehicleController::class)->except('destroy');
+        });
+
+        Route::middleware('feature:customers,admit_vehicle')->group(function () {
+            Route::apiResource('customers', CustomerController::class)->except('destroy');
         });
 
         Route::middleware('feature:billing')->group(function () {
@@ -75,7 +78,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         });
 
         Route::middleware('role:business_owner')->group(function () {
-            Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->middleware('feature:admit_vehicle');
+            Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->middleware('feature:customers,admit_vehicle');
             Route::delete('/vehicles/{vehicle}', [VehicleController::class, 'destroy'])->middleware('feature:admit_vehicle');
             Route::post('/parts', [PartController::class, 'store'])->middleware('feature:parts_inventory');
             Route::put('/parts/{part}', [PartController::class, 'update'])->middleware('feature:parts_inventory');
@@ -85,8 +88,16 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::post('/parts/{part}/restock', [PartController::class, 'restock'])->middleware('feature:parts_inventory');
         });
 
+        Route::middleware('feature:employees_management,attendance')->group(function () {
+            Route::get('/employees', [EmployeeController::class, 'index']);
+            Route::get('/employees/{employee}', [EmployeeController::class, 'show']);
+        });
         Route::middleware('feature:employees_management')->group(function () {
-            Route::apiResource('employees', EmployeeController::class);
+            Route::post('/employees', [EmployeeController::class, 'store']);
+            Route::put('/employees/{employee}', [EmployeeController::class, 'update']);
+            Route::delete('/employees/{employee}', [EmployeeController::class, 'destroy']);
+        });
+        Route::middleware('feature:attendance')->group(function () {
             Route::get('/attendance', [AttendanceController::class, 'index']);
             Route::post('/attendance', [AttendanceController::class, 'store']);
             Route::post('/attendance/punch', [AttendanceController::class, 'punch']);

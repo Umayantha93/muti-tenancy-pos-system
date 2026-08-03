@@ -132,7 +132,10 @@ class SuperAdminTenantController extends Controller
 
     public function features(Tenant $tenant): JsonResponse
     {
-        return response()->json(['available' => Feature::all(), 'enabled' => $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key')]);
+        return response()->json([
+            'available' => Feature::query()->orderBy('sort_order')->orderBy('name')->get(),
+            'enabled' => $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key'),
+        ]);
     }
 
     public function updateFeatures(Request $request, Tenant $tenant): JsonResponse
