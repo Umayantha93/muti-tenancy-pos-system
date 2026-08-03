@@ -14,7 +14,7 @@ class EmployeeController extends Controller
         return response()->json(Employee::query()
             ->when($request->boolean('active_only'), fn ($query) => $query->where('active', true))
             ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
-            ->orderBy('name')->paginate(20));
+            ->orderBy('name')->paginate($request->integer('per_page', 20)));
     }
 
     public function store(Request $request): JsonResponse

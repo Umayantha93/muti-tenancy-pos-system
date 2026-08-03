@@ -92,8 +92,8 @@ class MultiTenancyTest extends TestCase
 
     private function seedFeatures(): void
     {
-        foreach (['admit_vehicle', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'reports'] as $key) {
-            Feature::firstOrCreate(['key' => $key], ['name' => str($key)->headline()]);
+        foreach (['admit_vehicle', 'customers', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'attendance', 'reports'] as $key) {
+            Feature::firstOrCreate(['key' => $key], ['name' => str($key)->headline(), 'group' => 'Other', 'sort_order' => 0]);
         }
     }
 }

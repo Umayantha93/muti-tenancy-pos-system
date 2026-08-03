@@ -108,8 +108,8 @@ class GarageApiTest extends TestCase
 
     private function tenantUser(string $role, array $attributes = []): User
     {
-        $features = collect(['admit_vehicle', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'reports'])
-            ->map(fn (string $key) => Feature::firstOrCreate(['key' => $key], ['name' => str($key)->headline()]));
+        $features = collect(['admit_vehicle', 'customers', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'attendance', 'reports'])
+            ->map(fn (string $key) => Feature::firstOrCreate(['key' => $key], ['name' => str($key)->headline(), 'group' => 'Other', 'sort_order' => 0]));
         $tenant = Tenant::create([
             'business_name' => fake()->company(), 'business_type' => 'garage', 'owner_name' => fake()->name(),
             'owner_phone' => '0771234567', 'owner_email' => fake()->unique()->safeEmail(), 'status' => 'active',

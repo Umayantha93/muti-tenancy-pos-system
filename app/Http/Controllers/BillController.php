@@ -63,18 +63,23 @@ class BillController extends Controller
                 ],
             );
 
-            $bill = Bill::create([
-                'bill_number' => 'JOB-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
-                'vehicle_id' => $vehicle->id,
-                'customer_id' => $customer->id,
-                'admission_date' => $data['admission_date'] ?? today(),
-                'odometer' => $data['odometer'] ?? null,
-                'notes' => $data['notes'] ?? null,
-                'created_by' => $request->user()->id,
-            ]);
-
-            return $bill->load(['customer', 'vehicle', 'items', 'payments']);
+            return $this->openBill($request, $vehicle, $customer->id, $data);
         });
+
+        return response()->json($bill, 201);
+    }
+
+    public function storeFromVehicle(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'vehicle_id' => ['required', Rule::exists('vehicles', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'odometer' => ['nullable', 'integer', 'min:0'],
+            'notes' => ['nullable', 'string'],
+            'admission_date' => ['nullable', 'date'],
+        ]);
+
+        $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
+        $bill = $this->openBill($request, $vehicle, $vehicle->customer_id, $data);
 
         return response()->json($bill, 201);
     }
@@ -94,5 +99,18 @@ class BillController extends Controller
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
         return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments']));
+    }
+
+    private function openBill(Request $request, Vehicle $vehicle, int $customerId, array $data): Bill
+    {
+        return Bill::create([
+            'bill_number' => 'JOB-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+            'vehicle_id' => $vehicle->id,
+            'customer_id' => $customerId,
+            'admission_date' => $data['admission_date'] ?? today(),
+            'odometer' => $data['odometer'] ?? null,
+            'notes' => $data['notes'] ?? null,
+            'created_by' => $request->user()->id,
+        ])->load(['customer', 'vehicle', 'items', 'payments']);
     }
 }

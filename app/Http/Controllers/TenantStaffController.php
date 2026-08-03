@@ -27,7 +27,14 @@ class TenantStaffController extends Controller
     public function permissions(Request $request, User $user): JsonResponse
     {
         $this->ownedStaff($request, $user);
-        return response()->json(['available' => $request->user()->tenant->features()->wherePivot('is_enabled', true)->get(), 'permissions' => $user->permissions]);
+        return response()->json([
+            'available' => $request->user()->tenant->features()
+                ->wherePivot('is_enabled', true)
+                ->orderBy('features.sort_order')
+                ->orderBy('features.name')
+                ->get(),
+            'permissions' => $user->permissions,
+        ]);
     }
 
     public function updatePermissions(Request $request, User $user): JsonResponse

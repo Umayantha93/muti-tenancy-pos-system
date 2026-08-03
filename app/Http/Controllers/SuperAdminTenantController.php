@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class SuperAdminTenantController extends Controller
@@ -42,20 +43,31 @@ class SuperAdminTenantController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $features = $this->normalizeFeatures($request);
         $data = $request->validate([
             'business_name' => ['required', 'string', 'max:255'],
-            'business_type' => ['required', Rule::in(['garage', 'supermarket', 'shop'])],
+            'business_type' => ['required', Rule::in(['garage', 'cottage', 'supermarket', 'shop'])],
             'owner_name' => ['required', 'string', 'max:255'],
             'owner_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
             'owner_email' => ['required', 'email', 'unique:users,email'],
+            'contact_email' => ['nullable', 'email'],
+            'contact_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'password' => ['required', 'string', 'min:8'],
             'plan' => ['nullable', 'string', 'max:100'],
+            'logo' => ['nullable', 'image', 'max:5120'],
             'features' => ['nullable', 'array'],
             'features.*' => ['string', 'exists:features,key'],
         ]);
+        $data['features'] = $features ?: ($data['features'] ?? null);
+        $data['contact_email'] = $data['contact_email'] ?: $data['owner_email'];
+        $data['contact_phone'] = $data['contact_phone'] ?: $data['owner_phone'];
 
         $tenant = DB::transaction(function () use ($data, $request) {
-            $tenant = Tenant::create([...$data, 'status' => 'active']);
+            $payload = collect($data)->except(['password', 'features', 'logo'])->all();
+            $tenant = Tenant::create([...$payload, 'status' => 'active']);
+            if ($request->hasFile('logo')) {
+                $tenant->update(['logo' => $request->file('logo')->store('tenants', 'public')]);
+            }
             User::create([
                 'tenant_id' => $tenant->id,
                 'name' => $data['owner_name'],
@@ -83,14 +95,24 @@ class SuperAdminTenantController extends Controller
     {
         $data = $request->validate([
             'business_name' => ['sometimes', 'string', 'max:255'],
-            'business_type' => ['sometimes', Rule::in(['garage', 'supermarket', 'shop'])],
+            'business_type' => ['sometimes', Rule::in(['garage', 'cottage', 'supermarket', 'shop'])],
             'owner_name' => ['sometimes', 'string', 'max:255'],
             'owner_phone' => ['sometimes', 'regex:/^[0-9+() -]{7,20}$/'],
             'owner_email' => ['sometimes', 'email'],
+            'contact_email' => ['nullable', 'email'],
+            'contact_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'plan' => ['nullable', 'string', 'max:100'],
+            'logo' => ['nullable', 'image', 'max:5120'],
         ]);
-        $tenant->update($data);
-        $this->audit($request, 'tenant.updated', $tenant, $data);
+        $payload = collect($data)->except('logo')->all();
+        $tenant->update($payload);
+        if ($request->hasFile('logo')) {
+            if ($tenant->logo) {
+                Storage::disk('public')->delete($tenant->logo);
+            }
+            $tenant->update(['logo' => $request->file('logo')->store('tenants', 'public')]);
+        }
+        $this->audit($request, 'tenant.updated', $tenant, $payload);
 
         return response()->json($tenant->refresh());
     }
@@ -110,7 +132,10 @@ class SuperAdminTenantController extends Controller
 
     public function features(Tenant $tenant): JsonResponse
     {
-        return response()->json(['available' => Feature::all(), 'enabled' => $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key')]);
+        return response()->json([
+            'available' => Feature::query()->orderBy('sort_order')->orderBy('name')->get(),
+            'enabled' => $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key'),
+        ]);
     }
 
     public function updateFeatures(Request $request, Tenant $tenant): JsonResponse
@@ -153,6 +178,18 @@ class SuperAdminTenantController extends Controller
         return $type === 'garage'
             ? Feature::pluck('key')->all()
             : ['billing', 'parts_inventory', 'reports', 'balance_sheet'];
+    }
+
+    private function normalizeFeatures(Request $request): ?array
+    {
+        $features = $request->input('features');
+        if (is_string($features)) {
+            $decoded = json_decode($features, true);
+            $features = is_array($decoded) ? $decoded : array_filter(array_map('trim', explode(',', $features)));
+            $request->merge(['features' => $features]);
+        }
+
+        return is_array($features) ? $features : null;
     }
 
     private function audit(Request $request, string $action, Tenant $tenant, array $metadata = []): void

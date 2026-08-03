@@ -15,18 +15,20 @@ class FeatureSeeder extends Seeder
     }
 
     /**
-     * @return array<int, array{key: string, name: string, description: string}>
+     * @return array<int, array{key: string, name: string, description: string, group: string, sort_order: int}>
      */
     private function features(): array
     {
         return [
-            ['key' => 'admit_vehicle', 'name' => 'Service Intake', 'description' => 'Vehicle admission and job cards'],
-            ['key' => 'billing', 'name' => 'Billing', 'description' => 'Charges, deductions and payments'],
-            ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll'],
-            ['key' => 'balance_sheet', 'name' => 'Finance', 'description' => 'Income, expenses and profit'],
-            ['key' => 'parts_inventory', 'name' => 'Inventory', 'description' => 'Parts and product stock'],
-            ['key' => 'employees_management', 'name' => 'Employees', 'description' => 'Employee and attendance management'],
-            ['key' => 'reports', 'name' => 'Reports', 'description' => 'Business reporting and trends'],
+            ['key' => 'admit_vehicle', 'name' => 'Admit vehicle', 'description' => 'Admit vehicles and open job cards', 'group' => 'Service Intake', 'sort_order' => 10],
+            ['key' => 'customers', 'name' => 'Customers', 'description' => 'Customer directory and job history', 'group' => 'Service Intake', 'sort_order' => 20],
+            ['key' => 'billing', 'name' => 'Job cards', 'description' => 'Job cards, charges, and payments', 'group' => 'Service Intake', 'sort_order' => 30],
+            ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Parts and product stock', 'group' => 'Inventory', 'sort_order' => 40],
+            ['key' => 'employees_management', 'name' => 'Team', 'description' => 'Employee profiles and records', 'group' => 'People', 'sort_order' => 50],
+            ['key' => 'attendance', 'name' => 'Attendance', 'description' => 'Punch and monthly attendance', 'group' => 'People', 'sort_order' => 60],
+            ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll', 'group' => 'People', 'sort_order' => 70],
+            ['key' => 'balance_sheet', 'name' => 'Finance', 'description' => 'Income, expenses and profit', 'group' => 'Finance', 'sort_order' => 80],
+            ['key' => 'reports', 'name' => 'Reports', 'description' => 'Business reporting and trends', 'group' => 'Finance', 'sort_order' => 90],
         ];
     }
 }

@@ -15,7 +15,7 @@ class VehicleController extends Controller
             ->when($request->filled('search'), fn ($query) => $query->where(fn ($nested) => $nested
                 ->where('number_plate', 'like', '%'.$request->string('search').'%')
                 ->orWhere('chassis_number', 'like', '%'.$request->string('search').'%')))
-            ->latest()->paginate(20));
+            ->latest()->paginate($request->integer('per_page', 20)));
     }
 
     public function store(Request $request): JsonResponse
