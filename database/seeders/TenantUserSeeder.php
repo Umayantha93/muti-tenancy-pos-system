@@ -26,6 +26,8 @@ class TenantUserSeeder extends Seeder
                 'business_type' => $tenantData['business_type'],
                 'owner_name' => $tenantData['owner_name'],
                 'owner_phone' => $tenantData['owner_phone'],
+                'contact_email' => $tenantData['owner_email'],
+                'contact_phone' => $tenantData['owner_phone'],
                 'status' => 'active',
                 'plan' => $tenantData['plan'],
             ]);

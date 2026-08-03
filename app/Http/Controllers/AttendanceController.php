@@ -24,7 +24,7 @@ class AttendanceController extends Controller
             ->when(isset($data['employee_id']), fn ($query) => $query->where('employee_id', $data['employee_id']))
             ->when(isset($data['month']), fn ($query) => $query->whereMonth('date', $data['month']))
             ->when(isset($data['year']), fn ($query) => $query->whereYear('date', $data['year']))
-            ->latest('date')->paginate(31));
+            ->latest('date')->paginate($request->integer('per_page', 31)));
     }
 
     public function store(Request $request): JsonResponse
@@ -36,7 +36,35 @@ class AttendanceController extends Controller
             'source' => ['nullable', 'string', 'max:50'],
         ]);
 
-        return response()->json($this->saveAttendance(Employee::findOrFail($data['employee_id']), $data), 201);
+        return response()->json($this->saveAttendance(Employee::findOrFail($data['employee_id']), $data)->load('employee'), 201);
+    }
+
+    public function punch(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'fingerprint_id' => ['required', 'string'],
+            'event' => ['nullable', Rule::in(['check_in', 'check_out'])],
+            'timestamp' => ['nullable', 'date'],
+        ]);
+
+        $employee = Employee::query()
+            ->where('fingerprint_id', $data['fingerprint_id'])
+            ->where('active', true)
+            ->firstOrFail();
+
+        $timestamp = Carbon::parse($data['timestamp'] ?? now());
+        $existing = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('date', [$timestamp->copy()->startOfDay(), $timestamp->copy()->endOfDay()])
+            ->first();
+        $event = $data['event'] ?? ($existing ? 'check_out' : 'check_in');
+
+        $attendance = $this->saveAttendance($employee, [
+            'check_in' => $event === 'check_in' ? $timestamp : ($existing?->check_in ?? $timestamp),
+            'check_out' => $event === 'check_out' ? $timestamp : $existing?->check_out,
+            'source' => 'fingerprint',
+        ]);
+
+        return response()->json($attendance->load('employee'), $existing ? 200 : 201);
     }
 
     public function ingest(Request $request): JsonResponse
