@@ -38,7 +38,9 @@ npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_URL` when the API is not available at `http://localhost:8000/api`.
+Set `NEXT_PUBLIC_API_URL` when the API is not available at `http://localhost:8000/api` (must include the `/api` suffix, e.g. `https://api.iubits.cc/api`).
+
+On the API host, set `FRONTEND_URL=https://iubits.cc`, then run `php artisan config:clear`.
 
 ## Seed Accounts
 
