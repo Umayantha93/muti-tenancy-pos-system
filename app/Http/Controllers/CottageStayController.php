@@ -89,7 +89,7 @@ class CottageStayController extends Controller
                 ]);
                 BillItem::create([
                     'bill_id' => $bill->id,
-                    'type' => 'service',
+                    'type' => 'room',
                     'description' => "{$room->name} · {$nights} night(s)",
                     'quantity' => $nights,
                     'unit_price' => $room->nightly_rate,

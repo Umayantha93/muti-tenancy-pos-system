@@ -72,12 +72,16 @@ class SuperAdminTenantController extends Controller
             'contact_email' => ['nullable', 'email'],
             'contact_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'password' => ['required', 'string', 'min:8'],
-            'plan' => ['nullable', 'string', 'max:100'],
+            'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
+            'payment_plan' => ['required', Rule::in(BusinessTypes::paymentPlans())],
+            'plan_amount' => ['required', 'numeric', 'min:0'],
             'logo' => ['nullable', 'image', 'max:5120'],
             'features' => ['nullable', 'array'],
             'features.*' => ['string', 'exists:features,key'],
         ]);
         $data['features'] = $features ?: ($data['features'] ?? null);
+        $data['plan'] = $data['plan'] ?? BusinessTypes::defaultPlan($data['business_type']);
+        $data['payment_plan'] = $data['payment_plan'] ?? 'monthly';
         $data['owner_phones'] = $phones['owner_phones'];
         $data['contact_phones'] = $phones['contact_phones'];
         $data['owner_phone'] = $phones['owner_phone'];
@@ -126,7 +130,9 @@ class SuperAdminTenantController extends Controller
             'owner_email' => ['sometimes', 'email'],
             'contact_email' => ['nullable', 'email'],
             'contact_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
-            'plan' => ['nullable', 'string', 'max:100'],
+            'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
+            'payment_plan' => ['sometimes', Rule::in(BusinessTypes::paymentPlans())],
+            'plan_amount' => ['nullable', 'numeric', 'min:0'],
             'logo' => ['nullable', 'image', 'max:5120'],
         ]);
         $payload = collect($data)->except('logo')->all();

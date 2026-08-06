@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'total_deductions',
     'amount_paid',
     'balance_due',
+    'customer_balance',
     'created_by',
     'updated_by',
     'source_type',
@@ -38,6 +39,7 @@ class Bill extends Model
             'total_deductions' => 'decimal:2',
             'amount_paid' => 'decimal:2',
             'balance_due' => 'decimal:2',
+            'customer_balance' => 'decimal:2',
         ];
     }
 

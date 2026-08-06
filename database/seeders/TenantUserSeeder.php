@@ -33,6 +33,8 @@ class TenantUserSeeder extends Seeder
                 'contact_phones' => [['label' => 'Business', 'number' => $tenantData['owner_phone']]],
                 'status' => 'active',
                 'plan' => $tenantData['plan'],
+                'payment_plan' => $tenantData['payment_plan'],
+                'plan_amount' => $tenantData['plan_amount'],
             ]);
 
             $tenant->features()->sync($this->featureMatrix($tenantData['business_type']));
@@ -48,7 +50,7 @@ class TenantUserSeeder extends Seeder
     }
 
     /**
-     * @return array<int, array{business_name: string, business_type: string, owner_name: string, owner_phone: string, owner_email: string, plan: string}>
+     * @return array<int, array{business_name: string, business_type: string, owner_name: string, owner_phone: string, owner_email: string, plan: string, payment_plan: string, plan_amount: float}>
      */
     private function tenants(): array
     {
@@ -60,6 +62,8 @@ class TenantUserSeeder extends Seeder
                 'owner_phone' => '0771234567',
                 'owner_email' => 'admin@garage.lk',
                 'plan' => 'garage-pro',
+                'payment_plan' => 'monthly',
+                'plan_amount' => 15000,
             ],
             [
                 'business_name' => 'Lens & Light Studio',
@@ -68,6 +72,8 @@ class TenantUserSeeder extends Seeder
                 'owner_phone' => '0772234567',
                 'owner_email' => 'owner@photo.lk',
                 'plan' => 'studio-pro',
+                'payment_plan' => 'monthly',
+                'plan_amount' => 12000,
             ],
             [
                 'business_name' => 'Thread & Co',
@@ -76,6 +82,8 @@ class TenantUserSeeder extends Seeder
                 'owner_phone' => '0777654321',
                 'owner_email' => 'owner@clothing.lk',
                 'plan' => 'retail-pro',
+                'payment_plan' => 'yearly',
+                'plan_amount' => 120000,
             ],
             [
                 'business_name' => 'Hillside Cottages',
@@ -84,6 +92,8 @@ class TenantUserSeeder extends Seeder
                 'owner_phone' => '0779988776',
                 'owner_email' => 'owner@cottage.lk',
                 'plan' => 'stay-pro',
+                'payment_plan' => 'monthly',
+                'plan_amount' => 18000,
             ],
         ];
     }

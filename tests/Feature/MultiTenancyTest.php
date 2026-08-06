@@ -69,6 +69,7 @@ class MultiTenancyTest extends TestCase
         $tenantId = $this->postJson('/api/super-admin/tenants', [
             'business_name' => 'Colombo Auto Care', 'business_type' => 'garage', 'owner_name' => 'A. Owner',
             'owner_phone' => '0771112233', 'owner_email' => 'owner@colombo.test', 'password' => 'password123',
+            'payment_plan' => 'monthly', 'plan_amount' => 10000,
             'features' => ['admit_vehicle', 'billing', 'parts_inventory'],
         ])->assertCreated()->assertJsonCount(1, 'users')->json('id');
 

@@ -78,7 +78,7 @@ class PhotoBookingController extends Controller
                     if ($package) {
                         BillItem::create([
                             'bill_id' => $bill->id,
-                            'type' => 'service',
+                            'type' => 'package',
                             'description' => $package->name,
                             'quantity' => 1,
                             'unit_price' => $package->price,

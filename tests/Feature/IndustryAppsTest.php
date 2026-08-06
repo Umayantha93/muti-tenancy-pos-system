@@ -121,6 +121,8 @@ class IndustryAppsTest extends TestCase
             ],
             'owner_email' => 'photo@studio.test',
             'password' => 'password123',
+            'payment_plan' => 'monthly',
+            'plan_amount' => 15000,
         ])->assertCreated();
 
         $this->assertCount(2, $response->json('owner_phones'));

@@ -3,21 +3,24 @@
 namespace App\Services;
 
 use App\Models\Bill;
+use App\Support\BusinessTypes;
 
 class BillCalculator
 {
     public function recalculate(Bill $bill): Bill
     {
-        $charges = (float) $bill->items()->whereIn('type', ['charge', 'part', 'labor'])->sum('line_total');
-        $discounts = (float) $bill->items()->where('type', 'discount')->sum('line_total');
+        $charges = (float) $bill->items()->whereIn('type', BusinessTypes::chargeItemTypes())->sum('line_total');
+        $discounts = (float) $bill->items()->whereIn('type', BusinessTypes::discountItemTypes())->sum('line_total');
         $advances = (float) $bill->items()->where('type', 'advance')->sum('line_total');
         $payments = (float) $bill->payments()->sum('amount');
         $amountPaid = $advances + $payments;
-        $balance = max(0, $charges - $discounts - $amountPaid);
+        $netBill = max(0, $charges - $discounts);
+        $balanceDue = max(0, $netBill - $amountPaid);
+        $customerBalance = max(0, $amountPaid - $netBill);
 
         $status = match (true) {
             $bill->status === 'closed' => 'closed',
-            $charges > 0 && $balance <= 0 => 'paid',
+            $netBill > 0 && $balanceDue <= 0 => 'paid',
             $amountPaid > 0 => 'partially_paid',
             default => 'open',
         };
@@ -26,7 +29,8 @@ class BillCalculator
             'subtotal' => $charges,
             'total_deductions' => $discounts + $advances,
             'amount_paid' => $amountPaid,
-            'balance_due' => $balance,
+            'balance_due' => $balanceDue,
+            'customer_balance' => $customerBalance,
             'status' => $status,
         ]);
 

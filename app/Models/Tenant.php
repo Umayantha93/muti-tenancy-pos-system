@@ -21,19 +21,22 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'contact_phones',
     'status',
     'plan',
+    'payment_plan',
+    'plan_amount',
     'logo',
 ])]
 class Tenant extends Model
 {
     use SoftDeletes;
 
-    protected $appends = ['logo_url'];
+    protected $appends = ['logo_url', 'payment_due_soon'];
 
     protected function casts(): array
     {
         return [
             'contact_phones' => 'array',
             'owner_phones' => 'array',
+            'plan_amount' => 'decimal:2',
         ];
     }
 
@@ -50,5 +53,18 @@ class Tenant extends Model
     protected function logoUrl(): Attribute
     {
         return Attribute::get(fn () => $this->logo ? 'storage/'.$this->logo : null);
+    }
+
+    protected function paymentDueSoon(): Attribute
+    {
+        return Attribute::get(function () {
+            if ($this->payment_plan !== 'monthly' || $this->plan_amount === null) {
+                return false;
+            }
+            $today = now()->day;
+            $lastDay = now()->daysInMonth;
+
+            return $today > ($lastDay - 5);
+        });
     }
 }

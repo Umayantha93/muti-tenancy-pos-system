@@ -82,7 +82,7 @@ class RetailSaleController extends Controller
                 $lineTotal = round($product->price * $qty, 2);
                 BillItem::create([
                     'bill_id' => $bill->id,
-                    'type' => 'part',
+                    'type' => 'product',
                     'description' => trim($product->name.' '.$product->size.' '.$product->color),
                     'quantity' => $qty,
                     'unit_price' => $product->price,
@@ -101,16 +101,16 @@ class RetailSaleController extends Controller
             if ($payAmount > 0) {
                 BillPayment::create([
                     'bill_id' => $bill->id,
-                    'amount' => min($payAmount, $subtotal),
+                    'amount' => $payAmount,
                     'method' => $data['payment_method'] ?? 'cash',
                     'paid_at' => now(),
                     'received_by' => $request->user()->id,
                 ]);
-                $paid = min($payAmount, $subtotal);
                 $bill->update([
-                    'amount_paid' => $paid,
-                    'balance_due' => max(0, $subtotal - $paid),
-                    'status' => $paid >= $subtotal ? 'paid' : 'partially_paid',
+                    'amount_paid' => $payAmount,
+                    'balance_due' => max(0, $subtotal - $payAmount),
+                    'customer_balance' => max(0, $payAmount - $subtotal),
+                    'status' => $payAmount >= $subtotal ? 'paid' : 'partially_paid',
                 ]);
             }
 
