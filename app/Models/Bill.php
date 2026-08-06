@@ -7,11 +7,29 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
-#[Fillable(['bill_number', 'vehicle_id', 'customer_id', 'admission_date', 'odometer', 'notes', 'status', 'subtotal', 'total_deductions', 'amount_paid', 'balance_due', 'created_by', 'updated_by'])]
+#[Fillable([
+    'bill_number',
+    'vehicle_id',
+    'customer_id',
+    'admission_date',
+    'odometer',
+    'notes',
+    'status',
+    'subtotal',
+    'total_deductions',
+    'amount_paid',
+    'balance_due',
+    'created_by',
+    'updated_by',
+    'source_type',
+    'source_id',
+])]
 class Bill extends Model
 {
     use BelongsToTenant;
+
     protected function casts(): array
     {
         return [
@@ -23,9 +41,33 @@ class Bill extends Model
         ];
     }
 
-    public function customer(): BelongsTo { return $this->belongsTo(Customer::class); }
-    public function vehicle(): BelongsTo { return $this->belongsTo(Vehicle::class); }
-    public function items(): HasMany { return $this->hasMany(BillItem::class); }
-    public function payments(): HasMany { return $this->hasMany(BillPayment::class); }
-    public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(Vehicle::class);
+    }
+
+    public function source(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(BillItem::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(BillPayment::class);
+    }
+
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }

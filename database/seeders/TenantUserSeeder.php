@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Feature;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\BusinessTypes;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -26,8 +27,10 @@ class TenantUserSeeder extends Seeder
                 'business_type' => $tenantData['business_type'],
                 'owner_name' => $tenantData['owner_name'],
                 'owner_phone' => $tenantData['owner_phone'],
+                'owner_phones' => [['label' => 'Primary', 'number' => $tenantData['owner_phone']]],
                 'contact_email' => $tenantData['owner_email'],
                 'contact_phone' => $tenantData['owner_phone'],
+                'contact_phones' => [['label' => 'Business', 'number' => $tenantData['owner_phone']]],
                 'status' => 'active',
                 'plan' => $tenantData['plan'],
             ]);
@@ -52,27 +55,35 @@ class TenantUserSeeder extends Seeder
         return [
             [
                 'business_name' => 'Bay 06 Garage',
-                'business_type' => 'garage',
+                'business_type' => BusinessTypes::GARAGE,
                 'owner_name' => 'Garage Owner',
                 'owner_phone' => '0771234567',
                 'owner_email' => 'admin@garage.lk',
                 'plan' => 'garage-pro',
             ],
             [
-                'business_name' => 'Bay 06 Spare Hub',
-                'business_type' => 'shop',
-                'owner_name' => 'Spare Parts Owner',
+                'business_name' => 'Lens & Light Studio',
+                'business_type' => BusinessTypes::PHOTOGRAPHY,
+                'owner_name' => 'Photo Owner',
                 'owner_phone' => '0772234567',
-                'owner_email' => 'owner2@garage.lk',
+                'owner_email' => 'owner@photo.lk',
+                'plan' => 'studio-pro',
+            ],
+            [
+                'business_name' => 'Thread & Co',
+                'business_type' => BusinessTypes::CLOTHING,
+                'owner_name' => 'Boutique Owner',
+                'owner_phone' => '0777654321',
+                'owner_email' => 'owner@clothing.lk',
                 'plan' => 'retail-pro',
             ],
             [
-                'business_name' => 'Bay 06 Supermarket',
-                'business_type' => 'supermarket',
-                'owner_name' => 'Supermarket Owner',
-                'owner_phone' => '0777654321',
-                'owner_email' => 'owner@supermarket.lk',
-                'plan' => 'retail-pro',
+                'business_name' => 'Hillside Cottages',
+                'business_type' => BusinessTypes::COTTAGE,
+                'owner_name' => 'Cottage Owner',
+                'owner_phone' => '0779988776',
+                'owner_email' => 'owner@cottage.lk',
+                'plan' => 'stay-pro',
             ],
         ];
     }
@@ -82,10 +93,9 @@ class TenantUserSeeder extends Seeder
      */
     private function featureMatrix(string $businessType): array
     {
-        $keys = $businessType === 'garage'
-            ? ['admit_vehicle', 'customers', 'billing', 'payroll', 'balance_sheet', 'parts_inventory', 'employees_management', 'attendance', 'reports']
-            : ['billing', 'parts_inventory', 'reports', 'balance_sheet'];
-
-        return Feature::whereIn('key', $keys)->pluck('id')->mapWithKeys(fn (int $id) => [$id => ['is_enabled' => true]])->all();
+        return Feature::whereIn('key', BusinessTypes::defaults($businessType))
+            ->pluck('id')
+            ->mapWithKeys(fn (int $id) => [$id => ['is_enabled' => true]])
+            ->all();
     }
 }

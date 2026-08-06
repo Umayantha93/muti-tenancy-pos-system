@@ -9,12 +9,33 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['business_name', 'business_type', 'owner_name', 'owner_phone', 'owner_email', 'contact_email', 'contact_phone', 'status', 'plan', 'logo'])]
+#[Fillable([
+    'business_name',
+    'business_type',
+    'owner_name',
+    'owner_phone',
+    'owner_phones',
+    'owner_email',
+    'contact_email',
+    'contact_phone',
+    'contact_phones',
+    'status',
+    'plan',
+    'logo',
+])]
 class Tenant extends Model
 {
     use SoftDeletes;
 
     protected $appends = ['logo_url'];
+
+    protected function casts(): array
+    {
+        return [
+            'contact_phones' => 'array',
+            'owner_phones' => 'array',
+        ];
+    }
 
     public function users(): HasMany
     {
