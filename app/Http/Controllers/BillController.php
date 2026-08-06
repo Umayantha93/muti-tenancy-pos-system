@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bill;
 use App\Models\Customer;
 use App\Models\Vehicle;
+use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,12 @@ class BillController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $type = $request->user()->tenant?->business_type ?? BusinessTypes::GARAGE;
+
+        if ($type !== BusinessTypes::GARAGE) {
+            return $this->storeGeneric($request, $type);
+        }
+
         $data = $request->validate([
             'customer_name' => ['required', 'string', 'max:255'],
             'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
@@ -63,7 +70,7 @@ class BillController extends Controller
                 ],
             );
 
-            return $this->openBill($request, $vehicle, $customer->id, $data);
+            return $this->openBill($request, $customer->id, $data, BusinessTypes::GARAGE, $vehicle->id);
         });
 
         return response()->json($bill, 201);
@@ -79,7 +86,7 @@ class BillController extends Controller
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
-        $bill = $this->openBill($request, $vehicle, $vehicle->customer_id, $data);
+        $bill = $this->openBill($request, $vehicle->customer_id, $data, BusinessTypes::GARAGE, $vehicle->id);
 
         return response()->json($bill, 201);
     }
@@ -101,15 +108,40 @@ class BillController extends Controller
         return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments']));
     }
 
-    private function openBill(Request $request, Vehicle $vehicle, int $customerId, array $data): Bill
+    private function storeGeneric(Request $request, string $type): JsonResponse
+    {
+        $data = $request->validate([
+            'customer_name' => ['required', 'string', 'max:255'],
+            'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
+            'customer_address' => ['nullable', 'string', 'max:255'],
+            'notes' => ['nullable', 'string'],
+            'admission_date' => ['nullable', 'date'],
+        ]);
+
+        $bill = DB::transaction(function () use ($data, $request, $type) {
+            $customer = Customer::firstOrCreate(
+                ['phone' => $data['customer_phone']],
+                ['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? null],
+            );
+            $customer->update(['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? $customer->address]);
+
+            return $this->openBill($request, $customer->id, $data, $type);
+        });
+
+        return response()->json($bill, 201);
+    }
+
+    private function openBill(Request $request, int $customerId, array $data, string $type, ?int $vehicleId = null, ?string $sourceType = null, ?int $sourceId = null): Bill
     {
         return Bill::create([
-            'bill_number' => 'JOB-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
-            'vehicle_id' => $vehicle->id,
+            'bill_number' => BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+            'vehicle_id' => $vehicleId,
             'customer_id' => $customerId,
             'admission_date' => $data['admission_date'] ?? today(),
             'odometer' => $data['odometer'] ?? null,
             'notes' => $data['notes'] ?? null,
+            'source_type' => $sourceType,
+            'source_id' => $sourceId,
             'created_by' => $request->user()->id,
         ])->load(['customer', 'vehicle', 'items', 'payments']);
     }

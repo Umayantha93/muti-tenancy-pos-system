@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\Part;
 use App\Services\BillCalculator;
+use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,13 +18,21 @@ class BillItemController extends Controller
     public function store(Request $request, Bill $bill, BillCalculator $calculator): JsonResponse
     {
         abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+
+        $businessType = $request->user()->tenant?->business_type ?? BusinessTypes::GARAGE;
+        $allowed = BusinessTypes::allowedBillItemTypes($businessType);
+        $typeMeta = collect(BusinessTypes::billItemTypes($businessType))->keyBy('value');
+
         $data = $request->validate([
-            'type' => ['required', Rule::in(['charge', 'part', 'labor', 'discount', 'customer_part'])],
+            'type' => ['required', Rule::in($allowed)],
             'part_id' => ['nullable', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'description' => ['nullable', 'string', 'max:255'],
             'quantity' => ['nullable', 'numeric', 'gt:0'],
             'unit_price' => ['nullable', 'numeric', 'min:0'],
         ]);
+
+        $kind = BusinessTypes::billItemKind($data['type']);
+        $allowQty = (bool) ($typeMeta[$data['type']]['allow_qty'] ?? false) || $kind === 'stock';
 
         if ($data['type'] === 'customer_part') {
             if (blank($data['description'] ?? null)) {
@@ -42,17 +51,19 @@ class BillItemController extends Controller
             }
         }
 
-        if (in_array($data['type'], ['labor', 'charge', 'discount'], true) && (! array_key_exists('unit_price', $data) || $data['unit_price'] === null)) {
-            throw ValidationException::withMessages(['unit_price' => ['The cost field is required.']]);
+        if ($kind !== 'stock' && (! array_key_exists('unit_price', $data) || $data['unit_price'] === null) && $data['type'] !== 'customer_part') {
+            if (empty($data['part_id'])) {
+                throw ValidationException::withMessages(['unit_price' => ['The cost field is required.']]);
+            }
         }
 
         $quantity = (float) ($data['quantity'] ?? 1);
-        if (in_array($data['type'], ['labor', 'charge', 'discount'], true)) {
+        if (! $allowQty) {
             $quantity = 1;
         }
 
-        if (in_array($data['type'], ['part', 'customer_part'], true) && $quantity !== (float) (int) $quantity) {
-            throw ValidationException::withMessages(['quantity' => ['Parts must use a whole quantity.']]);
+        if ($kind === 'stock' && $quantity !== (float) (int) $quantity) {
+            throw ValidationException::withMessages(['quantity' => ['Stock lines must use a whole quantity.']]);
         }
 
         $item = DB::transaction(function () use ($data, $bill, $calculator, $quantity) {
@@ -68,7 +79,7 @@ class BillItemController extends Controller
             $item = $bill->items()->create([
                 'part_id' => $part?->id,
                 'type' => $data['type'],
-                'description' => $data['description'] ?? $part?->name ?? ucfirst($data['type']),
+                'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
                 'line_total' => round($unitPrice * $quantity, 2),

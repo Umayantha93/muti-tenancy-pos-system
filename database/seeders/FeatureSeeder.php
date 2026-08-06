@@ -21,9 +21,15 @@ class FeatureSeeder extends Seeder
     {
         return [
             ['key' => 'admit_vehicle', 'name' => 'Admit vehicle', 'description' => 'Admit vehicles and open job cards', 'group' => 'Service Intake', 'sort_order' => 10],
-            ['key' => 'customers', 'name' => 'Customers', 'description' => 'Customer directory and job history', 'group' => 'Service Intake', 'sort_order' => 20],
-            ['key' => 'billing', 'name' => 'Job cards', 'description' => 'Job cards, charges, and payments', 'group' => 'Service Intake', 'sort_order' => 30],
-            ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Parts and product stock', 'group' => 'Inventory', 'sort_order' => 40],
+            ['key' => 'photo_bookings', 'name' => 'Bookings', 'description' => 'Photography session bookings', 'group' => 'Service Intake', 'sort_order' => 11],
+            ['key' => 'photo_packages', 'name' => 'Packages', 'description' => 'Photography packages and pricing', 'group' => 'Service Intake', 'sort_order' => 12],
+            ['key' => 'retail_pos', 'name' => 'Point of sale', 'description' => 'Quick clothing sales at the counter', 'group' => 'Service Intake', 'sort_order' => 13],
+            ['key' => 'cottage_stays', 'name' => 'Stays', 'description' => 'Cottage bookings and check-in', 'group' => 'Service Intake', 'sort_order' => 14],
+            ['key' => 'customers', 'name' => 'Customers', 'description' => 'Customer directory and history', 'group' => 'Service Intake', 'sort_order' => 20],
+            ['key' => 'billing', 'name' => 'Billing', 'description' => 'Orders, charges, and payments', 'group' => 'Service Intake', 'sort_order' => 30],
+            ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Garage parts and stock', 'group' => 'Inventory', 'sort_order' => 40],
+            ['key' => 'product_catalog', 'name' => 'Product catalog', 'description' => 'Clothing SKUs, sizes, and stock', 'group' => 'Inventory', 'sort_order' => 41],
+            ['key' => 'cottage_rooms', 'name' => 'Rooms', 'description' => 'Cottage rooms and rates', 'group' => 'Inventory', 'sort_order' => 42],
             ['key' => 'employees_management', 'name' => 'Team', 'description' => 'Employee profiles and records', 'group' => 'People', 'sort_order' => 50],
             ['key' => 'attendance', 'name' => 'Attendance', 'description' => 'Punch and monthly attendance', 'group' => 'People', 'sort_order' => 60],
             ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll', 'group' => 'People', 'sort_order' => 70],
