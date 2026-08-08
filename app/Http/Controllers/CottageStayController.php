@@ -26,7 +26,7 @@ class CottageStayController extends Controller
             ->latest('check_in')
             ->paginate($request->integer('per_page', 15));
 
-        return response()->json($stays);
+        return $this->moneyJson($stays);
     }
 
     public function store(Request $request): JsonResponse
@@ -110,7 +110,7 @@ class CottageStayController extends Controller
 
     public function show(CottageStay $stay): JsonResponse
     {
-        return response()->json($stay->load(['customer', 'room', 'bill.items', 'bill.payments', 'creator']));
+        return $this->moneyJson($stay->load(['customer', 'room', 'bill.items', 'bill.payments', 'creator']));
     }
 
     public function update(Request $request, CottageStay $stay): JsonResponse

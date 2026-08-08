@@ -11,7 +11,7 @@ class EmployeeController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        return response()->json(Employee::query()
+        return $this->moneyJson(Employee::query()
             ->when($request->boolean('active_only'), fn ($query) => $query->where('active', true))
             ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
             ->orderBy('name')->paginate($request->integer('per_page', 20)));
@@ -24,7 +24,7 @@ class EmployeeController extends Controller
 
     public function show(Employee $employee): JsonResponse
     {
-        return response()->json($employee->load(['attendance' => fn ($query) => $query->latest('date')->limit(31), 'payrolls' => fn ($query) => $query->latest('year')->latest('month')]));
+        return $this->moneyJson($employee->load(['attendance' => fn ($query) => $query->latest('date')->limit(31), 'payrolls' => fn ($query) => $query->latest('year')->latest('month')]));
     }
 
     public function update(Request $request, Employee $employee): JsonResponse

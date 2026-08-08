@@ -36,7 +36,7 @@ class DashboardController extends Controller
             $lowStock = Product::where('stock_qty', '<=', 5)->count();
         }
 
-        return response()->json([
+        return $this->moneyJson([
             'features' => $user->accessibleFeatureKeys(),
             'business_type' => $type,
             'today_income' => $billing ? (float) BillPayment::whereDate('paid_at', today())->sum('amount')

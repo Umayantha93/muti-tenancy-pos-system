@@ -116,7 +116,11 @@ class SuperAdminTenantController extends Controller
 
     public function show(Tenant $tenant): JsonResponse
     {
-        return response()->json($tenant->load(['features', 'users'])->loadCount('users'));
+        $tenant->makeVisible(['dual_financial_view_enabled']);
+        $payload = $tenant->load(['features', 'users'])->loadCount('users');
+        $payload->users->each(fn (User $user) => $user->makeVisible(['is_secondary_view']));
+
+        return response()->json($payload);
     }
 
     public function update(Request $request, Tenant $tenant): JsonResponse
@@ -153,7 +157,61 @@ class SuperAdminTenantController extends Controller
         }
         $this->audit($request, 'tenant.updated', $tenant, $payload);
 
-        return response()->json($tenant->refresh());
+        return response()->json($tenant->refresh()->makeVisible(['dual_financial_view_enabled']));
+    }
+
+    public function updateDualFinancialView(Request $request, Tenant $tenant): JsonResponse
+    {
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+        ]);
+
+        $enabled = (bool) $data['enabled'];
+        $secondary = $tenant->users()->where('is_secondary_view', true)->first();
+
+        if ($enabled) {
+            if (! $secondary) {
+                $creds = $request->validate([
+                    'secondary_name' => ['required', 'string', 'max:255'],
+                    'secondary_email' => ['required', 'email', 'unique:users,email'],
+                    'secondary_password' => ['required', 'string', 'min:8'],
+                ]);
+
+                $secondary = $tenant->users()->create([
+                    'name' => $creds['secondary_name'],
+                    'email' => $creds['secondary_email'],
+                    'password' => Hash::make($creds['secondary_password']),
+                    'role' => 'business_owner',
+                    'status' => 'active',
+                    'is_secondary_view' => true,
+                ]);
+                $this->audit($request, 'tenant.secondary_user_created', $tenant, ['user_id' => $secondary->id]);
+            } else {
+                $secondary->update(['status' => 'active']);
+                $secondary->tokens()->delete();
+            }
+
+            $tenant->update(['dual_financial_view_enabled' => true]);
+            $this->audit($request, 'tenant.dual_financial_view_enabled', $tenant, [
+                'secondary_user_id' => $secondary->id,
+            ]);
+        } else {
+            $tenant->update(['dual_financial_view_enabled' => false]);
+            $tenant->users()->where('is_secondary_view', true)->each(function (User $user) {
+                $user->update(['status' => 'inactive']);
+                $user->tokens()->delete();
+            });
+            $this->audit($request, 'tenant.dual_financial_view_disabled', $tenant);
+        }
+
+        $tenant->refresh()->makeVisible(['dual_financial_view_enabled']);
+        $tenant->load(['users']);
+        $tenant->users->each(fn (User $user) => $user->makeVisible(['is_secondary_view']));
+
+        return response()->json([
+            'tenant' => $tenant,
+            'secondary_user' => $tenant->users->firstWhere('is_secondary_view', true)?->makeVisible(['is_secondary_view']),
+        ]);
     }
 
     public function destroy(Request $request, Tenant $tenant): JsonResponse
@@ -204,7 +262,10 @@ class SuperAdminTenantController extends Controller
 
     public function users(Tenant $tenant): JsonResponse
     {
-        return response()->json($tenant->users()->with('permissions')->get());
+        $users = $tenant->users()->with('permissions')->get();
+        $users->each(fn (User $user) => $user->makeVisible(['is_secondary_view']));
+
+        return response()->json($users);
     }
 
     public function storeUser(Request $request, Tenant $tenant): JsonResponse
@@ -214,11 +275,26 @@ class SuperAdminTenantController extends Controller
             'email' => ['required', 'email', 'unique:users,email'],
             'password' => ['required', 'min:8'],
             'role' => ['required', Rule::in(['business_owner', 'staff'])],
+            'is_secondary_view' => ['sometimes', 'boolean'],
         ]);
-        $user = $tenant->users()->create([...$data, 'password' => Hash::make($data['password']), 'status' => 'active']);
-        $this->audit($request, 'tenant.user_created', $tenant, ['user_id' => $user->id]);
 
-        return response()->json($user, 201);
+        $isSecondary = (bool) ($data['is_secondary_view'] ?? false);
+        if ($isSecondary) {
+            abort_unless($tenant->dual_financial_view_enabled, 422, 'Enable dual financial view before creating a secondary login.');
+            abort_if($tenant->users()->where('is_secondary_view', true)->exists(), 422, 'This tenant already has a secondary login.');
+        }
+
+        $user = $tenant->users()->create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => Hash::make($data['password']),
+            'role' => $isSecondary ? 'business_owner' : $data['role'],
+            'status' => 'active',
+            'is_secondary_view' => $isSecondary,
+        ]);
+        $this->audit($request, $isSecondary ? 'tenant.secondary_user_created' : 'tenant.user_created', $tenant, ['user_id' => $user->id]);
+
+        return response()->json($user->makeVisible(['is_secondary_view']), 201);
     }
 
     private function status(Request $request, Tenant $tenant, string $status): JsonResponse

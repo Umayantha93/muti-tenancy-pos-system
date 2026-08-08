@@ -15,19 +15,30 @@ class BillController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $data = $request->validate([
+            'search' => ['nullable', 'string', 'max:255'],
+            'status' => ['nullable', 'string', 'max:50'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
         $bills = Bill::query()
             ->with(['customer', 'vehicle'])
-            ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')))
-            ->when($request->filled('search'), function ($query) use ($request) {
-                $search = '%'.$request->string('search').'%';
+            ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
+            ->when(! empty($data['search']), function ($query) use ($data) {
+                $search = '%'.$data['search'].'%';
                 $query->where(fn ($nested) => $nested->where('bill_number', 'like', $search)
                     ->orWhereHas('vehicle', fn ($vehicle) => $vehicle->where('number_plate', 'like', $search))
                     ->orWhereHas('customer', fn ($customer) => $customer->where('name', 'like', $search)));
             })
+            ->when(! empty($data['date_from']), fn ($query) => $query->whereDate('admission_date', '>=', $data['date_from']))
+            ->when(! empty($data['date_to']), fn ($query) => $query->whereDate('admission_date', '<=', $data['date_to']))
             ->latest('admission_date')
-            ->paginate($request->integer('per_page', 15));
+            ->orderByDesc('id')
+            ->paginate($data['per_page'] ?? 15);
 
-        return response()->json($bills);
+        return $this->moneyJson($bills);
     }
 
     public function store(Request $request): JsonResponse
@@ -93,7 +104,7 @@ class BillController extends Controller
 
     public function show(Bill $bill): JsonResponse
     {
-        return response()->json($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
     }
 
     public function update(Request $request, Bill $bill): JsonResponse

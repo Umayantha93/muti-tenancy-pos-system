@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'contact_phone',
     'contact_phones',
     'status',
+    'dual_financial_view_enabled',
     'plan',
     'payment_plan',
     'plan_amount',
@@ -31,13 +32,21 @@ class Tenant extends Model
 
     protected $appends = ['logo_url', 'payment_due_soon'];
 
+    protected $hidden = ['dual_financial_view_enabled'];
+
     protected function casts(): array
     {
         return [
             'contact_phones' => 'array',
             'owner_phones' => 'array',
             'plan_amount' => 'decimal:2',
+            'dual_financial_view_enabled' => 'boolean',
         ];
+    }
+
+    public function secondaryUser(): ?User
+    {
+        return $this->users()->where('is_secondary_view', true)->first();
     }
 
     public function users(): HasMany

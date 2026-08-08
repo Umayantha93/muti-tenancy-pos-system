@@ -20,13 +20,13 @@ class BalanceSheetController extends Controller
         $month = $data['month'] ?? now()->month;
         $year = $data['year'];
 
-        return response()->json([
+        return $this->moneyJson([
             'period' => ['month' => $month, 'year' => $year],
             ...$this->summary($month, $year),
             'yearly_trend' => collect(range(1, 12))->map(fn ($trendMonth) => [
                 'month' => $trendMonth,
                 ...$this->summary($trendMonth, $year, false),
-            ]),
+            ])->all(),
         ]);
     }
 

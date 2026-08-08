@@ -28,7 +28,7 @@ class CustomerController extends Controller
     {
         return response()->json($customer->load([
             'vehicles',
-            'bills' => fn ($query) => $query->with('vehicle')->latest('admission_date'),
+            'bills' => fn ($query) => $query->with('vehicle')->latest('admission_date')->orderByDesc('id'),
         ])->loadCount(['vehicles', 'bills']));
     }
 

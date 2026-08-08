@@ -22,6 +22,10 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
         }
 
+        if ($user->is_secondary_view && ! $user->tenant?->dual_financial_view_enabled) {
+            throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
+        }
+
         $user->tokens()->delete();
 
         return response()->json([

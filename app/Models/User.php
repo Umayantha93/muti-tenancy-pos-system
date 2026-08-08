@@ -14,8 +14,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['tenant_id', 'name', 'email', 'password', 'role', 'status'])]
-#[Hidden(['password', 'remember_token'])]
+#[Fillable(['tenant_id', 'name', 'email', 'password', 'role', 'status', 'is_secondary_view'])]
+#[Hidden(['password', 'remember_token', 'is_secondary_view'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -23,6 +23,11 @@ class User extends Authenticatable
 
     public function tenant(): BelongsTo { return $this->belongsTo(Tenant::class); }
     public function permissions(): BelongsToMany { return $this->belongsToMany(Feature::class, 'user_permissions')->withPivot('can_access')->withTimestamps(); }
+
+    public function usesSecondaryFinancialView(): bool
+    {
+        return (bool) $this->is_secondary_view && (bool) $this->tenant?->dual_financial_view_enabled;
+    }
 
     public function canAccessFeature(string $key): bool
     {
@@ -72,6 +77,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_secondary_view' => 'boolean',
         ];
     }
 }

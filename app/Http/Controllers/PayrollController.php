@@ -21,7 +21,7 @@ class PayrollController extends Controller
             'employee_id' => ['nullable', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
-        return response()->json(Payroll::with('employee')
+        return $this->moneyJson(Payroll::with('employee')
             ->when(isset($data['month']), fn ($query) => $query->where('month', $data['month']))
             ->when(isset($data['year']), fn ($query) => $query->where('year', $data['year']))
             ->when(isset($data['employee_id']), fn ($query) => $query->where('employee_id', $data['employee_id']))

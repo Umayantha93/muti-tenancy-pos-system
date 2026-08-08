@@ -12,6 +12,12 @@ class EnsureUserIsActive
     {
         abort_unless($request->user()?->status === 'active', 403, 'This user account is inactive.');
 
+        $user = $request->user();
+        if ($user?->is_secondary_view && ! $user->tenant?->dual_financial_view_enabled) {
+            $user->tokens()->delete();
+            abort(403, 'This user account is inactive.');
+        }
+
         return $next($request);
     }
 }

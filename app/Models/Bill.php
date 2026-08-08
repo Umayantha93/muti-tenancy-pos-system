@@ -34,7 +34,7 @@ class Bill extends Model
     protected function casts(): array
     {
         return [
-            'admission_date' => 'date',
+            'admission_date' => 'date:Y-m-d',
             'subtotal' => 'decimal:2',
             'total_deductions' => 'decimal:2',
             'amount_paid' => 'decimal:2',
