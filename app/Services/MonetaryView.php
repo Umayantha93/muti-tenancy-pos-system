@@ -38,6 +38,9 @@ class MonetaryView
         'monthly_expenses',
         'monthly_profit',
         'total',
+        'debit',
+        'credit',
+        'balance',
     ];
 
     public static function for(?User $user = null): self
