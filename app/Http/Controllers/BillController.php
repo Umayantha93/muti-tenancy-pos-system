@@ -24,7 +24,7 @@ class BillController extends Controller
         ]);
 
         $bills = Bill::query()
-            ->with(['customer', 'vehicle'])
+            ->with(['customer', 'vehicle', 'items', 'payments'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';

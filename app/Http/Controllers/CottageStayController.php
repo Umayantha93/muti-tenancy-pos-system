@@ -19,7 +19,7 @@ class CottageStayController extends Controller
     public function index(Request $request): JsonResponse
     {
         $stays = CottageStay::query()
-            ->with(['customer', 'room', 'bill'])
+            ->with(['customer', 'room', 'bill.items', 'bill.payments'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('from'), fn ($q) => $q->whereDate('check_out', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('check_in', '<=', $request->date('to')))

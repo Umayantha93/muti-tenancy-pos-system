@@ -53,12 +53,18 @@ class GarageApiTest extends TestCase
             'type' => 'discount', 'description' => 'Loyalty discount', 'quantity' => 1, 'unit_price' => 1000,
         ])->assertCreated()->assertJsonPath('bill.balance_due', '24000.00');
 
-        $this->postJson("/api/bills/{$billId}/payments", [
+        $paymentId = $this->postJson("/api/bills/{$billId}/payments", [
             'amount' => 10000, 'method' => 'cash',
         ])->assertCreated()
             ->assertJsonPath('bill.status', 'partially_paid')
             ->assertJsonPath('bill.amount_paid', '10000.00')
-            ->assertJsonPath('bill.balance_due', '14000.00');
+            ->assertJsonPath('bill.balance_due', '14000.00')
+            ->json('payment.id');
+
+        $this->deleteJson("/api/bills/{$billId}/payments/{$paymentId}")
+            ->assertOk()
+            ->assertJsonPath('bill.amount_paid', '0.00')
+            ->assertJsonPath('bill.balance_due', '24000.00');
 
         $this->deleteJson("/api/bills/{$billId}/items/{$itemId}")->assertOk();
         $this->assertSame(10, $part->fresh()->stock_qty);

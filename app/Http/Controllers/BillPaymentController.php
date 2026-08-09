@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bill;
+use App\Models\BillPayment;
 use App\Services\BillCalculator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,5 +34,18 @@ class BillPaymentController extends Controller
         });
 
         return response()->json(['payment' => $payment, 'bill' => $bill->fresh()], 201);
+    }
+
+    public function destroy(Bill $bill, BillPayment $payment, BillCalculator $calculator): JsonResponse
+    {
+        abort_unless($payment->bill_id === $bill->id, 404);
+        abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+
+        DB::transaction(function () use ($bill, $payment, $calculator) {
+            $payment->delete();
+            $calculator->recalculate($bill);
+        });
+
+        return response()->json(['bill' => $bill->fresh()]);
     }
 }

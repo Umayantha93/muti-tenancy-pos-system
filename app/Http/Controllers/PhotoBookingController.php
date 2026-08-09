@@ -18,7 +18,7 @@ class PhotoBookingController extends Controller
     public function index(Request $request): JsonResponse
     {
         $bookings = PhotoBooking::query()
-            ->with(['customer', 'package', 'bill'])
+            ->with(['customer', 'package', 'bill.items', 'bill.payments'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = '%'.$request->string('search').'%';

@@ -19,7 +19,7 @@ class RetailSaleController extends Controller
     public function index(Request $request): JsonResponse
     {
         $sales = RetailSale::query()
-            ->with(['customer', 'bill'])
+            ->with(['customer', 'bill.items', 'bill.payments'])
             ->latest()
             ->paginate($request->integer('per_page', 15));
 

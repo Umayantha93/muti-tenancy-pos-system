@@ -70,6 +70,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
+            Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
         });
 
         Route::middleware('feature:parts_inventory')->group(function () {

@@ -38,10 +38,11 @@ class DualFinancialViewTest extends TestCase
             ->assertOk()
             ->json();
 
-        $this->assertSame('6500.00', $secondaryBill['subtotal']);
-        $this->assertSame('6500.00', $secondaryBill['balance_due']);
-        $this->assertSame('6500.00', $secondaryBill['items'][0]['unit_price']);
-        $this->assertSame('6500.00', $secondaryBill['items'][0]['line_total']);
+        // Labor uses 50% factor (10000 → 5000).
+        $this->assertSame('5000.00', $secondaryBill['subtotal']);
+        $this->assertSame('5000.00', $secondaryBill['balance_due']);
+        $this->assertSame('5000.00', $secondaryBill['items'][0]['unit_price']);
+        $this->assertSame('5000.00', $secondaryBill['items'][0]['line_total']);
         $this->assertArrayNotHasKey('is_secondary_view', $secondaryBill);
         $this->assertFalse(isset($secondary->fresh()->toArray()['is_secondary_view']));
 
@@ -116,16 +117,119 @@ class DualFinancialViewTest extends TestCase
         $secondarySheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)
             ->assertOk()
             ->json();
-        $this->assertEquals(2600.0, $secondarySheet['income']);
-        $this->assertEquals(1300.0, $secondarySheet['expenses']);
-        $this->assertEquals(1300.0, $secondarySheet['net_profit']);
+        // Labor-only bill: payment tracks 50% factor (4000→2000). Expenses stay full (no general discount).
+        $this->assertEquals(2000.0, $secondarySheet['income']);
+        $this->assertEquals(2000.0, $secondarySheet['expenses']);
+        $this->assertEquals(0.0, $secondarySheet['net_profit']);
         $this->assertEquals(
             round($secondarySheet['income'] - $secondarySheet['expenses'], 2),
             $secondarySheet['net_profit']
         );
 
+        $incomeCredits = collect($secondarySheet['accounts'])
+            ->where('type', 'income')
+            ->sum('credit');
+        $expenseDebits = collect($secondarySheet['accounts'])
+            ->where('type', 'expense')
+            ->sum('debit');
+        $this->assertEquals(2000.0, $incomeCredits);
+        $this->assertEquals(2000.0, $expenseDebits);
+        $this->assertEquals(
+            round($incomeCredits - $expenseDebits, 2),
+            collect($secondarySheet['accounts'])->last()['balance']
+        );
+
         $dashboard = $this->getJson('/api/dashboard')->assertOk()->json();
-        $this->assertEquals(2600.0, $dashboard['today_income']);
+        $this->assertEquals(2000.0, $dashboard['today_income']);
+        $this->assertEquals(2000.0, $dashboard['monthly_income']);
+        $this->assertEquals(2000.0, $dashboard['monthly_expenses']);
+        $this->assertEquals(0.0, $dashboard['monthly_profit']);
+        $this->assertSame('2000.00', $dashboard['recent_bills'][0]['amount_paid']);
+        $this->assertSame('5000.00', $dashboard['recent_bills'][0]['balance_due']);
+    }
+
+    public function test_secondary_labor_is_half_while_parts_use_general_factor(): void
+    {
+        [$primary, $secondary, $bill] = $this->seedDualTenantWithBill();
+        Sanctum::actingAs($primary);
+
+        $part = Part::create([
+            'name' => 'Brake Pad', 'brand' => 'Akebono', 'type' => 'brake',
+            'price' => 2000, 'cost_price' => 1000, 'stock_qty' => 10,
+        ]);
+        $this->postJson("/api/bills/{$bill->id}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => 1,
+        ])->assertCreated();
+
+        Sanctum::actingAs($secondary);
+        $secondaryBill = $this->getJson("/api/bills/{$bill->id}")->assertOk()->json();
+
+        $labor = collect($secondaryBill['items'])->firstWhere('type', 'labor');
+        $partLine = collect($secondaryBill['items'])->firstWhere('type', 'part');
+
+        $this->assertSame('5000.00', $labor['unit_price']);
+        $this->assertSame('5000.00', $labor['line_total']);
+        // Parts stay full (no general discount): 2000 → 2000
+        $this->assertSame('2000.00', $partLine['unit_price']);
+        $this->assertSame('2000.00', $partLine['line_total']);
+        // 5000 labor (50%) + 2000 part (100%)
+        $this->assertSame('7000.00', $secondaryBill['subtotal']);
+        $this->assertSame('7000.00', $secondaryBill['balance_due']);
+    }
+
+    public function test_secondary_payments_track_blended_bill_total(): void
+    {
+        [$primary, $secondary, $bill] = $this->seedDualTenantWithBill();
+        Sanctum::actingAs($primary);
+
+        $labor = $bill->items->firstWhere('type', 'labor');
+        $labor->update([
+            'unit_price' => 40500,
+            'line_total' => 40500,
+        ]);
+
+        $part = Part::create([
+            'name' => 'Spark Plug Set', 'brand' => 'NGK', 'type' => 'spark',
+            'price' => 9200, 'cost_price' => 5000, 'stock_qty' => 10,
+        ]);
+        $this->postJson("/api/bills/{$bill->id}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => 1,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$bill->id}/payments", [
+            'amount' => 49700,
+            'method' => 'card',
+        ])->assertCreated();
+
+        Sanctum::actingAs($secondary);
+        $secondaryBill = $this->getJson("/api/bills/{$bill->id}")->assertOk()->json();
+
+        // Labor 40500→20250, part stays 9200, charges 29450.
+        // Payment must use same blended factor so summary stays balanced.
+        $this->assertSame('20250.00', collect($secondaryBill['items'])->firstWhere('type', 'labor')['line_total']);
+        $this->assertSame('9200.00', collect($secondaryBill['items'])->firstWhere('type', 'part')['line_total']);
+        $this->assertSame('29450.00', $secondaryBill['subtotal']);
+        $this->assertSame('29450.00', $secondaryBill['amount_paid']);
+        $this->assertSame('29450.00', $secondaryBill['payments'][0]['amount']);
+        $this->assertSame('0.00', $secondaryBill['balance_due']);
+        $this->assertSame('0.00', $secondaryBill['customer_balance']);
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)
+            ->assertOk()
+            ->json();
+        $this->assertEquals(29450.0, $sheet['income']);
+        $this->assertEquals(29450.0, collect($sheet['accounts'])->where('type', 'income')->sum('credit'));
+
+        $dashboard = $this->getJson('/api/dashboard')->assertOk()->json();
+        $this->assertEquals(29450.0, $dashboard['today_income']);
+        $this->assertEquals(29450.0, $dashboard['monthly_income']);
+        $this->assertSame('29450.00', $dashboard['recent_bills'][0]['amount_paid']);
+        $this->assertSame('0.00', $dashboard['recent_bills'][0]['balance_due']);
+
+        $list = $this->getJson('/api/bills')->assertOk()->json('data');
+        $listed = collect($list)->firstWhere('id', $bill->id);
+        $this->assertSame('29450.00', $listed['amount_paid']);
+        $this->assertSame('0.00', $listed['balance_due']);
+        $this->assertSame('29450.00', $listed['subtotal']);
     }
 
     public function test_disabling_dual_view_deactivates_secondary_login(): void
@@ -158,8 +262,8 @@ class DualFinancialViewTest extends TestCase
         Sanctum::actingAs($secondary);
         $this->getJson("/api/parts/{$part->id}")
             ->assertOk()
-            ->assertJsonPath('price', '1300.00')
-            ->assertJsonPath('cost_price', '650.00');
+            ->assertJsonPath('price', '2000.00')
+            ->assertJsonPath('cost_price', '1000.00');
     }
 
     /**
