@@ -47,12 +47,15 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::put('/tenants/{tenant}/features', [SuperAdminTenantController::class, 'updateFeatures']);
         Route::get('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'users']);
         Route::post('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'storeUser']);
+        Route::put('/tenants/{tenant}/dual-financial-view', [SuperAdminTenantController::class, 'updateDualFinancialView']);
+        Route::get('/tenants/{tenant}/fee-payments', [SuperAdminTenantController::class, 'feePayments']);
+        Route::put('/tenants/{tenant}/fee-payments/{year}/{month}', [SuperAdminTenantController::class, 'updateFeePayment']);
         Route::post('/users/{user}/activate', [SuperAdminUserController::class, 'activate']);
         Route::post('/users/{user}/deactivate', [SuperAdminUserController::class, 'deactivate']);
         Route::delete('/users/{user}', [SuperAdminUserController::class, 'destroy']);
     });
 
-    Route::middleware('role:business_owner,staff')->group(function () {
+    Route::middleware('role:business_owner,staff')->middleware('block.secondary.writes')->group(function () {
         Route::get('/dashboard', DashboardController::class);
 
         Route::middleware('feature:admit_vehicle')->group(function () {
@@ -69,6 +72,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
+            Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
         });
 
         Route::middleware('feature:parts_inventory')->group(function () {

@@ -19,14 +19,14 @@ class CottageStayController extends Controller
     public function index(Request $request): JsonResponse
     {
         $stays = CottageStay::query()
-            ->with(['customer', 'room', 'bill'])
+            ->with(['customer', 'room', 'bill.items', 'bill.payments'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('from'), fn ($q) => $q->whereDate('check_out', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('check_in', '<=', $request->date('to')))
             ->latest('check_in')
             ->paginate($request->integer('per_page', 15));
 
-        return response()->json($stays);
+        return $this->moneyJson($stays);
     }
 
     public function store(Request $request): JsonResponse
@@ -110,7 +110,7 @@ class CottageStayController extends Controller
 
     public function show(CottageStay $stay): JsonResponse
     {
-        return response()->json($stay->load(['customer', 'room', 'bill.items', 'bill.payments', 'creator']));
+        return $this->moneyJson($stay->load(['customer', 'room', 'bill.items', 'bill.payments', 'creator']));
     }
 
     public function update(Request $request, CottageStay $stay): JsonResponse

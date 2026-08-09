@@ -8,6 +8,7 @@ use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\EnsureTenantIsActive;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\CheckFeatureAccess;
+use App\Http\Middleware\BlockSecondaryFinancialWrites;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'user.active' => EnsureUserIsActive::class,
             'tenant.active' => EnsureTenantIsActive::class,
             'feature' => CheckFeatureAccess::class,
+            'block.secondary.writes' => BlockSecondaryFinancialWrites::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

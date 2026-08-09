@@ -16,7 +16,7 @@ class TenantUserSeeder extends Seeder
         User::updateOrCreate(['email' => 'superadmin@bay06.lk'], [
             'tenant_id' => null,
             'name' => 'Platform Administrator',
-            'password' => Hash::make('password'),
+            'password' => Hash::make('Umayantha@1234'),
             'role' => 'super_admin',
             'status' => 'active',
         ]);

@@ -15,7 +15,7 @@ class PhotoPackageController extends Controller
             ->latest()
             ->get();
 
-        return response()->json($packages);
+        return $this->moneyJson($packages);
     }
 
     public function store(Request $request): JsonResponse

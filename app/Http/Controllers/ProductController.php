@@ -19,7 +19,7 @@ class ProductController extends Controller
             ->latest()
             ->paginate($request->integer('per_page', 30));
 
-        return response()->json($products);
+        return $this->moneyJson($products);
     }
 
     public function store(Request $request): JsonResponse
@@ -42,7 +42,7 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        return response()->json($product);
+        return $this->moneyJson($product);
     }
 
     public function update(Request $request, Product $product): JsonResponse

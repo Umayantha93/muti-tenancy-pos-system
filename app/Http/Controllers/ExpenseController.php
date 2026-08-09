@@ -10,7 +10,7 @@ class ExpenseController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        return response()->json(Expense::with('creator')
+        return $this->moneyJson(Expense::with('creator')
             ->when($request->filled('category'), fn ($query) => $query->where('category', $request->string('category')))
             ->when($request->filled('month'), fn ($query) => $query->whereMonth('expense_date', $request->integer('month')))
             ->when($request->filled('year'), fn ($query) => $query->whereYear('expense_date', $request->integer('year')))

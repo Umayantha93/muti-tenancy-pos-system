@@ -30,7 +30,7 @@ class PartController extends Controller
             ->orderBy($sort, $direction)
             ->paginate($request->integer('per_page', 20));
 
-        return response()->json($parts);
+        return $this->moneyJson($parts);
     }
 
     public function store(Request $request): JsonResponse
@@ -54,7 +54,7 @@ class PartController extends Controller
 
     public function show(Part $part): JsonResponse
     {
-        return response()->json($part);
+        return $this->moneyJson($part);
     }
 
     public function update(Request $request, Part $part): JsonResponse

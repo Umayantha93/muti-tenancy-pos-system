@@ -15,7 +15,7 @@ class CottageRoomController extends Controller
             ->orderBy('name')
             ->get();
 
-        return response()->json($rooms);
+        return $this->moneyJson($rooms);
     }
 
     public function store(Request $request): JsonResponse

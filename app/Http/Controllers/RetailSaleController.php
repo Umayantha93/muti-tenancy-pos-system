@@ -19,11 +19,11 @@ class RetailSaleController extends Controller
     public function index(Request $request): JsonResponse
     {
         $sales = RetailSale::query()
-            ->with(['customer', 'bill'])
+            ->with(['customer', 'bill.items', 'bill.payments'])
             ->latest()
             ->paginate($request->integer('per_page', 15));
 
-        return response()->json($sales);
+        return $this->moneyJson($sales);
     }
 
     public function store(Request $request): JsonResponse
@@ -124,6 +124,6 @@ class RetailSaleController extends Controller
 
     public function show(RetailSale $sale): JsonResponse
     {
-        return response()->json($sale->load(['customer', 'bill.items', 'bill.payments', 'creator']));
+        return $this->moneyJson($sale->load(['customer', 'bill.items', 'bill.payments', 'creator']));
     }
 }

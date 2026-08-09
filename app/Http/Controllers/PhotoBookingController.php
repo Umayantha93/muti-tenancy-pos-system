@@ -18,7 +18,7 @@ class PhotoBookingController extends Controller
     public function index(Request $request): JsonResponse
     {
         $bookings = PhotoBooking::query()
-            ->with(['customer', 'package', 'bill'])
+            ->with(['customer', 'package', 'bill.items', 'bill.payments'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = '%'.$request->string('search').'%';
@@ -27,7 +27,7 @@ class PhotoBookingController extends Controller
             ->latest('scheduled_at')
             ->paginate($request->integer('per_page', 15));
 
-        return response()->json($bookings);
+        return $this->moneyJson($bookings);
     }
 
     public function store(Request $request): JsonResponse
@@ -100,7 +100,7 @@ class PhotoBookingController extends Controller
 
     public function show(PhotoBooking $booking): JsonResponse
     {
-        return response()->json($booking->load(['customer', 'package', 'bill.items', 'bill.payments', 'creator']));
+        return $this->moneyJson($booking->load(['customer', 'package', 'bill.items', 'bill.payments', 'creator']));
     }
 
     public function update(Request $request, PhotoBooking $booking): JsonResponse
