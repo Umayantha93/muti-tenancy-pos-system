@@ -59,6 +59,11 @@ class Tenant extends Model
         return $this->belongsToMany(Feature::class, 'tenant_features')->withPivot('is_enabled')->withTimestamps();
     }
 
+    public function feePayments(): HasMany
+    {
+        return $this->hasMany(TenantFeePayment::class);
+    }
+
     protected function logoUrl(): Attribute
     {
         return Attribute::get(fn () => $this->logo ? 'storage/'.$this->logo : null);
@@ -72,8 +77,14 @@ class Tenant extends Model
             }
             $today = now()->day;
             $lastDay = now()->daysInMonth;
+            if ($today <= ($lastDay - 5)) {
+                return false;
+            }
 
-            return $today > ($lastDay - 5);
+            return ! $this->feePayments()
+                ->where('year', now()->year)
+                ->where('month', now()->month)
+                ->exists();
         });
     }
 }

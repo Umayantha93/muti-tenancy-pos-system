@@ -48,6 +48,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::get('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'users']);
         Route::post('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'storeUser']);
         Route::put('/tenants/{tenant}/dual-financial-view', [SuperAdminTenantController::class, 'updateDualFinancialView']);
+        Route::get('/tenants/{tenant}/fee-payments', [SuperAdminTenantController::class, 'feePayments']);
+        Route::put('/tenants/{tenant}/fee-payments/{year}/{month}', [SuperAdminTenantController::class, 'updateFeePayment']);
         Route::post('/users/{user}/activate', [SuperAdminUserController::class, 'activate']);
         Route::post('/users/{user}/deactivate', [SuperAdminUserController::class, 'deactivate']);
         Route::delete('/users/{user}', [SuperAdminUserController::class, 'destroy']);

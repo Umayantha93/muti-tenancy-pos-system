@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AuditLog;
 use App\Models\Feature;
 use App\Models\Tenant;
+use App\Models\TenantFeePayment;
 use App\Models\User;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
@@ -51,12 +52,28 @@ class SuperAdminTenantController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        return response()->json(Tenant::withCount('users')->with('features')
+        $year = now()->year;
+        $month = now()->month;
+
+        $paginator = Tenant::withCount('users')->with('features')
+            ->withExists([
+                'feePayments as current_month_paid' => fn ($query) => $query
+                    ->where('year', $year)
+                    ->where('month', $month),
+            ])
             ->when($request->filled('search'), fn ($query) => $query->where(fn ($nested) => $nested
                 ->where('business_name', 'like', '%'.$request->string('search').'%')
                 ->orWhere('owner_email', 'like', '%'.$request->string('search').'%')))
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')))
-            ->latest()->paginate(20));
+            ->latest()->paginate(20);
+
+        $paginator->getCollection()->transform(function (Tenant $tenant) {
+            $tenant->current_month_paid = (bool) $tenant->current_month_paid;
+
+            return $tenant;
+        });
+
+        return response()->json($paginator);
     }
 
     public function store(Request $request): JsonResponse
@@ -119,6 +136,13 @@ class SuperAdminTenantController extends Controller
         $tenant->makeVisible(['dual_financial_view_enabled']);
         $payload = $tenant->load(['features', 'users'])->loadCount('users');
         $payload->users->each(fn (User $user) => $user->makeVisible(['is_secondary_view']));
+        $payload->setAttribute(
+            'current_month_paid',
+            $tenant->feePayments()
+                ->where('year', now()->year)
+                ->where('month', now()->month)
+                ->exists()
+        );
 
         return response()->json($payload);
     }
@@ -158,6 +182,80 @@ class SuperAdminTenantController extends Controller
         $this->audit($request, 'tenant.updated', $tenant, $payload);
 
         return response()->json($tenant->refresh()->makeVisible(['dual_financial_view_enabled']));
+    }
+
+    public function feePayments(Tenant $tenant): JsonResponse
+    {
+        $payments = $tenant->feePayments()
+            ->with('marker:id,name,email')
+            ->orderByDesc('year')
+            ->orderByDesc('month')
+            ->get()
+            ->map(fn (TenantFeePayment $payment) => [
+                'id' => $payment->id,
+                'year' => $payment->year,
+                'month' => $payment->month,
+                'period' => sprintf('%04d-%02d', $payment->year, $payment->month),
+                'amount' => $payment->amount,
+                'paid_at' => $payment->paid_at,
+                'notes' => $payment->notes,
+                'marked_by' => $payment->marker?->only(['id', 'name', 'email']),
+            ]);
+
+        return response()->json([
+            'current_month_paid' => $tenant->feePayments()
+                ->where('year', now()->year)
+                ->where('month', now()->month)
+                ->exists(),
+            'payments' => $payments,
+        ]);
+    }
+
+    public function updateFeePayment(Request $request, Tenant $tenant, int $year, int $month): JsonResponse
+    {
+        abort_unless($tenant->payment_plan === 'monthly', 422, 'Fee payments apply only to monthly plans.');
+        abort_unless($month >= 1 && $month <= 12, 422, 'Month must be between 1 and 12.');
+        abort_unless($year >= 2000 && $year <= 2100, 422, 'Year is out of range.');
+
+        $data = $request->validate([
+            'paid' => ['required', 'boolean'],
+            'notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        if ($data['paid']) {
+            abort_if($tenant->plan_amount === null, 422, 'Set a plan amount before marking the fee as paid.');
+
+            $payment = TenantFeePayment::query()->updateOrCreate(
+                [
+                    'tenant_id' => $tenant->id,
+                    'year' => $year,
+                    'month' => $month,
+                ],
+                [
+                    'amount' => $tenant->plan_amount,
+                    'paid_at' => now(),
+                    'marked_by' => $request->user()->id,
+                    'notes' => $data['notes'] ?? null,
+                ]
+            );
+            $this->audit($request, 'tenant.fee_marked_paid', $tenant, [
+                'year' => $year,
+                'month' => $month,
+                'amount' => $payment->amount,
+            ]);
+        } else {
+            TenantFeePayment::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('year', $year)
+                ->where('month', $month)
+                ->delete();
+            $this->audit($request, 'tenant.fee_marked_unpaid', $tenant, [
+                'year' => $year,
+                'month' => $month,
+            ]);
+        }
+
+        return $this->feePayments($tenant);
     }
 
     public function updateDualFinancialView(Request $request, Tenant $tenant): JsonResponse
