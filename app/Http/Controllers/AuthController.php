@@ -43,6 +43,7 @@ class AuthController extends Controller
             'business_name' => $tenant?->business_name,
             'business_type' => $tenant?->business_type,
             'logo_url' => $tenant?->logo_url,
+            'address' => $tenant?->address,
             'contact_email' => $tenant?->contact_email ?? $tenant?->owner_email,
             'contact_phone' => $tenant?->contact_phone ?? $tenant?->owner_phone,
         ]);
