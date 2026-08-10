@@ -26,8 +26,6 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
         }
 
-        $user->tokens()->delete();
-
         return response()->json([
             'token' => $user->createToken('garage-pos')->plainTextToken,
             'user' => $user->load('tenant'),
