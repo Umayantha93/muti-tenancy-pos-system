@@ -135,6 +135,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->middleware('feature:customers,admit_vehicle,photo_bookings,retail_pos,cottage_stays');
             Route::delete('/vehicles/{vehicle}', [VehicleController::class, 'destroy'])->middleware('feature:admit_vehicle');
             Route::post('/parts', [PartController::class, 'store'])->middleware('feature:parts_inventory');
+            Route::get('/parts/import/template', [PartController::class, 'importTemplate'])->middleware('feature:parts_inventory');
+            Route::post('/parts/import', [PartController::class, 'import'])->middleware('feature:parts_inventory');
             Route::put('/parts/{part}', [PartController::class, 'update'])->middleware('feature:parts_inventory');
             Route::post('/parts/{part}', [PartController::class, 'update'])->middleware('feature:parts_inventory');
             Route::delete('/parts/{part}', [PartController::class, 'destroy'])->middleware('feature:parts_inventory');
