@@ -6,6 +6,13 @@ return [
         'key' => env('FINGERPRINT_DEVICE_KEY', 'change-this-device-key'),
     ],
 
+    'notify_lk' => [
+        'endpoint' => env('NOTIFYLK_ENDPOINT', 'https://app.notify.lk/api/v1/send'),
+        'user_id' => env('NOTIFYLK_USER_ID'),
+        'api_key' => env('NOTIFYLK_API_KEY'),
+        'sender_id' => env('NOTIFYLK_SENDER_ID', 'NotifyDEMO'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

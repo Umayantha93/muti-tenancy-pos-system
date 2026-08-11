@@ -122,6 +122,8 @@ class BillController extends Controller
 
     public function show(Bill $bill): JsonResponse
     {
+        $bill->ensureShareToken();
+
         return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
     }
 

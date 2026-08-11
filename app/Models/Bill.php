@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 #[Fillable([
     'bill_number',
+    'share_token',
     'vehicle_id',
     'customer_id',
     'admission_date',
@@ -31,6 +32,19 @@ class Bill extends Model
 {
     use BelongsToTenant;
 
+    protected static function booted(): void
+    {
+        static::creating(function (Bill $bill): void {
+            if (! $bill->share_token) {
+                do {
+                    $token = str()->lower(str()->random(40));
+                } while (static::withoutGlobalScopes()->where('share_token', $token)->exists());
+
+                $bill->share_token = $token;
+            }
+        });
+    }
+
     protected function casts(): array
     {
         return [
@@ -41,6 +55,21 @@ class Bill extends Model
             'balance_due' => 'decimal:2',
             'customer_balance' => 'decimal:2',
         ];
+    }
+
+    public function ensureShareToken(): string
+    {
+        if ($this->share_token) {
+            return $this->share_token;
+        }
+
+        do {
+            $token = str()->lower(str()->random(40));
+        } while (static::withoutGlobalScopes()->where('share_token', $token)->exists());
+
+        $this->forceFill(['share_token' => $token])->save();
+
+        return $token;
     }
 
     public function customer(): BelongsTo
