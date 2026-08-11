@@ -19,11 +19,13 @@ class BillSmsController extends Controller
             return response()->json(['message' => 'This bill has no customer phone number.'], 422);
         }
 
+        $paid = $this->isPaid($bill);
+        $document = $paid ? 'paid bill' : 'quotation';
         $frontend = rtrim((string) config('app.frontend_url', config('app.url')), '/');
         $link = $frontend.'/share/bills/'.$bill->share_token;
         $business = $bill->tenant?->business_name ?: 'us';
         $name = $bill->customer?->name ? ' '.$bill->customer->name : '';
-        $message = "Hi{$name}, here is your bill {$bill->bill_number} from {$business}: {$link}";
+        $message = "Hi{$name}, here is your {$document} {$bill->bill_number} from {$business}: {$link}";
 
         try {
             $sms->send($phone, $message);
@@ -32,9 +34,16 @@ class BillSmsController extends Controller
         }
 
         return response()->json([
-            'message' => 'Bill link sent by SMS.',
+            'message' => $paid ? 'Paid bill link sent by SMS.' : 'Quotation link sent by SMS.',
+            'document' => $paid ? 'paid_bill' : 'quotation',
             'to' => $sms->normalizePhone($phone),
             'share_token' => $bill->share_token,
         ]);
+    }
+
+    private function isPaid(Bill $bill): bool
+    {
+        return $bill->status === 'paid'
+            || ((float) $bill->balance_due <= 0 && (float) $bill->amount_paid > 0);
     }
 }
