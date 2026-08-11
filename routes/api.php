@@ -6,6 +6,8 @@ use App\Http\Controllers\BalanceSheetController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
+use App\Http\Controllers\BillShareController;
+use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
 use App\Http\Controllers\CustomerController;
@@ -28,6 +30,7 @@ use Illuminate\Support\Facades\Route;
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 Route::get('/auth/branding', [AuthController::class, 'branding'])->middleware('throttle:30,1');
 Route::post('/attendance/ingest', [AttendanceController::class, 'ingest'])->middleware('throttle:120,1');
+Route::get('/bills/shared/{token}', [BillShareController::class, 'show'])->middleware('throttle:60,1');
 
 Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(function () {
     Route::get('/user', fn (Request $request) => [
@@ -69,6 +72,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::middleware('feature:billing')->group(function () {
             Route::apiResource('bills', BillController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('/bills/from-vehicle', [BillController::class, 'storeFromVehicle']);
+            Route::post('/bills/{bill}/send-sms', BillSmsController::class);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
