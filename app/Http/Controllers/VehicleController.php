@@ -42,13 +42,25 @@ class VehicleController extends Controller
 
     private function validated(Request $request, ?Vehicle $vehicle = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'customer_id' => [$vehicle ? 'sometimes' : 'required', Rule::exists('customers', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'number_plate' => [$vehicle ? 'sometimes' : 'required', 'string', 'max:30'],
-            'chassis_number' => [$vehicle ? 'sometimes' : 'required', 'string', 'max:100', Rule::unique('vehicles')->where('tenant_id', $request->user()->tenant_id)->ignore($vehicle)],
+            'chassis_number' => ['nullable', 'string', 'max:100', Rule::unique('vehicles')->where('tenant_id', $request->user()->tenant_id)->ignore($vehicle)],
             'make' => ['nullable', 'string', 'max:100'],
             'model' => ['nullable', 'string', 'max:100'],
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
         ]);
+
+        if (array_key_exists('chassis_number', $data) && ($data['chassis_number'] === null || trim((string) $data['chassis_number']) === '')) {
+            $data['chassis_number'] = null;
+        } elseif (! empty($data['chassis_number'])) {
+            $data['chassis_number'] = strtoupper(trim($data['chassis_number']));
+        }
+
+        if (! empty($data['number_plate'])) {
+            $data['number_plate'] = strtoupper(trim($data['number_plate']));
+        }
+
+        return $data;
     }
 }

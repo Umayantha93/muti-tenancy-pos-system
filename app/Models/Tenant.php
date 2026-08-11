@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'contact_email',
     'contact_phone',
     'contact_phones',
+    'address',
     'status',
     'dual_financial_view_enabled',
     'plan',

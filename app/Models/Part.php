@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['name', 'sku', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'images', 'description'])]
+#[Fillable(['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'images', 'description'])]
 class Part extends Model
 {
     use BelongsToTenant;

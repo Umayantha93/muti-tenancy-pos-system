@@ -54,7 +54,7 @@ class BillController extends Controller
             'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
             'customer_address' => ['nullable', 'string', 'max:255'],
             'number_plate' => ['required', 'string', 'max:30'],
-            'chassis_number' => ['required', 'string', 'max:100'],
+            'chassis_number' => ['nullable', 'string', 'max:100'],
             'make' => ['nullable', 'string', 'max:100'],
             'model' => ['nullable', 'string', 'max:100'],
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
@@ -70,16 +70,34 @@ class BillController extends Controller
             );
             $customer->update(['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? $customer->address]);
 
-            $vehicle = Vehicle::updateOrCreate(
-                ['chassis_number' => strtoupper($data['chassis_number'])],
-                [
-                    'customer_id' => $customer->id,
-                    'number_plate' => strtoupper($data['number_plate']),
-                    'make' => $data['make'] ?? null,
-                    'model' => $data['model'] ?? null,
-                    'year' => $data['year'] ?? null,
-                ],
-            );
+            $chassisRaw = isset($data['chassis_number']) ? strtoupper(trim((string) $data['chassis_number'])) : '';
+            $chassis = $chassisRaw !== '' ? $chassisRaw : null;
+            $plate = strtoupper($data['number_plate']);
+            $vehicleAttrs = [
+                'customer_id' => $customer->id,
+                'number_plate' => $plate,
+                'make' => $data['make'] ?? null,
+                'model' => $data['model'] ?? null,
+                'year' => $data['year'] ?? null,
+            ];
+
+            if ($chassis) {
+                $vehicle = Vehicle::updateOrCreate(
+                    ['chassis_number' => $chassis],
+                    $vehicleAttrs,
+                );
+            } else {
+                $vehicle = Vehicle::query()
+                    ->where('number_plate', $plate)
+                    ->where('customer_id', $customer->id)
+                    ->first();
+
+                if ($vehicle) {
+                    $vehicle->update($vehicleAttrs);
+                } else {
+                    $vehicle = Vehicle::create([...$vehicleAttrs, 'chassis_number' => null]);
+                }
+            }
 
             return $this->openBill($request, $customer->id, $data, BusinessTypes::GARAGE, $vehicle->id);
         });
