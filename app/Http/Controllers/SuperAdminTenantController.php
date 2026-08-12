@@ -7,6 +7,7 @@ use App\Models\Feature;
 use App\Models\Tenant;
 use App\Models\TenantFeePayment;
 use App\Models\User;
+use App\Services\ImprovmxMailService;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -133,7 +134,18 @@ class SuperAdminTenantController extends Controller
             return $tenant;
         });
 
-        return response()->json($tenant->load(['users', 'features']), 201);
+        $emailed = app(ImprovmxMailService::class)->sendTenantWelcomeSafely(
+            $data['owner_email'],
+            $data['owner_name'],
+            $tenant->business_name,
+            $data['owner_email'],
+            $data['password'],
+        );
+
+        return response()->json(array_merge(
+            $tenant->load(['users', 'features'])->toArray(),
+            ['welcome_email_sent' => $emailed],
+        ), 201);
     }
 
     public function show(Tenant $tenant): JsonResponse

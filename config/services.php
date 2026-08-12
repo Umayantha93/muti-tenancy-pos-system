@@ -13,6 +13,12 @@ return [
         'sender_id' => env('NOTIFYLK_SENDER_ID', 'NotifyDEMO'),
     ],
 
+    'improvmx' => [
+        'api_key' => env('IMPROVMX_API_KEY'),
+        'domain' => env('IMPROVMX_DOMAIN', 'iubits.cc'),
+        'from' => env('IMPROVMX_FROM', 'admin'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

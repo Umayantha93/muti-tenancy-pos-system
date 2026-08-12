@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bill;
 use App\Models\BillItem;
+use App\Models\Expense;
 use App\Models\Part;
 use App\Services\BillCalculator;
 use App\Support\BusinessTypes;
@@ -29,6 +30,7 @@ class BillItemController extends Controller
             'description' => ['nullable', 'string', 'max:255'],
             'quantity' => ['nullable', 'numeric', 'gt:0'],
             'unit_price' => ['nullable', 'numeric', 'min:0'],
+            'purchase_unit_cost' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         $kind = BusinessTypes::billItemKind($data['type']);
@@ -40,6 +42,7 @@ class BillItemController extends Controller
             }
             $data['unit_price'] = 0;
             $data['part_id'] = null;
+            $data['purchase_unit_cost'] = null;
         }
 
         if ($data['type'] === 'part' && empty($data['part_id'])) {
@@ -47,8 +50,13 @@ class BillItemController extends Controller
                 throw ValidationException::withMessages(['description' => ['Describe the part bought outside.']]);
             }
             if (! array_key_exists('unit_price', $data) || $data['unit_price'] === null) {
-                throw ValidationException::withMessages(['unit_price' => ['Enter the cost for a part bought outside.']]);
+                throw ValidationException::withMessages(['unit_price' => ['Enter the selling price for a part bought outside.']]);
             }
+            if (! array_key_exists('purchase_unit_cost', $data) || $data['purchase_unit_cost'] === null) {
+                throw ValidationException::withMessages(['purchase_unit_cost' => ['Enter the purchase cost for a part bought outside.']]);
+            }
+        } else {
+            $data['purchase_unit_cost'] = null;
         }
 
         if ($kind !== 'stock' && (! array_key_exists('unit_price', $data) || $data['unit_price'] === null) && $data['type'] !== 'customer_part') {
@@ -66,7 +74,7 @@ class BillItemController extends Controller
             throw ValidationException::withMessages(['quantity' => ['Stock lines must use a whole quantity.']]);
         }
 
-        $item = DB::transaction(function () use ($data, $bill, $calculator, $quantity) {
+        $item = DB::transaction(function () use ($data, $bill, $calculator, $quantity, $request) {
             $part = ! empty($data['part_id']) ? Part::lockForUpdate()->findOrFail($data['part_id']) : null;
             if ($part && $part->stock_qty < $quantity) {
                 throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part.']]);
@@ -76,12 +84,29 @@ class BillItemController extends Controller
                 ? 0.0
                 : (float) ($data['unit_price'] ?? $part?->price ?? 0);
 
+            $purchaseUnitCost = isset($data['purchase_unit_cost']) && $data['purchase_unit_cost'] !== null
+                ? (float) $data['purchase_unit_cost']
+                : null;
+
+            $expense = null;
+            if ($data['type'] === 'part' && ! $part && $purchaseUnitCost !== null && $purchaseUnitCost > 0 && $quantity > 0) {
+                $expense = Expense::create([
+                    'category' => 'inventory',
+                    'description' => 'Outside part: '.($data['description'] ?? 'Bought outside').' × '.(int) $quantity,
+                    'amount' => round($purchaseUnitCost * $quantity, 2),
+                    'expense_date' => now()->toDateString(),
+                    'created_by' => $request->user()->id,
+                ]);
+            }
+
             $item = $bill->items()->create([
                 'part_id' => $part?->id,
                 'type' => $data['type'],
                 'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
+                'purchase_unit_cost' => $purchaseUnitCost,
+                'purchase_expense_id' => $expense?->id,
                 'line_total' => round($unitPrice * $quantity, 2),
             ]);
             $part?->decrement('stock_qty', (int) $quantity);
@@ -101,6 +126,9 @@ class BillItemController extends Controller
         DB::transaction(function () use ($bill, $item, $calculator) {
             if ($item->part_id) {
                 Part::whereKey($item->part_id)->increment('stock_qty', (int) $item->quantity);
+            }
+            if ($item->purchase_expense_id) {
+                Expense::whereKey($item->purchase_expense_id)->delete();
             }
             $item->delete();
             $calculator->recalculate($bill);
