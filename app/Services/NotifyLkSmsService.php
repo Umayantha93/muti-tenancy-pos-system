@@ -10,14 +10,18 @@ class NotifyLkSmsService
     public function configured(): bool
     {
         return filled(config('services.notify_lk.user_id'))
-            && filled(config('services.notify_lk.api_key'))
-            && filled(config('services.notify_lk.sender_id'));
+            && filled(config('services.notify_lk.api_key'));
     }
 
-    public function send(string $to, string $message): void
+    public function send(string $to, string $message, ?string $senderId = null): void
     {
         if (! $this->configured()) {
-            throw new RuntimeException('Notify.lk SMS is not configured. Add NOTIFYLK_USER_ID, NOTIFYLK_API_KEY, and NOTIFYLK_SENDER_ID to the server .env.');
+            throw new RuntimeException('Notify.lk SMS is not configured. Add NOTIFYLK_USER_ID and NOTIFYLK_API_KEY to the server .env.');
+        }
+
+        $sender = $this->normalizeSenderId($senderId) ?: $this->normalizeSenderId(config('services.notify_lk.sender_id'));
+        if (! $sender) {
+            throw new RuntimeException('SMS Sender ID is missing. Set an approved Sender ID for this business (or NOTIFYLK_SENDER_ID in .env).');
         }
 
         $response = Http::asForm()
@@ -26,7 +30,7 @@ class NotifyLkSmsService
             ->post(config('services.notify_lk.endpoint'), [
                 'user_id' => config('services.notify_lk.user_id'),
                 'api_key' => config('services.notify_lk.api_key'),
-                'sender_id' => config('services.notify_lk.sender_id'),
+                'sender_id' => $sender,
                 'to' => $this->normalizePhone($to),
                 'message' => mb_substr($message, 0, 621),
             ]);
@@ -46,6 +50,17 @@ class NotifyLkSmsService
 
             throw new RuntimeException(is_string($error) && $error !== '' ? $error : 'SMS could not be sent.');
         }
+    }
+
+    public function normalizeSenderId(?string $raw): ?string
+    {
+        $value = preg_replace('/[^A-Za-z0-9]/', '', trim((string) $raw)) ?? '';
+
+        if ($value === '') {
+            return null;
+        }
+
+        return substr($value, 0, 11);
     }
 
     public function normalizePhone(string $raw): string

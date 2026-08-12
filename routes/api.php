@@ -72,12 +72,13 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::middleware('feature:billing')->group(function () {
             Route::apiResource('bills', BillController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('/bills/from-vehicle', [BillController::class, 'storeFromVehicle']);
-            Route::post('/bills/{bill}/send-sms', BillSmsController::class);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
             Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
         });
+
+        Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
 
         Route::middleware('feature:parts_inventory')->group(function () {
             Route::get('/parts', [PartController::class, 'index']);
