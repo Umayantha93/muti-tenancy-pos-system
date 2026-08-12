@@ -27,6 +27,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'cottage_stays', 'name' => 'Stays', 'description' => 'Cottage bookings and check-in', 'group' => 'Service Intake', 'sort_order' => 14],
             ['key' => 'customers', 'name' => 'Customers', 'description' => 'Customer directory and history', 'group' => 'Service Intake', 'sort_order' => 20],
             ['key' => 'billing', 'name' => 'Billing', 'description' => 'Orders, charges, and payments', 'group' => 'Service Intake', 'sort_order' => 30],
+            ['key' => 'bill_sms', 'name' => 'Bill SMS', 'description' => 'Send quotation / paid bill links to customers by SMS', 'group' => 'Service Intake', 'sort_order' => 31],
             ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Garage parts and stock', 'group' => 'Inventory', 'sort_order' => 40],
             ['key' => 'product_catalog', 'name' => 'Product catalog', 'description' => 'Clothing SKUs, sizes, and stock', 'group' => 'Inventory', 'sort_order' => 41],
             ['key' => 'cottage_rooms', 'name' => 'Rooms', 'description' => 'Cottage rooms and rates', 'group' => 'Inventory', 'sort_order' => 42],

@@ -26,9 +26,10 @@ class BillSmsController extends Controller
         $business = $bill->tenant?->business_name ?: 'us';
         $name = $bill->customer?->name ? ' '.$bill->customer->name : '';
         $message = "Hi{$name}, here is your {$document} {$bill->bill_number} from {$business}: {$link}";
+        $senderId = $bill->tenant?->resolvedSmsSenderId();
 
         try {
-            $sms->send($phone, $message);
+            $sms->send($phone, $message, $senderId);
         } catch (RuntimeException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
@@ -36,6 +37,7 @@ class BillSmsController extends Controller
         return response()->json([
             'message' => $paid ? 'Paid bill link sent by SMS.' : 'Quotation link sent by SMS.',
             'document' => $paid ? 'paid_bill' : 'quotation',
+            'sender_id' => $sms->normalizeSenderId($senderId),
             'to' => $sms->normalizePhone($phone),
             'share_token' => $bill->share_token,
         ]);

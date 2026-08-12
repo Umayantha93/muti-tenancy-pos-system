@@ -82,6 +82,7 @@ class SuperAdminTenantController extends Controller
         $phones = $this->normalizePhones($request);
         $data = $request->validate([
             'business_name' => ['required', 'string', 'max:255'],
+            'sms_sender_id' => ['nullable', 'string', 'max:11', 'regex:/^[A-Za-z0-9]*$/'],
             'business_type' => ['required', Rule::in(BusinessTypes::all())],
             'owner_name' => ['required', 'string', 'max:255'],
             'owner_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
@@ -105,6 +106,9 @@ class SuperAdminTenantController extends Controller
         $data['owner_phone'] = $phones['owner_phone'];
         $data['contact_phone'] = $phones['contact_phone'] ?: $phones['owner_phone'];
         $data['contact_email'] = $data['contact_email'] ?: $data['owner_email'];
+        $data['sms_sender_id'] = filled($data['sms_sender_id'] ?? null)
+            ? Tenant::suggestSmsSenderId($data['sms_sender_id'])
+            : null;
 
         $tenant = DB::transaction(function () use ($data, $request) {
             $payload = collect($data)->except(['password', 'features', 'logo'])->all();
@@ -153,6 +157,7 @@ class SuperAdminTenantController extends Controller
         $phones = $this->normalizePhones($request, false);
         $data = $request->validate([
             'business_name' => ['sometimes', 'string', 'max:255'],
+            'sms_sender_id' => ['nullable', 'string', 'max:11', 'regex:/^[A-Za-z0-9]*$/'],
             'business_type' => ['sometimes', Rule::in(BusinessTypes::all())],
             'owner_name' => ['sometimes', 'string', 'max:255'],
             'owner_phone' => ['sometimes', 'regex:/^[0-9+() -]{7,20}$/'],
@@ -166,6 +171,11 @@ class SuperAdminTenantController extends Controller
             'logo' => ['nullable', 'image', 'max:5120'],
         ]);
         $payload = collect($data)->except('logo')->all();
+        if (array_key_exists('sms_sender_id', $payload)) {
+            $payload['sms_sender_id'] = filled($payload['sms_sender_id'])
+                ? Tenant::suggestSmsSenderId($payload['sms_sender_id'])
+                : null;
+        }
         if ($phones['owner_phones'] !== null) {
             $payload['owner_phones'] = $phones['owner_phones'];
             $payload['owner_phone'] = $phones['owner_phone'];
