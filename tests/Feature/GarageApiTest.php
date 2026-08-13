@@ -106,6 +106,46 @@ class GarageApiTest extends TestCase
         $this->assertSame(['part', 'charge', 'labor', 'discount'], $types);
     }
 
+    public function test_closed_bill_cannot_be_edited(): void
+    {
+        $cashier = $this->tenantUser('staff');
+        Sanctum::actingAs($cashier);
+        $part = Part::create([
+            'name' => 'Oil Filter', 'brand' => 'Toyota', 'type' => 'filter',
+            'model' => 'Corolla', 'year' => 2018, 'price' => 1500, 'cost_price' => 800, 'stock_qty' => 10,
+        ]);
+
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Nimal Perera',
+            'customer_phone' => '0771234567',
+            'number_plate' => 'CAB-1234',
+        ])->assertCreated()->json('id');
+
+        $itemId = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => 1,
+        ])->assertCreated()->json('item.id');
+
+        $this->postJson("/api/bills/{$billId}/close")
+            ->assertOk()
+            ->assertJsonPath('status', 'closed');
+
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor', 'description' => 'Fit filter', 'quantity' => 1, 'unit_price' => 1000,
+        ])->assertStatus(422);
+
+        $this->postJson("/api/bills/{$billId}/payments", [
+            'amount' => 500, 'method' => 'cash',
+        ])->assertStatus(422);
+
+        $this->deleteJson("/api/bills/{$billId}/items/{$itemId}")->assertStatus(422);
+        $this->putJson("/api/bills/{$billId}", ['notes' => 'try edit'])->assertStatus(422);
+        $this->putJson("/api/bills/{$billId}", ['status' => 'open'])->assertStatus(422);
+        $this->postJson("/api/bills/{$billId}/close")->assertStatus(422);
+
+        $this->assertSame('closed', Bill::find($billId)->status);
+        $this->assertSame(9, $part->fresh()->stock_qty);
+    }
+
     public function test_staff_cannot_mutate_inventory_or_use_an_unpermitted_feature(): void
     {
         $staff = $this->tenantUser('staff');
