@@ -129,6 +129,8 @@ class BillController extends Controller
 
     public function update(Request $request, Bill $bill): JsonResponse
     {
+        abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+
         $data = $request->validate([
             'status' => ['sometimes', Rule::in(['open', 'partially_paid', 'paid', 'closed'])],
             'notes' => ['nullable', 'string'],
@@ -137,6 +139,18 @@ class BillController extends Controller
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
         return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments']));
+    }
+
+    public function close(Request $request, Bill $bill): JsonResponse
+    {
+        abort_if($bill->status === 'closed', 422, 'This bill is already closed.');
+
+        $bill->update([
+            'status' => 'closed',
+            'updated_by' => $request->user()->id,
+        ]);
+
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
     }
 
     private function storeGeneric(Request $request, string $type): JsonResponse
