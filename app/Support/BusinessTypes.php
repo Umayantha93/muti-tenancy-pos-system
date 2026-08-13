@@ -191,6 +191,20 @@ class BusinessTypes
         return 'charge';
     }
 
+    /**
+     * Job card / bill line order: inventory parts, other charges, labor, then discount.
+     */
+    public static function billItemDisplayOrderSql(string $column = 'bill_items.type'): string
+    {
+        return "CASE {$column}
+            WHEN 'part' THEN 1
+            WHEN 'customer_part' THEN 1
+            WHEN 'labor' THEN 3
+            WHEN 'discount' THEN 4
+            ELSE 2
+        END";
+    }
+
     public static function billItemLabel(string $type): string
     {
         foreach (self::all() as $businessType) {
