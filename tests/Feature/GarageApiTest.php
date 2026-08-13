@@ -71,6 +71,41 @@ class GarageApiTest extends TestCase
         $this->assertSame('0.00', Bill::find($billId)->subtotal);
     }
 
+    public function test_bill_items_are_listed_inventory_then_labor_then_discount(): void
+    {
+        $cashier = $this->tenantUser('staff');
+        Sanctum::actingAs($cashier);
+        $part = Part::create([
+            'name' => 'Oil Filter', 'brand' => 'Toyota', 'type' => 'filter',
+            'model' => 'Corolla', 'year' => 2018, 'price' => 1500, 'cost_price' => 800, 'stock_qty' => 10,
+        ]);
+
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Nimal Perera',
+            'customer_phone' => '0771234567',
+            'number_plate' => 'CAB-1234',
+        ])->assertCreated()->json('id');
+
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'discount', 'description' => 'Loyalty', 'quantity' => 1, 'unit_price' => 200,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor', 'description' => 'Oil change', 'quantity' => 1, 'unit_price' => 4000,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'charge', 'description' => 'Shop supplies', 'quantity' => 1, 'unit_price' => 500,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => 1,
+        ])->assertCreated();
+
+        $types = collect($this->getJson("/api/bills/{$billId}")->assertOk()->json('items'))
+            ->pluck('type')
+            ->all();
+
+        $this->assertSame(['part', 'charge', 'labor', 'discount'], $types);
+    }
+
     public function test_staff_cannot_mutate_inventory_or_use_an_unpermitted_feature(): void
     {
         $staff = $this->tenantUser('staff');

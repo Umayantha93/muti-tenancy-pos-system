@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -89,7 +90,9 @@ class Bill extends Model
 
     public function items(): HasMany
     {
-        return $this->hasMany(BillItem::class);
+        return $this->hasMany(BillItem::class)
+            ->orderByRaw(BusinessTypes::billItemDisplayOrderSql())
+            ->orderBy('bill_items.id');
     }
 
     public function payments(): HasMany

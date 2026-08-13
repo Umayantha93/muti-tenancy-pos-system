@@ -11,7 +11,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'business_name',
-    'sms_sender_id',
     'business_type',
     'owner_name',
     'owner_phone',
@@ -32,7 +31,7 @@ class Tenant extends Model
 {
     use SoftDeletes;
 
-    protected $appends = ['logo_url', 'payment_due_soon', 'suggested_sms_sender_id'];
+    protected $appends = ['logo_url', 'payment_due_soon'];
 
     protected $hidden = ['dual_financial_view_enabled'];
 
@@ -44,28 +43,6 @@ class Tenant extends Model
             'plan_amount' => 'decimal:2',
             'dual_financial_view_enabled' => 'boolean',
         ];
-    }
-
-    public static function suggestSmsSenderId(?string $businessName): ?string
-    {
-        $raw = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $businessName) ?? '');
-
-        if ($raw === '') {
-            return null;
-        }
-
-        return substr($raw, 0, 11);
-    }
-
-    public function resolvedSmsSenderId(): ?string
-    {
-        if (filled($this->sms_sender_id)) {
-            return $this->sms_sender_id;
-        }
-
-        $fallback = config('services.notify_lk.sender_id');
-
-        return filled($fallback) ? (string) $fallback : null;
     }
 
     public function secondaryUser(): ?User
@@ -91,11 +68,6 @@ class Tenant extends Model
     protected function logoUrl(): Attribute
     {
         return Attribute::get(fn () => $this->logo ? 'storage/'.$this->logo : null);
-    }
-
-    protected function suggestedSmsSenderId(): Attribute
-    {
-        return Attribute::get(fn () => static::suggestSmsSenderId($this->business_name));
     }
 
     protected function paymentDueSoon(): Attribute
