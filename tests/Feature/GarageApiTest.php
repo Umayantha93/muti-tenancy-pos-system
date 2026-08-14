@@ -126,6 +126,14 @@ class GarageApiTest extends TestCase
         ])->assertCreated()->json('item.id');
 
         $this->postJson("/api/bills/{$billId}/close")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Only paid bills can be closed.');
+
+        $this->postJson("/api/bills/{$billId}/payments", [
+            'amount' => 1500, 'method' => 'cash',
+        ])->assertCreated()->assertJsonPath('bill.status', 'paid');
+
+        $this->postJson("/api/bills/{$billId}/close")
             ->assertOk()
             ->assertJsonPath('status', 'closed');
 

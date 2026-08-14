@@ -136,6 +136,10 @@ class BillController extends Controller
             'notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
         ]);
+
+        if (($data['status'] ?? null) === 'closed' && ! $this->isPaidBill($bill)) {
+            abort(422, 'Only paid bills can be closed.');
+        }
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
         return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments']));
@@ -144,6 +148,7 @@ class BillController extends Controller
     public function close(Request $request, Bill $bill): JsonResponse
     {
         abort_if($bill->status === 'closed', 422, 'This bill is already closed.');
+        abort_unless($this->isPaidBill($bill), 422, 'Only paid bills can be closed.');
 
         $bill->update([
             'status' => 'closed',
@@ -189,5 +194,11 @@ class BillController extends Controller
             'source_id' => $sourceId,
             'created_by' => $request->user()->id,
         ])->load(['customer', 'vehicle', 'items', 'payments']);
+    }
+
+    private function isPaidBill(Bill $bill): bool
+    {
+        return $bill->status === 'paid'
+            || ((float) $bill->balance_due <= 0 && (float) $bill->amount_paid > 0);
     }
 }
