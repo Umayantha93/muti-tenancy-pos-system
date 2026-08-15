@@ -66,7 +66,7 @@ class SuperAdminTenantController extends Controller
                 ->where('business_name', 'like', '%'.$request->string('search').'%')
                 ->orWhere('owner_email', 'like', '%'.$request->string('search').'%')))
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')))
-            ->latest()->paginate(20);
+            ->latest()->paginate(min(100, max(1, $request->integer('per_page', 20))));
 
         $paginator->getCollection()->transform(function (Tenant $tenant) {
             $tenant->current_month_paid = (bool) $tenant->current_month_paid;
