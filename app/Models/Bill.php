@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'customer_id',
     'admission_date',
     'odometer',
+    'mileage',
     'notes',
     'status',
     'subtotal',

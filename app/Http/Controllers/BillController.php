@@ -110,6 +110,7 @@ class BillController extends Controller
         $data = $request->validate([
             'vehicle_id' => ['required', Rule::exists('vehicles', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'odometer' => ['nullable', 'integer', 'min:0'],
+            'mileage' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
         ]);
@@ -135,6 +136,7 @@ class BillController extends Controller
             'status' => ['sometimes', Rule::in(['open', 'partially_paid', 'paid', 'closed'])],
             'notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
+            'mileage' => ['nullable', 'integer', 'min:0'],
         ]);
 
         if (($data['status'] ?? null) === 'closed' && ! $this->isPaidBill($bill)) {
@@ -189,6 +191,7 @@ class BillController extends Controller
             'customer_id' => $customerId,
             'admission_date' => $data['admission_date'] ?? today(),
             'odometer' => $data['odometer'] ?? null,
+            'mileage' => $data['mileage'] ?? null,
             'notes' => $data['notes'] ?? null,
             'source_type' => $sourceType,
             'source_id' => $sourceId,
@@ -198,7 +201,6 @@ class BillController extends Controller
 
     private function isPaidBill(Bill $bill): bool
     {
-        return $bill->status === 'paid'
-            || ((float) $bill->balance_due <= 0 && (float) $bill->amount_paid > 0);
+        return (float) $bill->amount_paid > 0 && (float) $bill->balance_due <= 0;
     }
 }

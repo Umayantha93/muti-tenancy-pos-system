@@ -61,6 +61,7 @@ class SuperAdminBillController extends Controller
         $data = $request->validate([
             'notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
+            'mileage' => ['nullable', 'integer', 'min:0'],
         ]);
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 

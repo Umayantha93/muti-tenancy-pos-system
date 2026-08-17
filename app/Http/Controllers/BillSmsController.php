@@ -44,7 +44,6 @@ class BillSmsController extends Controller
 
     private function isPaid(Bill $bill): bool
     {
-        return $bill->status === 'paid'
-            || ((float) $bill->balance_due <= 0 && (float) $bill->amount_paid > 0);
+        return (float) $bill->amount_paid > 0 && (float) $bill->balance_due <= 0;
     }
 }
