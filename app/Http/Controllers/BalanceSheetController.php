@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\Expense;
 use App\Models\Payroll;
+use App\Services\BillProfitAnalyzer;
 use App\Services\MonetaryView;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,6 +29,8 @@ class BalanceSheetController extends Controller
             'period' => ['month' => $month, 'year' => $year],
             ...$summary,
             'accounts' => $this->accounts($month, $year, $view),
+            'inventory_payables' => $this->inventoryPayables($view),
+            'bill_receivables' => $this->billReceivables($view),
             'yearly_trend' => collect(range(1, 12))->map(fn ($trendMonth) => [
                 'month' => $trendMonth,
                 ...$this->summary($trendMonth, $year, $view, false),
@@ -58,7 +62,7 @@ class BalanceSheetController extends Controller
                     $item->bill?->items ?? []
                 ));
 
-            $manualExpenses = Expense::whereYear('expense_date', $year)->whereMonth('expense_date', $month);
+            $manualExpenses = Expense::postedIn($month, $year);
             $manualTotal = (float) (clone $manualExpenses)->sum('amount');
             $salaryTotal = (float) Payroll::where('year', $year)->where('month', $month)->sum('net_salary');
             $income = round((float) $payments + (float) $advances, 2);
@@ -82,7 +86,7 @@ class BalanceSheetController extends Controller
 
         $payments = (float) BillPayment::whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
         $advances = (float) BillItem::where('type', 'advance')->whereYear('created_at', $year)->whereMonth('created_at', $month)->sum('line_total');
-        $manualExpenses = Expense::whereYear('expense_date', $year)->whereMonth('expense_date', $month);
+        $manualExpenses = Expense::postedIn($month, $year);
         $manualTotal = (float) (clone $manualExpenses)->sum('amount');
         $salaryTotal = (float) Payroll::where('year', $year)->where('month', $month)->sum('net_salary');
         $income = $payments + $advances;
@@ -107,7 +111,7 @@ class BalanceSheetController extends Controller
      *   description: string,
      *   reference: string|null,
      *   category: string,
-     *   type: 'income'|'expense',
+     *   type: 'income'|'expense'|'payable'|'bill',
      *   debit: float,
      *   credit: float,
      *   balance: float
@@ -165,6 +169,29 @@ class BalanceSheetController extends Controller
             });
 
         Expense::query()
+            ->postedIn($month, $year)
+            ->orderBy('expense_date')
+            ->get()
+            ->each(function (Expense $expense) use ($rows, $view) {
+                $amount = $view->active()
+                    ? $view->scaleExpense((float) $expense->amount)
+                    : (float) $expense->amount;
+                $posted = $expense->settled_at?->toDateString() ?? $expense->expense_date?->toDateString();
+
+                $rows->push([
+                    'date' => $posted,
+                    'sort_at' => ($expense->settled_at?->format('Y-m-d H:i:s') ?? (($expense->expense_date?->format('Y-m-d') ?? '').' 12:00:00')),
+                    'description' => $expense->description,
+                    'reference' => null,
+                    'category' => ucwords(str_replace('_', ' ', $expense->category)),
+                    'type' => 'expense',
+                    'debit' => $amount,
+                    'credit' => 0.0,
+                ]);
+            });
+
+        Expense::query()
+            ->credit()
             ->whereYear('expense_date', $year)
             ->whereMonth('expense_date', $month)
             ->orderBy('expense_date')
@@ -176,12 +203,39 @@ class BalanceSheetController extends Controller
 
                 $rows->push([
                     'date' => $expense->expense_date?->toDateString() ?? $expense->expense_date,
-                    'sort_at' => ($expense->expense_date?->format('Y-m-d') ?? '').' 12:00:00',
-                    'description' => $expense->description,
-                    'reference' => null,
-                    'category' => ucwords(str_replace('_', ' ', $expense->category)),
-                    'type' => 'expense',
+                    'sort_at' => ($expense->expense_date?->format('Y-m-d') ?? '').' 12:30:00',
+                    'description' => $expense->description.' · supplier credit (not in profit until paid)',
+                    'reference' => $expense->due_date?->toDateString(),
+                    'category' => 'Inventory payable',
+                    'type' => 'payable',
                     'debit' => $amount,
+                    'credit' => 0.0,
+                ]);
+            });
+
+        $analyzer = app(BillProfitAnalyzer::class);
+        Bill::query()
+            ->with(['items.part'])
+            ->whereNotNull('closed_at')
+            ->whereYear('closed_at', $year)
+            ->whereMonth('closed_at', $month)
+            ->orderBy('closed_at')
+            ->get()
+            ->each(function (Bill $bill) use ($rows, $analyzer) {
+                $summary = $analyzer->summarize($bill);
+                $rows->push([
+                    'date' => $bill->closed_at?->toDateString(),
+                    'sort_at' => $bill->closed_at?->format('Y-m-d H:i:s') ?? '',
+                    'description' => sprintf(
+                        'Bill closed · revenue %s · COGS %s · profit %s',
+                        number_format($summary['revenue'], 2, '.', ''),
+                        number_format($summary['cogs'], 2, '.', ''),
+                        number_format($summary['profit'], 2, '.', '')
+                    ),
+                    'reference' => $bill->bill_number,
+                    'category' => $summary['billing_type'] === 'credit' ? 'Credit bill' : 'Bill profit',
+                    'type' => 'bill',
+                    'debit' => 0.0,
                     'credit' => 0.0,
                 ]);
             });
@@ -218,7 +272,9 @@ class BalanceSheetController extends Controller
             ])
             ->values()
             ->map(function (array $row) use (&$balance) {
-                $balance = round($balance + $row['credit'] - $row['debit'], 2);
+                if (in_array($row['type'], ['income', 'expense'], true)) {
+                    $balance = round($balance + $row['credit'] - $row['debit'], 2);
+                }
                 unset($row['sort_at']);
                 $row['debit'] = round($row['debit'], 2);
                 $row['credit'] = round($row['credit'], 2);
@@ -227,5 +283,51 @@ class BalanceSheetController extends Controller
                 return $row;
             })
             ->all();
+    }
+
+    /**
+     * @return array{payables_total: float, items: list<array<string, mixed>>}
+     */
+    private function inventoryPayables(MonetaryView $view): array
+    {
+        $items = Expense::query()
+            ->credit()
+            ->orderBy('due_date')
+            ->orderBy('expense_date')
+            ->get()
+            ->map(function (Expense $expense) use ($view) {
+                $amount = $view->active()
+                    ? $view->scaleExpense((float) $expense->amount)
+                    : (float) $expense->amount;
+
+                return [
+                    'id' => $expense->id,
+                    'description' => $expense->description,
+                    'amount' => round($amount, 2),
+                    'expense_date' => $expense->expense_date?->toDateString(),
+                    'due_date' => $expense->due_date?->toDateString(),
+                    'category' => $expense->category,
+                ];
+            })
+            ->all();
+
+        return [
+            'payables_total' => round(collect($items)->sum('amount'), 2),
+            'items' => $items,
+        ];
+    }
+
+    /**
+     * @return array{receivables_total: float, count: int}
+     */
+    private function billReceivables(MonetaryView $view): array
+    {
+        $bills = Bill::query()->where('status', 'owe_in')->get(['balance_due']);
+        $total = (float) $bills->sum('balance_due');
+
+        return [
+            'receivables_total' => $view->active() ? $view->scaleExpense($total) : round($total, 2),
+            'count' => $bills->count(),
+        ];
     }
 }

@@ -18,9 +18,13 @@ class BillCalculator
         $balanceDue = max(0, $netBill - $amountPaid);
         $customerBalance = max(0, $amountPaid - $netBill);
 
+        $wasOweIn = $bill->status === 'owe_in';
+        $fullyPaid = $netBill > 0 && $balanceDue <= 0;
         $status = match (true) {
             $bill->status === 'closed' => 'closed',
-            $netBill > 0 && $balanceDue <= 0 => 'paid',
+            $wasOweIn && $fullyPaid => 'closed',
+            $wasOweIn => 'owe_in',
+            $fullyPaid => 'paid',
             $amountPaid > 0 => 'partially_paid',
             default => 'open',
         };
@@ -32,6 +36,7 @@ class BillCalculator
             'balance_due' => $balanceDue,
             'customer_balance' => $customerBalance,
             'status' => $status,
+            'closed_at' => $status === 'closed' ? ($bill->closed_at ?? now()) : $bill->closed_at,
         ]);
 
         return $bill->refresh();

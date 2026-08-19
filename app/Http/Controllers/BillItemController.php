@@ -18,7 +18,9 @@ class BillItemController extends Controller
 {
     public function store(Request $request, Bill $bill, BillCalculator $calculator): JsonResponse
     {
-        abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
+            ? 'Owe-in bills cannot be edited. Record a payment instead.'
+            : 'Closed bills cannot be edited.');
 
         $businessType = $request->user()->tenant?->business_type ?? BusinessTypes::GARAGE;
         $allowed = BusinessTypes::allowedBillItemTypes($businessType);
@@ -55,7 +57,7 @@ class BillItemController extends Controller
             if (! array_key_exists('purchase_unit_cost', $data) || $data['purchase_unit_cost'] === null) {
                 throw ValidationException::withMessages(['purchase_unit_cost' => ['Enter the purchase cost for a part bought outside.']]);
             }
-        } else {
+        } elseif ($data['type'] !== 'part') {
             $data['purchase_unit_cost'] = null;
         }
 
@@ -84,9 +86,11 @@ class BillItemController extends Controller
                 ? 0.0
                 : (float) ($data['unit_price'] ?? $part?->price ?? 0);
 
-            $purchaseUnitCost = isset($data['purchase_unit_cost']) && $data['purchase_unit_cost'] !== null
-                ? (float) $data['purchase_unit_cost']
-                : null;
+            $purchaseUnitCost = $part
+                ? (float) $part->cost_price
+                : (isset($data['purchase_unit_cost']) && $data['purchase_unit_cost'] !== null
+                    ? (float) $data['purchase_unit_cost']
+                    : null);
 
             $expense = null;
             if ($data['type'] === 'part' && ! $part && $purchaseUnitCost !== null && $purchaseUnitCost > 0 && $quantity > 0) {
@@ -95,6 +99,8 @@ class BillItemController extends Controller
                     'description' => 'Outside part: '.($data['description'] ?? 'Bought outside').' × '.(int) $quantity,
                     'amount' => round($purchaseUnitCost * $quantity, 2),
                     'expense_date' => now()->toDateString(),
+                    'payment_status' => Expense::STATUS_PAID,
+                    'settled_at' => now(),
                     'created_by' => $request->user()->id,
                 ]);
             }
@@ -109,7 +115,7 @@ class BillItemController extends Controller
                 'purchase_expense_id' => $expense?->id,
                 'line_total' => round($unitPrice * $quantity, 2),
             ]);
-            $part?->decrement('stock_qty', (int) $quantity);
+            $part?->takeStock((int) $quantity);
             $calculator->recalculate($bill);
 
             return $item;
@@ -121,7 +127,9 @@ class BillItemController extends Controller
     public function destroy(Bill $bill, BillItem $item, BillCalculator $calculator): JsonResponse
     {
         abort_unless($item->bill_id === $bill->id, 404);
-        abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
+            ? 'Owe-in bills cannot be edited. Record a payment instead.'
+            : 'Closed bills cannot be edited.');
 
         DB::transaction(function () use ($bill, $item, $calculator) {
             if ($item->part_id) {

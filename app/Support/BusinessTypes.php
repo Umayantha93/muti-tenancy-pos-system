@@ -25,7 +25,7 @@ class BusinessTypes
      */
     public static function featureMatrix(): array
     {
-        $shared = ['customers', 'billing', 'bill_sms', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'reports'];
+        $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'reports'];
 
         return [
             self::GARAGE => array_merge(['admit_vehicle', 'parts_inventory'], $shared),

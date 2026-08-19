@@ -14,7 +14,7 @@ class BillPaymentController extends Controller
 {
     public function store(Request $request, Bill $bill, BillCalculator $calculator): JsonResponse
     {
-        abort_if($bill->status === 'closed', 422, 'Closed bills cannot accept payments.');
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot accept payments.');
         $data = $request->validate([
             'amount' => ['required', 'numeric', 'gt:0'],
             'method' => ['required', Rule::in(['cash', 'card', 'bank_transfer', 'other'])],
@@ -39,7 +39,9 @@ class BillPaymentController extends Controller
     public function destroy(Bill $bill, BillPayment $payment, BillCalculator $calculator): JsonResponse
     {
         abort_unless($payment->bill_id === $bill->id, 404);
-        abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
+            ? 'Payments on owe-in bills cannot be removed.'
+            : 'Closed bills cannot be edited.');
 
         DB::transaction(function () use ($bill, $payment, $calculator) {
             $payment->delete();

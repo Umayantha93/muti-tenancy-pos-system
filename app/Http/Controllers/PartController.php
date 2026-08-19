@@ -302,6 +302,9 @@ class PartController extends Controller
                 $part,
                 (int) ($data['stock_qty'] ?? 0),
                 (float) ($data['cost_price'] ?? 0),
+                null,
+                $request->input('payment_status', 'paid'),
+                $request->input('due_date'),
             );
 
             return $part->refresh();
@@ -344,10 +347,16 @@ class PartController extends Controller
 
     public function restock(Request $request, Part $part): JsonResponse
     {
+        if ($request->input('due_date') === '') {
+            $request->merge(['due_date' => null]);
+        }
+
         $data = $request->validate([
             'quantity' => ['required', 'integer', 'gt:0'],
             'unit_cost' => ['nullable', 'numeric', 'min:0'],
             'expense_date' => ['nullable', 'date'],
+            'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
+            'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
         ]);
 
         [$part, $expense] = DB::transaction(function () use ($data, $part, $request) {
@@ -362,6 +371,8 @@ class PartController extends Controller
                 (int) $data['quantity'],
                 $unitCost,
                 $data['expense_date'] ?? null,
+                $data['payment_status'] ?? 'paid',
+                $data['due_date'] ?? null,
             );
 
             return [$part->refresh(), $expense];
@@ -388,9 +399,11 @@ class PartController extends Controller
             'description' => ['nullable', 'string'],
             'images' => ['sometimes', 'array', 'max:5'],
             'images.*' => ['image', 'max:5120'],
+            'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
+            'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
         ]);
 
-        unset($data['images']);
+        unset($data['images'], $data['payment_status'], $data['due_date']);
 
         foreach (['sku', 'barcode'] as $field) {
             if (array_key_exists($field, $data) && ($data[$field] === null || trim((string) $data[$field]) === '')) {
@@ -442,17 +455,32 @@ class PartController extends Controller
         }
     }
 
-    private function recordPurchaseExpense(Request $request, Part $part, int $quantity, float $unitCost, ?string $expenseDate = null): ?Expense
-    {
+    private function recordPurchaseExpense(
+        Request $request,
+        Part $part,
+        int $quantity,
+        float $unitCost,
+        ?string $expenseDate = null,
+        string $paymentStatus = 'paid',
+        ?string $dueDate = null,
+    ): ?Expense {
         if ($quantity <= 0 || $unitCost <= 0) {
             return null;
         }
 
+        $paid = $paymentStatus !== Expense::STATUS_CREDIT;
+        $date = $expenseDate ?? now()->toDateString();
+
         return Expense::create([
             'category' => 'inventory',
-            'description' => "Stock purchase: {$part->name} × {$quantity}",
+            'description' => $paid
+                ? "Stock purchase: {$part->name} × {$quantity}"
+                : "Stock purchase on credit: {$part->name} × {$quantity}",
             'amount' => round($unitCost * $quantity, 2),
-            'expense_date' => $expenseDate ?? now()->toDateString(),
+            'expense_date' => $date,
+            'payment_status' => $paid ? Expense::STATUS_PAID : Expense::STATUS_CREDIT,
+            'due_date' => $paid ? null : $dueDate,
+            'settled_at' => $paid ? $date : null,
             'created_by' => $request->user()->id,
         ]);
     }
