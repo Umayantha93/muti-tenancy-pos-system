@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'mileage',
     'notes',
     'status',
+    'owe_in_due_date',
+    'closed_at',
     'subtotal',
     'total_deductions',
     'amount_paid',
@@ -51,6 +53,8 @@ class Bill extends Model
     {
         return [
             'admission_date' => 'date:Y-m-d',
+            'owe_in_due_date' => 'date:Y-m-d',
+            'closed_at' => 'datetime',
             'subtotal' => 'decimal:2',
             'total_deductions' => 'decimal:2',
             'amount_paid' => 'decimal:2',
@@ -104,5 +108,58 @@ class Bill extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function isClosed(): bool
+    {
+        return $this->status === 'closed';
+    }
+
+    public function isOweIn(): bool
+    {
+        return $this->status === 'owe_in';
+    }
+
+    public function isLockedForEdits(): bool
+    {
+        return in_array($this->status, ['closed', 'owe_in'], true);
+    }
+
+    public function acceptsPayments(): bool
+    {
+        return $this->status !== 'closed';
+    }
+
+    public function isOweInUrgent(?int $withinDays = 3): bool
+    {
+        if (! $this->isOweIn() || ! $this->owe_in_due_date) {
+            return false;
+        }
+
+        return $this->owe_in_due_date->lte(now()->startOfDay()->addDays($withinDays));
+    }
+
+    /**
+     * Job-card queue: urgent owe-in first, then open, partial, remaining owe-in, paid, closed.
+     */
+    public function scopeQueued($query)
+    {
+        $soon = now()->startOfDay()->addDays(3)->toDateString();
+
+        return $query
+            ->orderByRaw("
+                CASE
+                    WHEN status = 'owe_in' AND owe_in_due_date IS NOT NULL AND owe_in_due_date <= ? THEN 0
+                    WHEN status = 'open' THEN 1
+                    WHEN status = 'partially_paid' THEN 2
+                    WHEN status = 'owe_in' THEN 3
+                    WHEN status = 'paid' THEN 4
+                    WHEN status = 'closed' THEN 5
+                    ELSE 6
+                END
+            ", [$soon])
+            ->orderByRaw("CASE WHEN status = 'owe_in' THEN owe_in_due_date ELSE '9999-12-31' END")
+            ->orderByDesc('admission_date')
+            ->orderByDesc('id');
     }
 }

@@ -47,6 +47,18 @@ class MonetaryView
         'debit',
         'credit',
         'balance',
+        'purchase_unit_cost',
+        'revenue',
+        'cogs',
+        'profit',
+        'total_revenue',
+        'total_cogs',
+        'gross_profit',
+        'credit_generated',
+        'credit_collected',
+        'credit_pending',
+        'payables_total',
+        'receivables_total',
     ];
 
     public static function for(?User $user = null): self

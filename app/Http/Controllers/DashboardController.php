@@ -34,7 +34,7 @@ class DashboardController extends Controller
         ) : null;
 
         $monthlyExpensesRaw = $finance
-            ? (float) Expense::whereYear('expense_date', now()->year)->whereMonth('expense_date', now()->month)->sum('amount')
+            ? (float) Expense::postedIn((int) now()->month, (int) now()->year)->sum('amount')
                 + (float) Payroll::where('year', now()->year)->where('month', now()->month)->sum('net_salary')
             : null;
         $monthlyExpenses = $finance
@@ -62,7 +62,7 @@ class DashboardController extends Controller
             'features' => $user->accessibleFeatureKeys(),
             'business_type' => $type,
             'today_income' => $todayIncome,
-            'open_bills' => $billing ? Bill::whereIn('status', ['open', 'partially_paid'])->count() : null,
+            'open_bills' => $billing ? Bill::whereIn('status', ['open', 'partially_paid', 'owe_in'])->count() : null,
             'low_stock_parts' => $inventory ? $lowStock : null,
             'upcoming_bookings' => $user->canAccessFeature('photo_bookings')
                 ? $view->transform(

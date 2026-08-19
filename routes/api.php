@@ -6,7 +6,7 @@ use App\Http\Controllers\BalanceSheetController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
-use App\Http\Controllers\BillShareController;
+use App\Http\Controllers\BillProfitController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
@@ -86,6 +86,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::apiResource('bills', BillController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('/bills/from-vehicle', [BillController::class, 'storeFromVehicle']);
             Route::post('/bills/{bill}/close', [BillController::class, 'close']);
+            Route::post('/bills/{bill}/owe-in', [BillController::class, 'oweIn']);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
@@ -181,8 +182,13 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::get('/payroll', [PayrollController::class, 'index']);
             Route::post('/payroll/generate', [PayrollController::class, 'generate']);
         });
+        Route::middleware('feature:bill_profits')->group(function () {
+            Route::get('/bill-profits', [BillProfitController::class, 'index']);
+            Route::get('/bill-profits/{bill}', [BillProfitController::class, 'show']);
+        });
         Route::middleware('feature:balance_sheet')->group(function () {
             Route::apiResource('expenses', ExpenseController::class)->except('show');
+            Route::post('/expenses/{expense}/settle', [ExpenseController::class, 'settle']);
             Route::get('/balance-sheet', BalanceSheetController::class);
         });
     });

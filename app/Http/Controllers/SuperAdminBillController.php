@@ -71,10 +71,12 @@ class SuperAdminBillController extends Controller
     public function reopen(Request $request, Tenant $tenant, Bill $bill, BillCalculator $calculator): JsonResponse
     {
         $this->assertBillTenant($tenant, $bill);
-        abort_unless($bill->status === 'closed', 422, 'This bill is not closed.');
+        abort_unless($bill->isClosed(), 422, 'This bill is not closed.');
 
         $bill->update([
             'status' => 'open',
+            'closed_at' => null,
+            'owe_in_due_date' => null,
             'updated_by' => $request->user()->id,
         ]);
         $calculator->recalculate($bill);
@@ -86,11 +88,12 @@ class SuperAdminBillController extends Controller
     public function close(Request $request, Tenant $tenant, Bill $bill, BillCalculator $calculator): JsonResponse
     {
         $this->assertBillTenant($tenant, $bill);
-        abort_if($bill->status === 'closed', 422, 'This bill is already closed.');
+        abort_if($bill->isClosed(), 422, 'This bill is already closed.');
 
         $calculator->recalculate($bill);
         $bill->update([
             'status' => 'closed',
+            'closed_at' => $bill->closed_at ?? now(),
             'updated_by' => $request->user()->id,
         ]);
         $this->audit($request, $tenant, $bill, 'bill.closed');
@@ -168,7 +171,7 @@ class SuperAdminBillController extends Controller
             if (! array_key_exists('purchase_unit_cost', $data) || $data['purchase_unit_cost'] === null) {
                 throw ValidationException::withMessages(['purchase_unit_cost' => ['Enter the purchase cost for a part bought outside.']]);
             }
-        } else {
+        } elseif ($data['type'] !== 'part') {
             $data['purchase_unit_cost'] = null;
         }
 
@@ -199,9 +202,11 @@ class SuperAdminBillController extends Controller
                 ? 0.0
                 : (float) ($data['unit_price'] ?? $part?->price ?? 0);
 
-            $purchaseUnitCost = isset($data['purchase_unit_cost']) && $data['purchase_unit_cost'] !== null
-                ? (float) $data['purchase_unit_cost']
-                : null;
+            $purchaseUnitCost = $part
+                ? (float) $part->cost_price
+                : (isset($data['purchase_unit_cost']) && $data['purchase_unit_cost'] !== null
+                    ? (float) $data['purchase_unit_cost']
+                    : null);
 
             $expense = null;
             if ($data['type'] === 'part' && ! $part && $purchaseUnitCost !== null && $purchaseUnitCost > 0 && $quantity > 0) {
@@ -211,6 +216,8 @@ class SuperAdminBillController extends Controller
                     'description' => 'Outside part: '.($data['description'] ?? 'Bought outside').' × '.(int) $quantity,
                     'amount' => round($purchaseUnitCost * $quantity, 2),
                     'expense_date' => now()->toDateString(),
+                    'payment_status' => Expense::STATUS_PAID,
+                    'settled_at' => now(),
                     'created_by' => $request->user()->id,
                 ]);
                 $expense->tenant_id = $bill->tenant_id;
@@ -229,7 +236,7 @@ class SuperAdminBillController extends Controller
             ]);
             $item->tenant_id = $bill->tenant_id;
             $item->save();
-            $part?->decrement('stock_qty', (int) $quantity);
+            $part?->takeStock((int) $quantity);
             $calculator->recalculate($bill);
 
             return $item;

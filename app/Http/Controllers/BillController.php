@@ -34,8 +34,7 @@ class BillController extends Controller
             })
             ->when(! empty($data['date_from']), fn ($query) => $query->whereDate('admission_date', '>=', $data['date_from']))
             ->when(! empty($data['date_to']), fn ($query) => $query->whereDate('admission_date', '<=', $data['date_to']))
-            ->latest('admission_date')
-            ->orderByDesc('id')
+            ->queued()
             ->paginate($data['per_page'] ?? 15);
 
         return $this->moneyJson($bills);
@@ -130,10 +129,12 @@ class BillController extends Controller
 
     public function update(Request $request, Bill $bill): JsonResponse
     {
-        abort_if($bill->status === 'closed', 422, 'Closed bills cannot be edited.');
+        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
+            ? 'Owe-in bills cannot be edited. Record a payment instead.'
+            : 'Closed bills cannot be edited.');
 
         $data = $request->validate([
-            'status' => ['sometimes', Rule::in(['open', 'partially_paid', 'paid', 'closed'])],
+            'status' => ['sometimes', Rule::in(['open', 'partially_paid', 'paid', 'closed', 'owe_in'])],
             'notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
@@ -142,6 +143,9 @@ class BillController extends Controller
         if (($data['status'] ?? null) === 'closed' && ! $this->isPaidBill($bill)) {
             abort(422, 'Only paid bills can be closed.');
         }
+        if (($data['status'] ?? null) === 'owe_in') {
+            abort(422, 'Use the Owe In action to mark a bill on credit.');
+        }
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
         return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments']));
@@ -149,11 +153,32 @@ class BillController extends Controller
 
     public function close(Request $request, Bill $bill): JsonResponse
     {
-        abort_if($bill->status === 'closed', 422, 'This bill is already closed.');
+        abort_if($bill->isClosed(), 422, 'This bill is already closed.');
         abort_unless($this->isPaidBill($bill), 422, 'Only paid bills can be closed.');
 
         $bill->update([
             'status' => 'closed',
+            'closed_at' => $bill->closed_at ?? now(),
+            'updated_by' => $request->user()->id,
+        ]);
+
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+    }
+
+    public function oweIn(Request $request, Bill $bill): JsonResponse
+    {
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot be marked owe in.');
+        abort_if($bill->isOweIn(), 422, 'This bill is already on owe in.');
+        abort_if($this->isPaidBill($bill), 422, 'This bill is fully paid. Close it instead.');
+        abort_if((float) $bill->subtotal <= 0, 422, 'Add charges before marking this bill owe in.');
+
+        $data = $request->validate([
+            'due_date' => ['required', 'date', 'after_or_equal:today'],
+        ]);
+
+        $bill->update([
+            'status' => 'owe_in',
+            'owe_in_due_date' => $data['due_date'],
             'updated_by' => $request->user()->id,
         ]);
 
