@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\Feature;
+use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Models\TenantFeePayment;
 use App\Models\User;
@@ -126,6 +127,10 @@ class SuperAdminTenantController extends Controller
             $featureIds = Feature::whereIn('key', array_values(array_intersect($requested, $allowed)))->pluck('id');
             $tenant->features()->sync($featureIds->mapWithKeys(fn ($id) => [$id => ['is_enabled' => true]]));
             $this->audit($request, 'tenant.created', $tenant, ['business_name' => $tenant->business_name]);
+
+            if ($data['business_type'] === BusinessTypes::GARAGE) {
+                ServiceAddon::seedDefaultsFor((int) $tenant->id);
+            }
 
             return $tenant;
         });

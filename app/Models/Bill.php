@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'mileage',
     'notes',
     'status',
+    'job_kind',
     'owe_in_due_date',
     'closed_at',
     'subtotal',
@@ -35,6 +36,10 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 class Bill extends Model
 {
     use BelongsToTenant;
+
+    public const JOB_KIND_REPAIR = 'repair';
+
+    public const JOB_KIND_SERVICE = 'service';
 
     protected static function booted(): void
     {
