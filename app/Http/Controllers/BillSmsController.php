@@ -78,19 +78,13 @@ class BillSmsController extends Controller
         $greeting = $name !== '' ? "Hi {$name}," : 'Hi,';
         $status = $this->smsStatus($bill);
         $plate = $this->garageVehiclePlate($bill);
-
-        if ($plate !== null) {
-            return match ($status) {
-                'paid' => "{$greeting} your bill for vehicle {$plate} from {$business} is paid in full. View it here: {$link}",
-                'partial' => "{$greeting} here is the bill for your vehicle {$plate} from {$business}. It is partly paid. View it here: {$link}",
-                default => "{$greeting} here is the quotation for your vehicle {$plate} from {$business}. View it here: {$link}",
-            };
-        }
-
-        return match ($status) {
-            'paid' => "{$greeting} your bill from {$business} is paid in full. View it here: {$link}",
-            'partial' => "{$greeting} here is your bill from {$business}. It is partly paid. View it here: {$link}",
-            default => "{$greeting} here is your quotation from {$business}. View it here: {$link}",
+        $detail = $plate !== null ? " for {$plate}" : '';
+        $document = match ($status) {
+            'paid' => 'paid bill',
+            'partial' => 'bill (partly paid)',
+            default => 'quotation',
         };
+
+        return "{$link} \n{$greeting} {$business} {$document}{$detail}.";
     }
 }

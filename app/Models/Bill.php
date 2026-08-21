@@ -45,11 +45,7 @@ class Bill extends Model
     {
         static::creating(function (Bill $bill): void {
             if (! $bill->share_token) {
-                do {
-                    $token = str()->lower(str()->random(40));
-                } while (static::withoutGlobalScopes()->where('share_token', $token)->exists());
-
-                $bill->share_token = $token;
+                $bill->share_token = static::newShareToken();
             }
         });
     }
@@ -68,19 +64,29 @@ class Bill extends Model
         ];
     }
 
+    public static function normalizeShareToken(?string $token): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9]/i', '', (string) $token) ?? '');
+    }
+
+    public static function newShareToken(): string
+    {
+        do {
+            $token = str()->lower(str()->random(24));
+        } while (static::withoutGlobalScopes()->where('share_token', $token)->exists());
+
+        return $token;
+    }
+
     public function ensureShareToken(): string
     {
         if ($this->share_token) {
             return $this->share_token;
         }
 
-        do {
-            $token = str()->lower(str()->random(40));
-        } while (static::withoutGlobalScopes()->where('share_token', $token)->exists());
+        $this->forceFill(['share_token' => static::newShareToken()])->save();
 
-        $this->forceFill(['share_token' => $token])->save();
-
-        return $token;
+        return $this->share_token;
     }
 
     public function customer(): BelongsTo
