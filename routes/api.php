@@ -7,6 +7,7 @@ use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
 use App\Http\Controllers\BillProfitController;
+use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
