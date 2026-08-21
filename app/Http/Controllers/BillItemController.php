@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\Expense;
 use App\Models\Part;
+use App\Models\ServiceAddon;
 use App\Services\BillCalculator;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
@@ -33,10 +34,15 @@ class BillItemController extends Controller
             'quantity' => ['nullable', 'numeric', 'gt:0'],
             'unit_price' => ['nullable', 'numeric', 'min:0'],
             'purchase_unit_cost' => ['nullable', 'numeric', 'min:0'],
+            'service_addon_id' => ['nullable', Rule::exists('service_addons', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
+        $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id);
+
         $kind = BusinessTypes::billItemKind($data['type']);
-        $allowQty = (bool) ($typeMeta[$data['type']]['allow_qty'] ?? false) || $kind === 'stock';
+        $allowQty = (bool) ($typeMeta[$data['type']]['allow_qty'] ?? false)
+            || $kind === 'stock'
+            || $data['type'] === 'service_addon';
 
         if ($data['type'] === 'customer_part') {
             if (blank($data['description'] ?? null)) {
@@ -107,8 +113,10 @@ class BillItemController extends Controller
 
             $item = $bill->items()->create([
                 'part_id' => $part?->id,
+                'service_addon_id' => $data['service_addon_id'] ?? null,
                 'type' => $data['type'],
                 'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
+                'included_services' => $data['included_services'] ?? null,
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
                 'purchase_unit_cost' => $purchaseUnitCost,

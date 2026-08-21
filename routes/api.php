@@ -20,6 +20,7 @@ use App\Http\Controllers\PhotoBookingController;
 use App\Http\Controllers\PhotoPackageController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\RetailSaleController;
+use App\Http\Controllers\ServiceAddonController;
 use App\Http\Controllers\SuperAdminBillController;
 use App\Http\Controllers\SuperAdminTenantController;
 use App\Http\Controllers\SuperAdminUserController;
@@ -91,6 +92,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
             Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
+            Route::get('/service-addons', [ServiceAddonController::class, 'index']);
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
@@ -162,6 +164,9 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::delete('/parts/{part}', [PartController::class, 'destroy'])->middleware('feature:parts_inventory');
             Route::post('/parts/{part}/image', [PartController::class, 'image'])->middleware('feature:parts_inventory');
             Route::post('/parts/{part}/restock', [PartController::class, 'restock'])->middleware('feature:parts_inventory');
+            Route::post('/service-addons', [ServiceAddonController::class, 'store'])->middleware('feature:billing');
+            Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update'])->middleware('feature:billing');
+            Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy'])->middleware('feature:billing');
         });
 
         Route::middleware('feature:employees_management,attendance')->group(function () {

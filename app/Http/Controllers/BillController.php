@@ -60,6 +60,7 @@ class BillController extends Controller
             'odometer' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
         ]);
 
         $bill = DB::transaction(function () use ($data, $request) {
@@ -112,6 +113,7 @@ class BillController extends Controller
             'mileage' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
@@ -218,6 +220,9 @@ class BillController extends Controller
             'odometer' => $data['odometer'] ?? null,
             'mileage' => $data['mileage'] ?? null,
             'notes' => $data['notes'] ?? null,
+            'job_kind' => $type === BusinessTypes::GARAGE
+                ? ($data['job_kind'] ?? Bill::JOB_KIND_REPAIR)
+                : Bill::JOB_KIND_REPAIR,
             'source_type' => $sourceType,
             'source_id' => $sourceId,
             'created_by' => $request->user()->id,

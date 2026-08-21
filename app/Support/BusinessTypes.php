@@ -138,7 +138,6 @@ class BusinessTypes
             ],
             default => [
                 ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge'],
-                ['value' => 'charge', 'label' => 'Service / charge', 'kind' => 'charge'],
                 ['value' => 'part', 'label' => 'Inventory part', 'kind' => 'stock'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
@@ -151,7 +150,7 @@ class BusinessTypes
     public static function chargeItemTypes(): array
     {
         return [
-            'labor', 'charge', 'part', 'service',
+            'labor', 'charge', 'part', 'service', 'service_addon',
             'session', 'package', 'print', 'addon',
             'product', 'alteration',
             'room', 'amenity', 'meal',
@@ -174,6 +173,8 @@ class BusinessTypes
         $values = collect(self::billItemTypes($businessType))->pluck('value')->all();
         if ($businessType === self::GARAGE) {
             $values[] = 'customer_part';
+            $values[] = 'charge';
+            $values[] = 'service_addon';
         }
 
         return array_values(array_unique($values));
@@ -218,6 +219,8 @@ class BusinessTypes
         return match ($type) {
             'customer_part' => 'Customer part',
             'service' => 'Service',
+            'service_addon' => 'Service',
+            'charge' => 'Service / charge',
             default => str($type)->replace('_', ' ')->title()->toString(),
         };
     }

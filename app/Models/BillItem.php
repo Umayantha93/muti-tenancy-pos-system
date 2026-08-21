@@ -10,8 +10,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'bill_id',
     'part_id',
+    'service_addon_id',
     'type',
     'description',
+    'included_services',
     'quantity',
     'unit_price',
     'purchase_unit_cost',
@@ -25,6 +27,7 @@ class BillItem extends Model
     protected function casts(): array
     {
         return [
+            'included_services' => 'array',
             'quantity' => 'decimal:2',
             'unit_price' => 'decimal:2',
             'purchase_unit_cost' => 'decimal:2',
@@ -40,6 +43,11 @@ class BillItem extends Model
     public function part(): BelongsTo
     {
         return $this->belongsTo(Part::class);
+    }
+
+    public function serviceAddon(): BelongsTo
+    {
+        return $this->belongsTo(ServiceAddon::class);
     }
 
     public function purchaseExpense(): BelongsTo
