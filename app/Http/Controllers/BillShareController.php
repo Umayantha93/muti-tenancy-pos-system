@@ -9,16 +9,23 @@ class BillShareController extends Controller
 {
     public function show(string $token): JsonResponse
     {
-        $bill = Bill::query()
+        $token = Bill::normalizeShareToken($token);
+        abort_unless(strlen($token) >= 8, 404);
+
+        $bill = Bill::withoutGlobalScopes()
             ->where('share_token', $token)
             ->with([
-                'customer:id,name,phone,address',
-                'vehicle:id,number_plate,make,model,chassis_number',
-                'items:id,bill_id,type,description,quantity,unit_price,line_total',
-                'payments:id,bill_id,amount,method,paid_at',
+                'customer' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name', 'phone', 'address']),
+                'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number']),
+                'items' => fn ($query) => $query->withoutGlobalScopes()->select([
+                    'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_total',
+                ]),
+                'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
                 'tenant:id,business_name,business_type,logo,address,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
             ])
             ->firstOrFail();
+
+        $bill->tenant?->setAppends(['logo_url']);
 
         return response()->json([
             'bill_number' => $bill->bill_number,
