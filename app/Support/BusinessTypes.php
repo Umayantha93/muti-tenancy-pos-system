@@ -138,7 +138,7 @@ class BusinessTypes
             ],
             default => [
                 ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge'],
-                ['value' => 'part', 'label' => 'Inventory part', 'kind' => 'stock'],
+                ['value' => 'part', 'label' => 'Inventory', 'kind' => 'stock'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
         };
