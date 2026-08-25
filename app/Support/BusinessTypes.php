@@ -6,9 +6,15 @@ class BusinessTypes
 {
     public const GARAGE = 'garage';
 
+    public const TYRE = 'tyre';
+
+    public const DEVICE_REPAIR = 'device_repair';
+
     public const PHOTOGRAPHY = 'photography';
 
     public const CLOTHING = 'clothing';
+
+    public const SALON = 'salon';
 
     public const COTTAGE = 'cottage';
 
@@ -17,7 +23,10 @@ class BusinessTypes
      */
     public static function all(): array
     {
-        return [self::GARAGE, self::PHOTOGRAPHY, self::CLOTHING, self::COTTAGE];
+        return [
+            self::GARAGE, self::TYRE, self::DEVICE_REPAIR,
+            self::PHOTOGRAPHY, self::CLOTHING, self::SALON, self::COTTAGE,
+        ];
     }
 
     /**
@@ -27,10 +36,16 @@ class BusinessTypes
     {
         $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'reports'];
 
+        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers'], $shared);
+        $retailFamily = array_merge(['retail_pos', 'product_catalog', 'suppliers'], $shared);
+
         return [
-            self::GARAGE => array_merge(['admit_vehicle', 'parts_inventory'], $shared),
+            self::GARAGE => $garageFamily,
+            self::TYRE => $garageFamily,
+            self::DEVICE_REPAIR => $garageFamily,
             self::PHOTOGRAPHY => array_merge(['photo_bookings', 'photo_packages'], $shared),
-            self::CLOTHING => array_merge(['retail_pos', 'product_catalog'], $shared),
+            self::CLOTHING => $retailFamily,
+            self::SALON => array_merge(['photo_bookings', 'photo_packages', 'retail_pos', 'product_catalog'], $shared),
             self::COTTAGE => array_merge(['cottage_rooms', 'cottage_stays'], $shared),
         ];
     }
@@ -58,9 +73,10 @@ class BusinessTypes
     public static function billPrefix(string $type): string
     {
         return match ($type) {
-            self::PHOTOGRAPHY => 'ORD',
+            self::PHOTOGRAPHY, self::SALON => 'ORD',
             self::CLOTHING => 'SALE',
             self::COTTAGE => 'STAY',
+            self::DEVICE_REPAIR => 'REP',
             default => 'JOB',
         };
     }
@@ -69,6 +85,9 @@ class BusinessTypes
     {
         return match ($type) {
             'shop', 'supermarket' => self::CLOTHING,
+            'bike', 'three_wheel', 'auto_ac', 'detailing', 'tyre_shop' => self::TYRE,
+            'phone_repair', 'appliance' => self::DEVICE_REPAIR,
+            'spa', 'barber' => self::SALON,
             default => in_array($type, self::all(), true) ? $type : self::GARAGE,
         };
     }
@@ -85,6 +104,8 @@ class BusinessTypes
             'studio-pro',
             'retail-pro',
             'stay-pro',
+            'salon-pro',
+            'repair-pro',
             'Growth',
             'Trial',
             'Custom',
@@ -105,6 +126,8 @@ class BusinessTypes
             self::PHOTOGRAPHY => 'studio-pro',
             self::CLOTHING => 'retail-pro',
             self::COTTAGE => 'stay-pro',
+            self::SALON => 'salon-pro',
+            self::DEVICE_REPAIR => 'repair-pro',
             default => 'garage-pro',
         };
     }
@@ -117,6 +140,13 @@ class BusinessTypes
     public static function billItemTypes(string $businessType): array
     {
         return match ($businessType) {
+            self::SALON => [
+                ['value' => 'session', 'label' => 'Service', 'kind' => 'charge'],
+                ['value' => 'package', 'label' => 'Package', 'kind' => 'charge'],
+                ['value' => 'product', 'label' => 'Retail product', 'kind' => 'charge', 'allow_qty' => true],
+                ['value' => 'addon', 'label' => 'Add-on', 'kind' => 'charge'],
+                ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
+            ],
             self::PHOTOGRAPHY => [
                 ['value' => 'session', 'label' => 'Session / shoot', 'kind' => 'charge'],
                 ['value' => 'package', 'label' => 'Package', 'kind' => 'charge'],
@@ -134,6 +164,16 @@ class BusinessTypes
                 ['value' => 'room', 'label' => 'Room night', 'kind' => 'charge', 'allow_qty' => true],
                 ['value' => 'amenity', 'label' => 'Amenity / extras', 'kind' => 'charge'],
                 ['value' => 'meal', 'label' => 'Meals', 'kind' => 'charge', 'allow_qty' => true],
+                ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
+            ],
+            self::TYRE => [
+                ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge'],
+                ['value' => 'part', 'label' => 'Tyre / part', 'kind' => 'stock'],
+                ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
+            ],
+            self::DEVICE_REPAIR => [
+                ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge'],
+                ['value' => 'part', 'label' => 'Spare', 'kind' => 'stock'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
             default => [
@@ -171,13 +211,18 @@ class BusinessTypes
     public static function allowedBillItemTypes(string $businessType): array
     {
         $values = collect(self::billItemTypes($businessType))->pluck('value')->all();
-        if ($businessType === self::GARAGE) {
+        if (self::usesVehicleJobs($businessType)) {
             $values[] = 'customer_part';
             $values[] = 'charge';
             $values[] = 'service_addon';
         }
 
         return array_values(array_unique($values));
+    }
+
+    public static function usesVehicleJobs(string $type): bool
+    {
+        return in_array($type, [self::GARAGE, self::TYRE, self::DEVICE_REPAIR], true);
     }
 
     public static function billItemKind(string $type): string

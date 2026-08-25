@@ -32,6 +32,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Garage parts and stock', 'group' => 'Inventory', 'sort_order' => 40],
             ['key' => 'product_catalog', 'name' => 'Product catalog', 'description' => 'Clothing SKUs, sizes, and stock', 'group' => 'Inventory', 'sort_order' => 41],
             ['key' => 'cottage_rooms', 'name' => 'Rooms', 'description' => 'Cottage rooms and rates', 'group' => 'Inventory', 'sort_order' => 42],
+            ['key' => 'suppliers', 'name' => 'Suppliers', 'description' => 'Supplier directory and goods received notes', 'group' => 'Inventory', 'sort_order' => 43],
             ['key' => 'employees_management', 'name' => 'Team', 'description' => 'Employee profiles and records', 'group' => 'People', 'sort_order' => 50],
             ['key' => 'attendance', 'name' => 'Attendance', 'description' => 'Punch and monthly attendance', 'group' => 'People', 'sort_order' => 60],
             ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll', 'group' => 'People', 'sort_order' => 70],

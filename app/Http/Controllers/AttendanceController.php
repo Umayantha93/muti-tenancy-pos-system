@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Attendance;
 use App\Models\Employee;
+use App\Services\OvertimeCalculator;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -100,7 +101,7 @@ class AttendanceController extends Controller
         return DB::transaction(function () use ($employee, $data) {
             $checkIn = Carbon::parse($data['check_in']);
             $checkOut = isset($data['check_out']) && $data['check_out'] ? Carbon::parse($data['check_out']) : null;
-            $hours = $checkOut ? round($checkIn->diffInMinutes($checkOut) / 60, 2) : 0;
+            $overtime = app(OvertimeCalculator::class)->forPunch($employee, $checkIn, $checkOut);
 
             $attendance = Attendance::where('employee_id', $employee->id)
                 ->whereBetween('date', [$checkIn->copy()->startOfDay(), $checkIn->copy()->endOfDay()])
@@ -109,8 +110,8 @@ class AttendanceController extends Controller
             $attendance->fill([
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,
-                'hours_worked' => $hours,
-                'overtime_hours' => max(0, $hours - 8),
+                'hours_worked' => $overtime['hours_worked'],
+                'overtime_hours' => $overtime['overtime_hours'],
                 'source' => $data['source'] ?? 'manual',
             ])->save();
 

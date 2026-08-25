@@ -16,12 +16,12 @@ class BillShareController extends Controller
             ->where('share_token', $token)
             ->with([
                 'customer' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name', 'phone', 'address']),
-                'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number']),
+                'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
                 'items' => fn ($query) => $query->withoutGlobalScopes()->select([
                     'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_total',
                 ]),
                 'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
-                'tenant:id,business_name,business_type,logo,address,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
+                'tenant:id,business_name,business_type,logo,address,tin,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
             ])
             ->firstOrFail();
 
@@ -33,6 +33,10 @@ class BillShareController extends Controller
             'status' => $bill->status,
             'subtotal' => $bill->subtotal,
             'total_deductions' => $bill->total_deductions,
+            'vat_rate' => $bill->vat_rate,
+            'sscl_rate' => $bill->sscl_rate,
+            'vat_amount' => $bill->vat_amount,
+            'sscl_amount' => $bill->sscl_amount,
             'amount_paid' => $bill->amount_paid,
             'balance_due' => $bill->balance_due,
             'mileage' => $bill->mileage,

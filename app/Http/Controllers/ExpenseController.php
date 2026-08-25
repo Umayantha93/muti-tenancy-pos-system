@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Expense;
+use App\Models\ExpenseSettlement;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ExpenseController extends Controller
 {
@@ -44,13 +46,42 @@ class ExpenseController extends Controller
     {
         abort_unless($expense->isCredit(), 422, 'This expense is not on supplier credit.');
 
-        $expense->update([
-            'payment_status' => Expense::STATUS_PAID,
-            'settled_at' => now(),
-            'updated_by' => $request->user()->id,
-        ]);
+        $remaining = $expense->remainingAmount();
+        abort_if($remaining <= 0, 422, 'This credit purchase is already settled.');
 
-        return $this->moneyJson($expense->refresh());
+        $data = $request->validate([
+            'amount' => ['nullable', 'numeric', 'gt:0'],
+            'settled_on' => ['nullable', 'date'],
+        ]);
+        $amount = round((float) ($data['amount'] ?? $remaining), 2);
+        abort_if($amount > $remaining, 422, 'Settle amount cannot be more than the remaining balance of LKR '.number_format($remaining, 2, '.', '').'.');
+
+        $settledOn = $data['settled_on'] ?? now()->toDateString();
+
+        $expense = DB::transaction(function () use ($expense, $amount, $settledOn, $request) {
+            ExpenseSettlement::create([
+                'expense_id' => $expense->id,
+                'amount' => $amount,
+                'settled_on' => $settledOn,
+                'created_by' => $request->user()->id,
+            ]);
+
+            $paid = round((float) $expense->amount_paid + $amount, 2);
+            $fullyPaid = $paid + 0.00001 >= (float) $expense->amount;
+            $expense->update([
+                'amount_paid' => min($paid, (float) $expense->amount),
+                'payment_status' => $fullyPaid ? Expense::STATUS_PAID : Expense::STATUS_CREDIT,
+                'settled_at' => $fullyPaid ? $settledOn : null,
+                'updated_by' => $request->user()->id,
+            ]);
+
+            return $expense->refresh()->load('settlements');
+        });
+
+        return $this->moneyJson([
+            ...$expense->toArray(),
+            'remaining' => $expense->remainingAmount(),
+        ]);
     }
 
     public function destroy(Expense $expense): JsonResponse

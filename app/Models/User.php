@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['tenant_id', 'name', 'email', 'password', 'role', 'status', 'is_secondary_view'])]
+#[Fillable(['tenant_id', 'employee_id', 'name', 'email', 'password', 'role', 'status', 'is_secondary_view'])]
 #[Hidden(['password', 'remember_token', 'is_secondary_view'])]
 class User extends Authenticatable
 {
@@ -22,7 +22,13 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
     public function tenant(): BelongsTo { return $this->belongsTo(Tenant::class); }
+    public function employee(): BelongsTo { return $this->belongsTo(Employee::class); }
     public function permissions(): BelongsToMany { return $this->belongsToMany(Feature::class, 'user_permissions')->withPivot('can_access')->withTimestamps(); }
+
+    public function linkedEmployee(): ?Employee
+    {
+        return $this->employee;
+    }
 
     public function usesSecondaryFinancialView(): bool
     {
