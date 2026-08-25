@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Models\Tenant;
+use App\Services\BillCalculator;
 use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -24,6 +26,10 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'owe_in_due_date',
     'closed_at',
     'subtotal',
+    'vat_rate',
+    'sscl_rate',
+    'vat_amount',
+    'sscl_amount',
     'total_deductions',
     'amount_paid',
     'balance_due',
@@ -47,6 +53,12 @@ class Bill extends Model
             if (! $bill->share_token) {
                 $bill->share_token = static::newShareToken();
             }
+            if ($bill->vat_rate === null || $bill->sscl_rate === null) {
+                $tenant = $bill->tenant_id ? Tenant::query()->find($bill->tenant_id) : auth()->user()?->tenant;
+                $rates = BillCalculator::snapshotRates($tenant);
+                $bill->vat_rate ??= $rates['vat_rate'];
+                $bill->sscl_rate ??= $rates['sscl_rate'];
+            }
         });
     }
 
@@ -57,6 +69,10 @@ class Bill extends Model
             'owe_in_due_date' => 'date:Y-m-d',
             'closed_at' => 'datetime',
             'subtotal' => 'decimal:2',
+            'vat_rate' => 'decimal:2',
+            'sscl_rate' => 'decimal:2',
+            'vat_amount' => 'decimal:2',
+            'sscl_amount' => 'decimal:2',
             'total_deductions' => 'decimal:2',
             'amount_paid' => 'decimal:2',
             'balance_due' => 'decimal:2',

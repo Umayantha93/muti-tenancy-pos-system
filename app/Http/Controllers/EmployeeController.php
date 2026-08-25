@@ -12,6 +12,7 @@ class EmployeeController extends Controller
     public function index(Request $request): JsonResponse
     {
         return $this->moneyJson(Employee::query()
+            ->with('defaultShift:id,name,start_time,end_time,paid_hours')
             ->when($request->boolean('active_only'), fn ($query) => $query->where('active', true))
             ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
             ->orderBy('name')->paginate($request->integer('per_page', 20)));
@@ -39,6 +40,13 @@ class EmployeeController extends Controller
         return response()->json(null, 204);
     }
 
+    public function activate(Employee $employee): JsonResponse
+    {
+        $employee->update(['active' => true]);
+
+        return response()->json($employee->refresh());
+    }
+
     private function validated(Request $request, ?Employee $employee = null): array
     {
         return $request->validate([
@@ -50,6 +58,14 @@ class EmployeeController extends Controller
             'overtime_hourly_rate' => ['nullable', 'numeric', 'min:0'],
             'fingerprint_id' => [$employee ? 'sometimes' : 'required', 'string', 'max:100', Rule::unique('employees')->where('tenant_id', $request->user()->tenant_id)->ignore($employee)],
             'active' => ['sometimes', 'boolean'],
+            'epf_enabled' => ['sometimes', 'boolean'],
+            'paid_leave_days_per_year' => ['nullable', 'integer', 'min:0', 'max:366'],
+            'default_shift_id' => ['nullable', Rule::exists('work_shifts', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'allowances' => ['nullable', 'array'],
+            'allowances.*.name' => ['required_with:allowances', 'string', 'max:80'],
+            'allowances.*.amount' => ['required_with:allowances', 'numeric', 'min:0'],
+            'allowances.*.kind' => ['nullable', Rule::in(['fixed', 'attendance'])],
+            'allowances.*.min_days' => ['nullable', 'integer', 'min:0', 'max:31'],
         ]);
     }
 }

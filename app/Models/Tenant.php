@@ -20,7 +20,13 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'contact_phone',
     'contact_phones',
     'address',
+    'tin',
+    'vat_registered',
+    'sscl_registered',
+    'vat_rate',
+    'sscl_rate',
     'status',
+    'demo_ends_at',
     'dual_financial_view_enabled',
     'plan',
     'payment_plan',
@@ -31,7 +37,7 @@ class Tenant extends Model
 {
     use SoftDeletes;
 
-    protected $appends = ['logo_url', 'payment_due_soon'];
+    protected $appends = ['logo_url', 'payment_due_soon', 'demo_days_left', 'is_demo'];
 
     protected $hidden = ['dual_financial_view_enabled'];
 
@@ -42,7 +48,40 @@ class Tenant extends Model
             'owner_phones' => 'array',
             'plan_amount' => 'decimal:2',
             'dual_financial_view_enabled' => 'boolean',
+            'vat_registered' => 'boolean',
+            'sscl_registered' => 'boolean',
+            'vat_rate' => 'decimal:2',
+            'sscl_rate' => 'decimal:2',
+            'demo_ends_at' => 'datetime',
         ];
+    }
+
+    public function expireDemoIfNeeded(): bool
+    {
+        if ($this->status !== 'active' || ! $this->demo_ends_at || $this->demo_ends_at->isFuture()) {
+            return false;
+        }
+
+        $this->update(['status' => 'inactive']);
+        $this->users()->each(fn (User $user) => $user->tokens()->delete());
+
+        return true;
+    }
+
+    protected function isDemo(): Attribute
+    {
+        return Attribute::get(fn () => $this->demo_ends_at !== null);
+    }
+
+    protected function demoDaysLeft(): Attribute
+    {
+        return Attribute::get(function () {
+            if (! $this->demo_ends_at || $this->status !== 'active') {
+                return null;
+            }
+
+            return (int) now()->startOfDay()->diffInDays($this->demo_ends_at->copy()->endOfDay(), false);
+        });
     }
 
     public function secondaryUser(): ?User

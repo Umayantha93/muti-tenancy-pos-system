@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\Expense;
+use App\Models\ExpenseSettlement;
 use App\Models\Payroll;
 use App\Services\BillProfitAnalyzer;
 use App\Services\MonetaryView;
@@ -63,7 +64,7 @@ class BalanceSheetController extends Controller
                 ));
 
             $manualExpenses = Expense::postedIn($month, $year);
-            $manualTotal = (float) (clone $manualExpenses)->sum('amount');
+            $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
             $salaryTotal = (float) Payroll::where('year', $year)->where('month', $month)->sum('net_salary');
             $income = round((float) $payments + (float) $advances, 2);
             $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal), 2);
@@ -79,6 +80,13 @@ class BalanceSheetController extends Controller
                     ->pluck('total', 'category')
                     ->map(fn ($amount) => $view->scaleExpense((float) $amount))
                     ->put('salary', $view->scaleExpense($salaryTotal));
+                $settlements = $this->settlementsTotal($month, $year);
+                if ($settlements > 0) {
+                    $result['expense_breakdown']['inventory'] = round(
+                        (float) ($result['expense_breakdown']['inventory'] ?? 0) + $view->scaleExpense($settlements),
+                        2
+                    );
+                }
             }
 
             return $result;
@@ -87,7 +95,7 @@ class BalanceSheetController extends Controller
         $payments = (float) BillPayment::whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
         $advances = (float) BillItem::where('type', 'advance')->whereYear('created_at', $year)->whereMonth('created_at', $month)->sum('line_total');
         $manualExpenses = Expense::postedIn($month, $year);
-        $manualTotal = (float) (clone $manualExpenses)->sum('amount');
+        $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
         $salaryTotal = (float) Payroll::where('year', $year)->where('month', $month)->sum('net_salary');
         $income = $payments + $advances;
         $expenses = $manualTotal + $salaryTotal;
@@ -98,6 +106,13 @@ class BalanceSheetController extends Controller
                 ->selectRaw('category, SUM(amount) as total')->groupBy('category')
                 ->pluck('total', 'category')->map(fn ($amount) => (float) $amount)
                 ->put('salary', $salaryTotal);
+            $settlements = $this->settlementsTotal($month, $year);
+            if ($settlements > 0) {
+                $result['expense_breakdown']['inventory'] = round(
+                    (float) ($result['expense_breakdown']['inventory'] ?? 0) + $settlements,
+                    2
+                );
+            }
         }
 
         return $result;
@@ -190,6 +205,29 @@ class BalanceSheetController extends Controller
                 ]);
             });
 
+        ExpenseSettlement::query()
+            ->with('expense:id,description,category')
+            ->whereYear('settled_on', $year)
+            ->whereMonth('settled_on', $month)
+            ->orderBy('settled_on')
+            ->get()
+            ->each(function (ExpenseSettlement $settlement) use ($rows, $view) {
+                $amount = $view->active()
+                    ? $view->scaleExpense((float) $settlement->amount)
+                    : (float) $settlement->amount;
+
+                $rows->push([
+                    'date' => $settlement->settled_on?->toDateString(),
+                    'sort_at' => ($settlement->settled_on?->format('Y-m-d') ?? '').' 12:15:00',
+                    'description' => ($settlement->expense?->description ?: 'Supplier credit').' · settlement',
+                    'reference' => null,
+                    'category' => ucwords(str_replace('_', ' ', $settlement->expense?->category ?: 'inventory')),
+                    'type' => 'expense',
+                    'debit' => $amount,
+                    'credit' => 0.0,
+                ]);
+            });
+
         Expense::query()
             ->credit()
             ->whereYear('expense_date', $year)
@@ -197,9 +235,9 @@ class BalanceSheetController extends Controller
             ->orderBy('expense_date')
             ->get()
             ->each(function (Expense $expense) use ($rows, $view) {
-                $amount = $view->active()
-                    ? $view->scaleExpense((float) $expense->amount)
-                    : (float) $expense->amount;
+                $remaining = $view->active()
+                    ? $view->scaleExpense($expense->remainingAmount())
+                    : $expense->remainingAmount();
 
                 $rows->push([
                     'date' => $expense->expense_date?->toDateString() ?? $expense->expense_date,
@@ -208,7 +246,7 @@ class BalanceSheetController extends Controller
                     'reference' => $expense->due_date?->toDateString(),
                     'category' => 'Inventory payable',
                     'type' => 'payable',
-                    'debit' => $amount,
+                    'debit' => $remaining,
                     'credit' => 0.0,
                 ]);
             });
@@ -292,29 +330,55 @@ class BalanceSheetController extends Controller
     {
         $items = Expense::query()
             ->credit()
+            ->with('settlements')
             ->orderBy('due_date')
             ->orderBy('expense_date')
             ->get()
             ->map(function (Expense $expense) use ($view) {
-                $amount = $view->active()
+                $remaining = $view->active()
+                    ? $view->scaleExpense($expense->remainingAmount())
+                    : $expense->remainingAmount();
+                $original = $view->active()
                     ? $view->scaleExpense((float) $expense->amount)
                     : (float) $expense->amount;
+                $paid = $view->active()
+                    ? $view->scaleExpense((float) $expense->amount_paid)
+                    : (float) $expense->amount_paid;
 
                 return [
                     'id' => $expense->id,
                     'description' => $expense->description,
-                    'amount' => round($amount, 2),
+                    'amount' => round($original, 2),
+                    'amount_paid' => round($paid, 2),
+                    'remaining' => round($remaining, 2),
                     'expense_date' => $expense->expense_date?->toDateString(),
                     'due_date' => $expense->due_date?->toDateString(),
                     'category' => $expense->category,
+                    'settlements' => $expense->settlements
+                        ->sortBy('settled_on')
+                        ->values()
+                        ->map(fn (ExpenseSettlement $row) => [
+                            'id' => $row->id,
+                            'amount' => round((float) $row->amount, 2),
+                            'settled_on' => $row->settled_on?->toDateString(),
+                        ])
+                        ->all(),
                 ];
             })
             ->all();
 
         return [
-            'payables_total' => round(collect($items)->sum('amount'), 2),
+            'payables_total' => round(collect($items)->sum('remaining'), 2),
             'items' => $items,
         ];
+    }
+
+    private function settlementsTotal(int $month, int $year): float
+    {
+        return (float) ExpenseSettlement::query()
+            ->whereYear('settled_on', $year)
+            ->whereMonth('settled_on', $month)
+            ->sum('amount');
     }
 
     /**

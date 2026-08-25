@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['customer_id', 'number_plate', 'chassis_number', 'make', 'model', 'year'])]
+#[Fillable(['customer_id', 'asset_kind', 'number_plate', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'make', 'model', 'year'])]
 class Vehicle extends Model
 {
     use BelongsToTenant;

@@ -7,7 +7,12 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['employee_id', 'month', 'year', 'days_present', 'days_absent', 'hours_worked', 'overtime_hours', 'base_salary', 'overtime_pay', 'bonus', 'deductions', 'net_salary', 'generated_at', 'generated_by'])]
+#[Fillable([
+    'employee_id', 'month', 'year', 'days_present', 'days_absent', 'hours_worked', 'overtime_hours',
+    'base_salary', 'overtime_pay', 'allowances_total', 'target_incentive', 'gross_pay',
+    'epf_employee', 'epf_employer', 'etf_employer', 'unpaid_leave_days',
+    'bonus', 'deductions', 'net_salary', 'generated_at', 'generated_by',
+])]
 class Payroll extends Model
 {
     use BelongsToTenant;
@@ -19,6 +24,12 @@ class Payroll extends Model
             'overtime_hours' => 'decimal:2',
             'base_salary' => 'decimal:2',
             'overtime_pay' => 'decimal:2',
+            'allowances_total' => 'decimal:2',
+            'target_incentive' => 'decimal:2',
+            'gross_pay' => 'decimal:2',
+            'epf_employee' => 'decimal:2',
+            'epf_employer' => 'decimal:2',
+            'etf_employer' => 'decimal:2',
             'bonus' => 'decimal:2',
             'deductions' => 'decimal:2',
             'net_salary' => 'decimal:2',

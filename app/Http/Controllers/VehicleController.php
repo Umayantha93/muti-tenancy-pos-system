@@ -49,6 +49,11 @@ class VehicleController extends Controller
             'make' => ['nullable', 'string', 'max:100'],
             'model' => ['nullable', 'string', 'max:100'],
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
+            'asset_kind' => ['nullable', Rule::in(['vehicle', 'device'])],
+            'imei' => ['nullable', 'string', 'max:40'],
+            'tyre_size' => ['nullable', 'string', 'max:40'],
+            'axle' => ['nullable', 'string', 'max:40'],
+            'fault_description' => ['nullable', 'string', 'max:255'],
         ]);
 
         if (array_key_exists('chassis_number', $data) && ($data['chassis_number'] === null || trim((string) $data['chassis_number']) === '')) {

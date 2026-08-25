@@ -135,4 +135,33 @@ class CottageStayController extends Controller
 
         return response()->json($stay->refresh()->load(['customer', 'room', 'bill']));
     }
+
+    public function calendar(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'month' => ['nullable', 'integer', 'between:1,12'],
+            'year' => ['nullable', 'integer', 'between:2020,2100'],
+        ]);
+        $month = (int) ($data['month'] ?? now()->month);
+        $year = (int) ($data['year'] ?? now()->year);
+        $from = Carbon::create($year, $month)->startOfMonth()->toDateString();
+        $to = Carbon::create($year, $month)->endOfMonth()->toDateString();
+
+        $rooms = CottageRoom::query()->orderBy('name')->get(['id', 'name', 'status']);
+        $stays = CottageStay::query()
+            ->with(['customer:id,name', 'room:id,name'])
+            ->whereNotIn('status', ['cancelled'])
+            ->whereDate('check_out', '>', $from)
+            ->whereDate('check_in', '<=', $to)
+            ->get();
+
+        return response()->json([
+            'month' => $month,
+            'year' => $year,
+            'from' => $from,
+            'to' => $to,
+            'rooms' => $rooms,
+            'stays' => $stays,
+        ]);
+    }
 }

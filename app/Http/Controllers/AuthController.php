@@ -18,6 +18,11 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => ['The provided credentials are incorrect.']]);
         }
 
+        if ($user->role !== 'super_admin' && $user->tenant) {
+            $user->tenant->expireDemoIfNeeded();
+            $user->unsetRelation('tenant');
+        }
+
         if ($user->status !== 'active' || ($user->role !== 'super_admin' && $user->tenant?->status !== 'active')) {
             throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
         }
@@ -28,7 +33,7 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $user->createToken('garage-pos')->plainTextToken,
-            'user' => $user->load('tenant'),
+            'user' => $user->load(['tenant', 'employee']),
             'features' => $user->accessibleFeatureKeys(),
         ]);
     }

@@ -42,9 +42,9 @@ class BillController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $type = $request->user()->tenant?->business_type ?? BusinessTypes::GARAGE;
+        $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE));
 
-        if ($type !== BusinessTypes::GARAGE) {
+        if (! BusinessTypes::usesVehicleJobs($type)) {
             return $this->storeGeneric($request, $type);
         }
 
@@ -61,6 +61,11 @@ class BillController extends Controller
             'notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
+            'tyre_size' => ['nullable', 'string', 'max:40'],
+            'axle' => ['nullable', 'string', 'max:40'],
+            'imei' => ['nullable', 'string', 'max:40'],
+            'fault_description' => ['nullable', 'string', 'max:255'],
+            'asset_kind' => ['nullable', Rule::in(['vehicle', 'device'])],
         ]);
 
         $bill = DB::transaction(function () use ($data, $request) {
@@ -79,6 +84,11 @@ class BillController extends Controller
                 'make' => $data['make'] ?? null,
                 'model' => $data['model'] ?? null,
                 'year' => $data['year'] ?? null,
+                'asset_kind' => $data['asset_kind'] ?? 'vehicle',
+                'imei' => $data['imei'] ?? null,
+                'tyre_size' => $data['tyre_size'] ?? null,
+                'axle' => $data['axle'] ?? null,
+                'fault_description' => $data['fault_description'] ?? null,
             ];
 
             if ($chassis) {
@@ -99,7 +109,7 @@ class BillController extends Controller
                 }
             }
 
-            return $this->openBill($request, $customer->id, $data, BusinessTypes::GARAGE, $vehicle->id);
+            return $this->openBill($request, $customer->id, $data, $this->jobType($request), $vehicle->id);
         });
 
         return response()->json($bill, 201);
@@ -117,7 +127,7 @@ class BillController extends Controller
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
-        $bill = $this->openBill($request, $vehicle->customer_id, $data, BusinessTypes::GARAGE, $vehicle->id);
+        $bill = $this->openBill($request, $vehicle->customer_id, $data, $this->jobType($request), $vehicle->id);
 
         return response()->json($bill, 201);
     }
@@ -220,13 +230,18 @@ class BillController extends Controller
             'odometer' => $data['odometer'] ?? null,
             'mileage' => $data['mileage'] ?? null,
             'notes' => $data['notes'] ?? null,
-            'job_kind' => $type === BusinessTypes::GARAGE
+            'job_kind' => BusinessTypes::usesVehicleJobs($type)
                 ? ($data['job_kind'] ?? Bill::JOB_KIND_REPAIR)
                 : Bill::JOB_KIND_REPAIR,
             'source_type' => $sourceType,
             'source_id' => $sourceId,
             'created_by' => $request->user()->id,
         ])->load(['customer', 'vehicle', 'items', 'payments']);
+    }
+
+    private function jobType(Request $request): string
+    {
+        return BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE));
     }
 
     private function isPaidBill(Bill $bill): bool

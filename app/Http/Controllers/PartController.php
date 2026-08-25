@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Expense;
 use App\Models\Part;
+use App\Models\StockReceipt;
+use App\Models\StockReceiptItem;
+use App\Support\InventoryCosting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -49,26 +52,47 @@ class PartController extends Controller
 
         $headers = $this->importHeaders();
         $sheet->fromArray($headers, null, 'A1');
+        // Two sample rows: paid (no due date) and credit (due_date required).
+        $creditDueDate = now()->addDays(30)->toDateString();
         $sheet->fromArray([
-            'Oil Filter',
-            'OF-001',
-            '8901234567890',
-            'Bosch',
-            'Filters',
-            'Axio',
-            '2018',
-            '1500.00',
-            '900.00',
-            '10',
-            'Replace this sample row with your parts',
+            [
+                'Oil Filter',
+                'OF-001',
+                '8901234567890',
+                'Bosch',
+                'Filters',
+                'Axio',
+                '2018',
+                '1500.00',
+                '900.00',
+                '10',
+                'SAMPLE paid — money already paid; leave due_date blank',
+                'paid',
+                '',
+            ],
+            [
+                'Brake Pads',
+                'BP-002',
+                '8901234567891',
+                'Nissin',
+                'Braking',
+                'Vezel',
+                '2019',
+                '7800.00',
+                '4500.00',
+                '5',
+                'SAMPLE credit — supplier owe; due_date required (YYYY-MM-DD)',
+                'credit',
+                $creditDueDate,
+            ],
         ], null, 'A2');
 
-        $sheet->getStyle('A1:K1')->getFont()->setBold(true);
-        $sheet->getStyle('A1:K1')->getFill()
+        $sheet->getStyle('A1:M1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:M1')->getFill()
             ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setRGB('167C73');
-        $sheet->getStyle('A1:K1')->getFont()->getColor()->setRGB('FFFFFF');
-        foreach (range('A', 'K') as $column) {
+        $sheet->getStyle('A1:M1')->getFont()->getColor()->setRGB('FFFFFF');
+        foreach (range('A', 'M') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
         $sheet->freezePane('A2');
@@ -76,13 +100,17 @@ class PartController extends Controller
         $instructions = $spreadsheet->createSheet();
         $instructions->setTitle('Instructions');
         $instructions->fromArray([
-            ['Use the Parts sheet only. Keep the header row exactly as provided.'],
-            ['Required columns: name, brand, type, price, cost_price, stock_qty'],
-            ['Optional columns: sku, barcode, model, year, description'],
-            ['Expense amount for each row = cost_price × stock_qty (created one expense per imported row when stock_qty > 0 and cost_price > 0).'],
-            ['If barcode or sku already exists, stock_qty is added to that part (restock) and one expense is created for the added quantity.'],
-            ['Delete the sample row before importing your data.'],
-            ['Save the file as .xlsx before uploading.'],
+            ['Use the Parts sheet. Keep these required headers: name, brand, type, price, cost_price, stock_qty.'],
+            ['Optional columns: sku, barcode, model, year, description, payment_status, due_date.'],
+            ['payment_status: paid or debit = money already paid (hits Finance now). credit = supplier owe / inventory on credit.'],
+            ['Sample row A2 (Oil Filter): payment_status=paid, due_date blank — paid rows do not need a due date.'],
+            ['Sample row A3 (Brake Pads): payment_status=credit, due_date filled (YYYY-MM-DD) — credit rows require a due date.'],
+            ['due_date is required on a credit row (YYYY-MM-DD). You can also set a default paid/credit when uploading.'],
+            ['Expense amount for each row = cost_price × stock_qty (created when stock_qty > 0 and cost_price > 0).'],
+            ['If barcode or sku already exists, stock_qty is added and cost_price becomes a weighted average of old stock + this row’s cost_price × qty.'],
+            ['Expense for each row still uses this row’s cost_price × stock_qty (the actual purchase), not the blended catalogue cost.'],
+            ['Older templates without payment_status still work — those rows follow the upload default (paid unless you choose credit).'],
+            ['Delete both SAMPLE rows before importing your real data. Save as .xlsx.'],
         ], null, 'A1');
         $instructions->getColumnDimension('A')->setWidth(110);
 
@@ -99,7 +127,11 @@ class PartController extends Controller
     {
         $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:5120'],
+            'payment_status' => ['nullable', Rule::in(['paid', 'credit', 'debit'])],
+            'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
         ]);
+        $defaultPayment = $this->normalizePaymentStatus($request->input('payment_status', 'paid'));
+        $defaultDueDate = $request->input('due_date');
 
         $path = $request->file('file')->getRealPath();
         $spreadsheet = IOFactory::load($path);
@@ -110,10 +142,19 @@ class PartController extends Controller
         }
 
         $headers = array_map(fn ($value) => $this->normalizeHeader((string) $value), array_shift($rows));
-        $expected = $this->importHeaders();
-        if ($headers !== $expected) {
+        $headerIndex = [];
+        foreach ($headers as $columnIndex => $key) {
+            if ($key !== '') {
+                $headerIndex[$key] = $columnIndex;
+            }
+        }
+        $missing = array_values(array_filter(
+            $this->requiredImportHeaders(),
+            fn (string $key) => ! array_key_exists($key, $headerIndex)
+        ));
+        if ($missing) {
             throw ValidationException::withMessages([
-                'file' => ['Column headers must match the template exactly: '.implode(', ', $expected)],
+                'file' => ['Missing required columns: '.implode(', ', $missing).'. Download a fresh template.'],
             ]);
         }
 
@@ -129,8 +170,9 @@ class PartController extends Controller
             }
 
             $values = [];
-            foreach ($expected as $columnIndex => $key) {
-                $values[$key] = isset($row[$columnIndex]) ? trim((string) $row[$columnIndex]) : '';
+            foreach (array_unique([...$this->importHeaders(), 'payment_status', 'due_date']) as $key) {
+                $columnIndex = $headerIndex[$key] ?? null;
+                $values[$key] = $columnIndex !== null && isset($row[$columnIndex]) ? trim((string) $row[$columnIndex]) : '';
             }
 
             $rowErrors = [];
@@ -188,6 +230,17 @@ class PartController extends Controller
                 }
             }
 
+            $rowPayment = $values['payment_status'] !== ''
+                ? $this->normalizePaymentStatus($values['payment_status'])
+                : $defaultPayment;
+            if ($values['payment_status'] !== '' && ! in_array(strtolower($values['payment_status']), ['paid', 'debit', 'credit', 'cash'], true)) {
+                $rowErrors[] = 'payment_status must be paid, debit, or credit';
+            }
+            $rowDue = $values['due_date'] !== '' ? $values['due_date'] : $defaultDueDate;
+            if ($rowPayment === 'credit' && ! $rowDue) {
+                $rowErrors[] = 'due_date is required for credit / supplier-owe rows';
+            }
+
             if ($rowErrors) {
                 $errors[] = "Row {$line}: ".implode('; ', $rowErrors);
 
@@ -207,6 +260,8 @@ class PartController extends Controller
                 'cost_price' => round((float) $values['cost_price'], 2),
                 'stock_qty' => (int) $values['stock_qty'],
                 'description' => $values['description'] !== '' ? $values['description'] : null,
+                'payment_status' => $rowPayment,
+                'due_date' => $rowPayment === 'credit' ? $rowDue : null,
             ];
         }
 
@@ -237,6 +292,12 @@ class PartController extends Controller
                 $unitCost = $row['cost_price'];
 
                 if ($existing) {
+                    $blendedCost = InventoryCosting::weightedAverageCost(
+                        (int) $existing->stock_qty,
+                        $existing->cost_price,
+                        $qty,
+                        $unitCost,
+                    );
                     $existing->update([
                         'name' => $row['name'],
                         'sku' => $row['sku'] ?? $existing->sku,
@@ -246,7 +307,7 @@ class PartController extends Controller
                         'model' => $row['model'],
                         'year' => $row['year'],
                         'price' => $row['price'],
-                        'cost_price' => $unitCost,
+                        'cost_price' => $blendedCost,
                         'description' => $row['description'],
                         'stock_qty' => $existing->stock_qty + $qty,
                     ]);
@@ -269,7 +330,15 @@ class PartController extends Controller
                     $created++;
                 }
 
-                $expense = $this->recordPurchaseExpense($request, $part, $qty, $unitCost);
+                $expense = $this->recordPurchaseExpense(
+                    $request,
+                    $part,
+                    $qty,
+                    $unitCost,
+                    null,
+                    $row['payment_status'] ?? 'paid',
+                    $row['due_date'] ?? null,
+                );
                 if ($expense) {
                     $expenses++;
                     $expenseTotal += (float) $expense->amount;
@@ -350,6 +419,9 @@ class PartController extends Controller
         if ($request->input('due_date') === '') {
             $request->merge(['due_date' => null]);
         }
+        if ($request->input('supplier_id') === '' || $request->input('supplier_id') === '0') {
+            $request->merge(['supplier_id' => null]);
+        }
 
         $data = $request->validate([
             'quantity' => ['required', 'integer', 'gt:0'],
@@ -357,22 +429,31 @@ class PartController extends Controller
             'expense_date' => ['nullable', 'date'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
             'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
+            'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
         [$part, $expense] = DB::transaction(function () use ($data, $part, $request) {
+            $qty = (int) $data['quantity'];
             $unitCost = (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
-            $part->increment('stock_qty', $data['quantity']);
-            if ($data['unit_cost'] !== null) {
-                $part->update(['cost_price' => $unitCost]);
-            }
+            $blendedCost = InventoryCosting::weightedAverageCost(
+                (int) $part->stock_qty,
+                $part->cost_price,
+                $qty,
+                $unitCost,
+            );
+            $part->update([
+                'stock_qty' => (int) $part->stock_qty + $qty,
+                'cost_price' => $blendedCost,
+            ]);
             $expense = $this->recordPurchaseExpense(
                 $request,
                 $part->refresh(),
-                (int) $data['quantity'],
+                $qty,
                 $unitCost,
                 $data['expense_date'] ?? null,
                 $data['payment_status'] ?? 'paid',
                 $data['due_date'] ?? null,
+                $data['supplier_id'] ?? null,
             );
 
             return [$part->refresh(), $expense];
@@ -463,6 +544,7 @@ class PartController extends Controller
         ?string $expenseDate = null,
         string $paymentStatus = 'paid',
         ?string $dueDate = null,
+        ?int $supplierId = null,
     ): ?Expense {
         if ($quantity <= 0 || $unitCost <= 0) {
             return null;
@@ -471,7 +553,7 @@ class PartController extends Controller
         $paid = $paymentStatus !== Expense::STATUS_CREDIT;
         $date = $expenseDate ?? now()->toDateString();
 
-        return Expense::create([
+        $expense = Expense::create([
             'category' => 'inventory',
             'description' => $paid
                 ? "Stock purchase: {$part->name} × {$quantity}"
@@ -482,7 +564,30 @@ class PartController extends Controller
             'due_date' => $paid ? null : $dueDate,
             'settled_at' => $paid ? $date : null,
             'created_by' => $request->user()->id,
+            'supplier_id' => $supplierId,
         ]);
+
+        if ($supplierId) {
+            $count = StockReceipt::query()->count() + 1;
+            $receipt = StockReceipt::create([
+                'supplier_id' => $supplierId,
+                'expense_id' => $expense->id,
+                'receipt_number' => 'GRN-'.str_pad((string) $count, 4, '0', STR_PAD_LEFT),
+                'received_at' => $date,
+                'payment_status' => $paid ? 'paid' : 'credit',
+                'due_date' => $paid ? null : $dueDate,
+            ]);
+            StockReceiptItem::create([
+                'stock_receipt_id' => $receipt->id,
+                'item_type' => 'part',
+                'part_id' => $part->id,
+                'quantity' => $quantity,
+                'unit_cost' => $unitCost,
+            ]);
+            $expense->update(['stock_receipt_id' => $receipt->id]);
+        }
+
+        return $expense;
     }
 
     /**
@@ -490,7 +595,22 @@ class PartController extends Controller
      */
     private function importHeaders(): array
     {
-        return ['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'description'];
+        return ['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'description', 'payment_status', 'due_date'];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function requiredImportHeaders(): array
+    {
+        return ['name', 'brand', 'type', 'price', 'cost_price', 'stock_qty'];
+    }
+
+    private function normalizePaymentStatus(?string $value): string
+    {
+        $normalized = strtolower(trim((string) $value));
+
+        return in_array($normalized, ['credit'], true) ? 'credit' : 'paid';
     }
 
     private function normalizeHeader(string $value): string

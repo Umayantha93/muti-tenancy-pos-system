@@ -13,7 +13,8 @@ class EnsureTenantIsActive
         $user = $request->user();
 
         if ($user?->role !== 'super_admin') {
-            abort_unless($user?->tenant && $user->tenant->status === 'active', 403, 'This business account is inactive.');
+            $user?->tenant?->expireDemoIfNeeded();
+            abort_unless($user?->tenant && $user->tenant->fresh()?->status === 'active', 403, 'This business account is inactive.');
         }
 
         return $next($request);

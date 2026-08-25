@@ -91,6 +91,11 @@ class SuperAdminTenantController extends Controller
             'contact_email' => ['nullable', 'email'],
             'contact_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'address' => ['nullable', 'string', 'max:255'],
+            'tin' => ['nullable', 'string', 'max:32'],
+            'vat_registered' => ['sometimes', 'boolean'],
+            'sscl_registered' => ['sometimes', 'boolean'],
+            'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'sscl_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'password' => ['required', 'string', 'min:8'],
             'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
             'payment_plan' => ['required', Rule::in(BusinessTypes::paymentPlans())],
@@ -98,6 +103,8 @@ class SuperAdminTenantController extends Controller
             'logo' => ['nullable', 'image', 'max:5120'],
             'features' => ['nullable', 'array'],
             'features.*' => ['string', 'exists:features,key'],
+            'demo_access' => ['sometimes', 'boolean'],
+            'demo_days' => ['nullable', 'integer', 'min:1', 'max:90'],
         ]);
         $data['features'] = $features ?: ($data['features'] ?? null);
         $data['plan'] = $data['plan'] ?? BusinessTypes::defaultPlan($data['business_type']);
@@ -106,11 +113,16 @@ class SuperAdminTenantController extends Controller
         $data['contact_phones'] = $phones['contact_phones'];
         $data['owner_phone'] = $phones['owner_phone'];
         $data['contact_phone'] = $phones['contact_phone'] ?: $phones['owner_phone'];
-        $data['contact_email'] = $data['contact_email'] ?: $data['owner_email'];
+        $data['contact_email'] = ($data['contact_email'] ?? null) ?: $data['owner_email'];
 
         $tenant = DB::transaction(function () use ($data, $request) {
-            $payload = collect($data)->except(['password', 'features', 'logo'])->all();
-            $tenant = Tenant::create([...$payload, 'status' => 'active']);
+            $payload = collect($data)->except(['password', 'features', 'logo', 'demo_access', 'demo_days'])->all();
+            $demo = $request->boolean('demo_access');
+            $tenant = Tenant::create([
+                ...$payload,
+                'status' => 'active',
+                'demo_ends_at' => $demo ? now()->addDays((int) ($data['demo_days'] ?? 21))->endOfDay() : null,
+            ]);
             if ($request->hasFile('logo')) {
                 $tenant->update(['logo' => $request->file('logo')->store('tenants', 'public')]);
             }
@@ -128,7 +140,7 @@ class SuperAdminTenantController extends Controller
             $tenant->features()->sync($featureIds->mapWithKeys(fn ($id) => [$id => ['is_enabled' => true]]));
             $this->audit($request, 'tenant.created', $tenant, ['business_name' => $tenant->business_name]);
 
-            if ($data['business_type'] === BusinessTypes::GARAGE) {
+            if (BusinessTypes::usesVehicleJobs($data['business_type'])) {
                 ServiceAddon::seedDefaultsFor((int) $tenant->id);
             }
 
@@ -183,6 +195,11 @@ class SuperAdminTenantController extends Controller
             'contact_email' => ['nullable', 'email'],
             'contact_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'address' => ['nullable', 'string', 'max:255'],
+            'tin' => ['nullable', 'string', 'max:32'],
+            'vat_registered' => ['sometimes', 'boolean'],
+            'sscl_registered' => ['sometimes', 'boolean'],
+            'vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'sscl_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
             'payment_plan' => ['sometimes', Rule::in(BusinessTypes::paymentPlans())],
             'plan_amount' => ['nullable', 'numeric', 'min:0'],
@@ -370,12 +387,27 @@ class SuperAdminTenantController extends Controller
 
     public function activate(Request $request, Tenant $tenant): JsonResponse
     {
-        return $this->status($request, $tenant, 'active');
+        return $this->status($request, $tenant, 'active', clearDemo: true);
     }
 
     public function deactivate(Request $request, Tenant $tenant): JsonResponse
     {
         return $this->status($request, $tenant, 'inactive');
+    }
+
+    public function grantDemo(Request $request, Tenant $tenant): JsonResponse
+    {
+        $data = $request->validate([
+            'days' => ['nullable', 'integer', 'min:1', 'max:90'],
+        ]);
+        $days = (int) ($data['days'] ?? 21);
+        $tenant->update([
+            'status' => 'active',
+            'demo_ends_at' => now()->addDays($days)->endOfDay(),
+        ]);
+        $this->audit($request, 'tenant.demo_granted', $tenant, ['days' => $days, 'demo_ends_at' => $tenant->demo_ends_at]);
+
+        return response()->json($tenant->refresh());
     }
 
     public function features(Request $request, Tenant $tenant): JsonResponse
@@ -441,9 +473,13 @@ class SuperAdminTenantController extends Controller
         return response()->json($user->makeVisible(['is_secondary_view']), 201);
     }
 
-    private function status(Request $request, Tenant $tenant, string $status): JsonResponse
+    private function status(Request $request, Tenant $tenant, string $status, bool $clearDemo = false): JsonResponse
     {
-        $tenant->update(['status' => $status]);
+        $payload = ['status' => $status];
+        if ($clearDemo && $status === 'active') {
+            $payload['demo_ends_at'] = null;
+        }
+        $tenant->update($payload);
         $tenant->users()->each(fn (User $user) => $user->tokens()->delete());
         $this->audit($request, "tenant.{$status}", $tenant);
 

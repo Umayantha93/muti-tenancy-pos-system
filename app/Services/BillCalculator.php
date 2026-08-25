@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Bill;
+use App\Models\Tenant;
 use App\Support\BusinessTypes;
 
 class BillCalculator
@@ -14,7 +15,12 @@ class BillCalculator
         $advances = (float) $bill->items()->where('type', 'advance')->sum('line_total');
         $payments = (float) $bill->payments()->sum('amount');
         $amountPaid = $advances + $payments;
-        $netBill = max(0, $charges - $discounts);
+        $taxable = max(0, $charges - $discounts);
+        $vatRate = (float) ($bill->vat_rate ?? 0);
+        $ssclRate = (float) ($bill->sscl_rate ?? 0);
+        $vatAmount = round($taxable * ($vatRate / 100), 2);
+        $ssclAmount = round($taxable * ($ssclRate / 100), 2);
+        $netBill = $taxable + $vatAmount + $ssclAmount;
         $balanceDue = max(0, $netBill - $amountPaid);
         $customerBalance = max(0, $amountPaid - $netBill);
 
@@ -32,6 +38,8 @@ class BillCalculator
         $bill->update([
             'subtotal' => $charges,
             'total_deductions' => $discounts + $advances,
+            'vat_amount' => $vatAmount,
+            'sscl_amount' => $ssclAmount,
             'amount_paid' => $amountPaid,
             'balance_due' => $balanceDue,
             'customer_balance' => $customerBalance,
@@ -40,5 +48,13 @@ class BillCalculator
         ]);
 
         return $bill->refresh();
+    }
+
+    public static function snapshotRates(?Tenant $tenant): array
+    {
+        return [
+            'vat_rate' => $tenant?->vat_registered ? (float) $tenant->vat_rate : 0,
+            'sscl_rate' => $tenant?->sscl_registered ? (float) $tenant->sscl_rate : 0,
+        ];
     }
 }
