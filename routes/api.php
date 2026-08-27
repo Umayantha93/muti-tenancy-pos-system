@@ -18,6 +18,7 @@ use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
 use App\Http\Controllers\PartController;
+use App\Http\Controllers\PartSaleController;
 use App\Http\Controllers\PayrollController;
 use App\Http\Controllers\PhotoBookingController;
 use App\Http\Controllers\PhotoPackageController;
@@ -86,7 +87,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::delete('/users/{user}', [SuperAdminUserController::class, 'destroy']);
     });
 
-    Route::middleware('role:business_owner,staff')->middleware('block.secondary.writes')->group(function () {
+        Route::middleware('role:business_owner,staff')->middleware('block.secondary.writes')->group(function () {
         Route::get('/dashboard', DashboardController::class);
 
         Route::middleware('feature:admit_vehicle')->group(function () {
@@ -100,6 +101,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::middleware('feature:billing')->group(function () {
             Route::apiResource('bills', BillController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('/bills/from-vehicle', [BillController::class, 'storeFromVehicle']);
+            Route::post('/bills/instant', [BillController::class, 'storeInstant']);
             Route::post('/bills/{bill}/close', [BillController::class, 'close']);
             Route::post('/bills/{bill}/owe-in', [BillController::class, 'oweIn']);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
@@ -115,6 +117,9 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::get('/parts', [PartController::class, 'index']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
+            Route::get('/part-sales', [PartSaleController::class, 'index']);
+            Route::post('/part-sales', [PartSaleController::class, 'store']);
+            Route::get('/part-sales/{sale}', [PartSaleController::class, 'show']);
         });
 
         Route::middleware('feature:photo_packages')->group(function () {

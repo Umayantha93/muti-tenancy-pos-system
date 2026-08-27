@@ -20,12 +20,14 @@ class BillController extends Controller
             'status' => ['nullable', 'string', 'max:50'],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $bills = Bill::query()
             ->with(['customer', 'vehicle', 'items', 'payments'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
+            ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
                 $query->where(fn ($nested) => $nested->where('bill_number', 'like', $search)
@@ -128,6 +130,43 @@ class BillController extends Controller
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
         $bill = $this->openBill($request, $vehicle->customer_id, $data, $this->jobType($request), $vehicle->id);
+
+        return response()->json($bill, 201);
+    }
+
+    /**
+     * Walk-in / counter bill: same billing workspace as a job card, without registering a vehicle.
+     */
+    public function storeInstant(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'customer_name' => ['required', 'string', 'max:255'],
+            'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
+            'customer_address' => ['nullable', 'string', 'max:255'],
+            'notes' => ['nullable', 'string'],
+            'admission_date' => ['nullable', 'date'],
+        ]);
+
+        $bill = DB::transaction(function () use ($data, $request) {
+            $customer = Customer::firstOrCreate(
+                ['phone' => $data['customer_phone']],
+                ['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? null],
+            );
+            $customer->update([
+                'name' => $data['customer_name'],
+                'address' => $data['customer_address'] ?? $customer->address,
+            ]);
+
+            return Bill::create([
+                'bill_number' => 'INST-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'vehicle_id' => null,
+                'customer_id' => $customer->id,
+                'admission_date' => $data['admission_date'] ?? today(),
+                'notes' => $data['notes'] ?? null,
+                'job_kind' => Bill::JOB_KIND_PARTS_SALE,
+                'created_by' => $request->user()->id,
+            ])->load(['customer', 'vehicle', 'items', 'payments']);
+        });
 
         return response()->json($bill, 201);
     }
