@@ -47,6 +47,8 @@ class Bill extends Model
 
     public const JOB_KIND_SERVICE = 'service';
 
+    public const JOB_KIND_PARTS_SALE = 'parts_sale';
+
     protected static function booted(): void
     {
         static::creating(function (Bill $bill): void {
