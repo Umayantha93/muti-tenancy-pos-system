@@ -33,7 +33,7 @@ class SuperAdminBillController extends Controller
 
         $bills = Bill::query()
             ->where('tenant_id', $tenant->id)
-            ->with(['customer', 'vehicle'])
+            ->with(['customer', 'vehicle', 'employees:id,name,position'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
@@ -52,7 +52,7 @@ class SuperAdminBillController extends Controller
     {
         $this->assertBillTenant($tenant, $bill);
 
-        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
     }
 
     public function update(Request $request, Tenant $tenant, Bill $bill): JsonResponse
@@ -61,12 +61,13 @@ class SuperAdminBillController extends Controller
 
         $data = $request->validate([
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
         ]);
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
     }
 
     public function reopen(Request $request, Tenant $tenant, Bill $bill, BillCalculator $calculator): JsonResponse

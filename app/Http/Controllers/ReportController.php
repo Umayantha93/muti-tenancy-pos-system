@@ -11,6 +11,7 @@ use App\Models\Product;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ReportController extends Controller
 {
@@ -19,6 +20,7 @@ class ReportController extends Controller
         $data = $request->validate([
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'employee_id' => ['nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
         $from = Carbon::parse($data['from'] ?? now()->startOfMonth())->startOfDay();
@@ -75,6 +77,30 @@ class ReportController extends Controller
             'days' => (int) $row->days,
         ])->values();
 
+        $employees = Employee::query()
+            ->where('active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'position']);
+
+        $employeeJobs = null;
+        if (! empty($data['employee_id'])) {
+            $employee = Employee::query()->find($data['employee_id']);
+            $jobs = Bill::query()
+                ->with(['customer:id,name,phone', 'vehicle:id,number_plate,make,model'])
+                ->whereHas('employees', fn ($query) => $query->where('employees.id', $data['employee_id']))
+                ->whereBetween('admission_date', [$from->toDateString(), $to->toDateString()])
+                ->orderByDesc('admission_date')
+                ->orderByDesc('id')
+                ->get(['id', 'bill_number', 'customer_id', 'vehicle_id', 'admission_date', 'status', 'job_kind', 'subtotal', 'amount_paid', 'balance_due']);
+
+            $employeeJobs = [
+                'employee' => $employee ? $employee->only(['id', 'name', 'position']) : null,
+                'count' => $jobs->count(),
+                'billed' => round($jobs->sum(fn (Bill $bill) => (float) $bill->subtotal), 2),
+                'jobs' => $jobs,
+            ];
+        }
+
         return $this->moneyJson([
             'from' => $from->toDateString(),
             'to' => $to->toDateString(),
@@ -100,6 +126,8 @@ class ReportController extends Controller
                 'payrolls' => $payrolls,
                 'attendance' => $attendance,
             ],
+            'employees' => $employees,
+            'employee_jobs' => $employeeJobs,
         ]);
     }
 }

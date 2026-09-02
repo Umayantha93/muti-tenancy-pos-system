@@ -40,7 +40,6 @@ class BillShareController extends Controller
             'amount_paid' => $bill->amount_paid,
             'balance_due' => $bill->balance_due,
             'mileage' => $bill->mileage,
-            'notes' => $bill->notes,
             'customer' => $bill->customer,
             'vehicle' => $bill->vehicle,
             'items' => $bill->items,
