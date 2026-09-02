@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'bill_id',
     'part_id',
     'service_addon_id',
+    'labor_item_id',
     'type',
     'description',
     'included_services',
@@ -45,9 +46,9 @@ class BillItem extends Model
         return $this->belongsTo(Part::class);
     }
 
-    public function serviceAddon(): BelongsTo
+    public function laborItem(): BelongsTo
     {
-        return $this->belongsTo(ServiceAddon::class);
+        return $this->belongsTo(LaborItem::class);
     }
 
     public function purchaseExpense(): BelongsTo

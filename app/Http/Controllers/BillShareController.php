@@ -42,7 +42,21 @@ class BillShareController extends Controller
             'mileage' => $bill->mileage,
             'customer' => $bill->customer,
             'vehicle' => $bill->vehicle,
-            'items' => $bill->items,
+            'items' => $bill->items->map(function ($item) {
+                $isLabor = $item->type === 'labor';
+
+                return [
+                    'id' => $item->id,
+                    'bill_id' => $item->bill_id,
+                    'type' => $item->type,
+                    'description' => $item->description,
+                    'included_services' => $item->included_services,
+                    'quantity' => $isLabor ? null : $item->quantity,
+                    'unit_price' => $isLabor ? null : $item->unit_price,
+                    'line_total' => $item->line_total,
+                    'hide_hours' => $isLabor,
+                ];
+            }),
             'payments' => $bill->payments,
             'tenant' => $bill->tenant,
         ]);
