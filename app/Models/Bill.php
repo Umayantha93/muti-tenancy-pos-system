@@ -9,6 +9,7 @@ use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
@@ -21,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'odometer',
     'mileage',
     'notes',
+    'internal_notes',
     'status',
     'job_kind',
     'owe_in_due_date',
@@ -110,6 +112,13 @@ class Bill extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    public function employees(): BelongsToMany
+    {
+        return $this->belongsToMany(Employee::class, 'bill_employees')
+            ->withTimestamps()
+            ->orderBy('employees.name');
     }
 
     public function vehicle(): BelongsTo

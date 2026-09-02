@@ -46,10 +46,19 @@ class CustomerController extends Controller
 
     private function validated(Request $request, bool $update = false): array
     {
-        return $request->validate([
-            'name' => [$update ? 'sometimes' : 'required', 'string', 'max:255'],
-            'phone' => [$update ? 'sometimes' : 'required', 'regex:/^[0-9+() -]{7,20}$/'],
+        $data = $request->validate([
+            'name' => [$update ? 'sometimes' : 'nullable', 'string', 'max:255'],
+            'phone' => [$update ? 'sometimes' : 'nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'address' => ['nullable', 'string', 'max:255'],
         ]);
+
+        if (array_key_exists('name', $data) && trim((string) $data['name']) === '') {
+            $data['name'] = 'Walk-in';
+        }
+        if (! $update && empty($data['name'])) {
+            $data['name'] = 'Walk-in';
+        }
+
+        return $data;
     }
 }

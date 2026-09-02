@@ -8,6 +8,7 @@ use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\CottageStay;
 use App\Models\Expense;
+use App\Models\LaborItem;
 use App\Models\Part;
 use App\Models\PhotoBooking;
 use App\Models\RetailSale;
@@ -33,7 +34,7 @@ class SuperAdminBillController extends Controller
 
         $bills = Bill::query()
             ->where('tenant_id', $tenant->id)
-            ->with(['customer', 'vehicle'])
+            ->with(['customer', 'vehicle', 'employees:id,name,position'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
@@ -52,7 +53,7 @@ class SuperAdminBillController extends Controller
     {
         $this->assertBillTenant($tenant, $bill);
 
-        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
     }
 
     public function update(Request $request, Tenant $tenant, Bill $bill): JsonResponse
@@ -61,12 +62,13 @@ class SuperAdminBillController extends Controller
 
         $data = $request->validate([
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
         ]);
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
     }
 
     public function reopen(Request $request, Tenant $tenant, Bill $bill, BillCalculator $calculator): JsonResponse
@@ -149,14 +151,17 @@ class SuperAdminBillController extends Controller
             'unit_price' => ['nullable', 'numeric', 'min:0'],
             'purchase_unit_cost' => ['nullable', 'numeric', 'min:0'],
             'service_addon_id' => ['nullable', Rule::exists('service_addons', 'id')->where('tenant_id', $tenant->id)],
+            'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $tenant->id)],
         ]);
 
         $data = ServiceAddon::applyToItemPayload($data, (int) $tenant->id);
+        $data = LaborItem::applyToItemPayload($data, (int) $tenant->id);
 
         $kind = BusinessTypes::billItemKind($data['type']);
         $allowQty = (bool) ($typeMeta[$data['type']]['allow_qty'] ?? false)
             || $kind === 'stock'
-            || $data['type'] === 'service_addon';
+            || $data['type'] === 'service_addon'
+            || $data['type'] === 'labor';
 
         if ($data['type'] === 'customer_part') {
             if (blank($data['description'] ?? null)) {
@@ -233,6 +238,7 @@ class SuperAdminBillController extends Controller
             $item = $bill->items()->make([
                 'part_id' => $part?->id,
                 'service_addon_id' => $data['service_addon_id'] ?? null,
+                'labor_item_id' => $data['labor_item_id'] ?? null,
                 'type' => $data['type'],
                 'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
                 'included_services' => $data['included_services'] ?? null,

@@ -177,7 +177,7 @@ class BusinessTypes
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
             default => [
-                ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge'],
+                ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge', 'allow_qty' => true],
                 ['value' => 'part', 'label' => 'Inventory', 'kind' => 'stock'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],

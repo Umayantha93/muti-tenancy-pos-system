@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\Feature;
+use App\Models\LaborCategory;
 use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Models\TenantFeePayment;
@@ -142,6 +143,9 @@ class SuperAdminTenantController extends Controller
 
             if (BusinessTypes::usesVehicleJobs($data['business_type'])) {
                 ServiceAddon::seedDefaultsFor((int) $tenant->id);
+            }
+            if ($data['business_type'] === BusinessTypes::GARAGE) {
+                LaborCategory::seedDefaultsFor((int) $tenant->id);
             }
 
             return $tenant;

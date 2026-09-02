@@ -17,6 +17,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
+use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
 use App\Http\Controllers\PayrollController;
@@ -104,11 +105,14 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::post('/bills/instant', [BillController::class, 'storeInstant']);
             Route::post('/bills/{bill}/close', [BillController::class, 'close']);
             Route::post('/bills/{bill}/owe-in', [BillController::class, 'oweIn']);
+            Route::put('/bills/{bill}/employees', [BillController::class, 'syncEmployees']);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
+            Route::put('/bills/{bill}/items/{item}', [BillItemController::class, 'update']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
             Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
             Route::get('/service-addons', [ServiceAddonController::class, 'index']);
+            Route::get('/labor-catalog', [LaborCatalogController::class, 'index']);
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
@@ -196,6 +200,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::post('/service-addons', [ServiceAddonController::class, 'store'])->middleware('feature:billing');
             Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update'])->middleware('feature:billing');
             Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy'])->middleware('feature:billing');
+            Route::post('/labor-categories', [LaborCatalogController::class, 'storeCategory'])->middleware('feature:billing');
+            Route::put('/labor-categories/{labor_category}', [LaborCatalogController::class, 'updateCategory'])->middleware('feature:billing');
+            Route::delete('/labor-categories/{labor_category}', [LaborCatalogController::class, 'destroyCategory'])->middleware('feature:billing');
+            Route::post('/labor-categories/{labor_category}/items', [LaborCatalogController::class, 'storeItem'])->middleware('feature:billing');
+            Route::put('/labor-items/{labor_item}', [LaborCatalogController::class, 'updateItem'])->middleware('feature:billing');
+            Route::delete('/labor-items/{labor_item}', [LaborCatalogController::class, 'destroyItem'])->middleware('feature:billing');
         });
 
         Route::middleware('feature:employees_management,attendance')->group(function () {

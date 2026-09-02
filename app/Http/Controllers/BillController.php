@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bill;
 use App\Models\Customer;
+use App\Models\Employee;
 use App\Models\Vehicle;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +26,7 @@ class BillController extends Controller
         ]);
 
         $bills = Bill::query()
-            ->with(['customer', 'vehicle', 'items', 'payments'])
+            ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
             ->when(! empty($data['search']), function ($query) use ($data) {
@@ -51,8 +52,8 @@ class BillController extends Controller
         }
 
         $data = $request->validate([
-            'customer_name' => ['required', 'string', 'max:255'],
-            'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
+            'customer_name' => ['nullable', 'string', 'max:255'],
+            'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'customer_address' => ['nullable', 'string', 'max:255'],
             'number_plate' => ['required', 'string', 'max:30'],
             'chassis_number' => ['nullable', 'string', 'max:100'],
@@ -61,6 +62,7 @@ class BillController extends Controller
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
             'tyre_size' => ['nullable', 'string', 'max:40'],
@@ -68,14 +70,15 @@ class BillController extends Controller
             'imei' => ['nullable', 'string', 'max:40'],
             'fault_description' => ['nullable', 'string', 'max:255'],
             'asset_kind' => ['nullable', Rule::in(['vehicle', 'device'])],
+            ...$this->employeeIdsRules($request),
         ]);
 
         $bill = DB::transaction(function () use ($data, $request) {
-            $customer = Customer::firstOrCreate(
-                ['phone' => $data['customer_phone']],
-                ['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? null],
+            $customer = Customer::resolveFromIntake(
+                $data['customer_name'] ?? null,
+                $data['customer_phone'] ?? null,
+                $data['customer_address'] ?? null,
             );
-            $customer->update(['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? $customer->address]);
 
             $chassisRaw = isset($data['chassis_number']) ? strtoupper(trim((string) $data['chassis_number'])) : '';
             $chassis = $chassisRaw !== '' ? $chassisRaw : null;
@@ -124,8 +127,10 @@ class BillController extends Controller
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
+            ...$this->employeeIdsRules($request),
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
@@ -140,32 +145,35 @@ class BillController extends Controller
     public function storeInstant(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'customer_name' => ['required', 'string', 'max:255'],
-            'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
+            'customer_name' => ['nullable', 'string', 'max:255'],
+            'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'customer_address' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
+            ...$this->employeeIdsRules($request),
         ]);
 
         $bill = DB::transaction(function () use ($data, $request) {
-            $customer = Customer::firstOrCreate(
-                ['phone' => $data['customer_phone']],
-                ['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? null],
+            $customer = Customer::resolveFromIntake(
+                $data['customer_name'] ?? null,
+                $data['customer_phone'] ?? null,
+                $data['customer_address'] ?? null,
             );
-            $customer->update([
-                'name' => $data['customer_name'],
-                'address' => $data['customer_address'] ?? $customer->address,
-            ]);
 
-            return Bill::create([
+            $bill = Bill::create([
                 'bill_number' => 'INST-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
                 'vehicle_id' => null,
                 'customer_id' => $customer->id,
                 'admission_date' => $data['admission_date'] ?? today(),
                 'notes' => $data['notes'] ?? null,
+                'internal_notes' => $data['internal_notes'] ?? null,
                 'job_kind' => Bill::JOB_KIND_PARTS_SALE,
                 'created_by' => $request->user()->id,
-            ])->load(['customer', 'vehicle', 'items', 'payments']);
+            ]);
+            $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
+
+            return $bill->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
         });
 
         return response()->json($bill, 201);
@@ -175,21 +183,29 @@ class BillController extends Controller
     {
         $bill->ensureShareToken();
 
-        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
     }
 
     public function update(Request $request, Bill $bill): JsonResponse
     {
-        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
-            ? 'Owe-in bills cannot be edited. Record a payment instead.'
-            : 'Closed bills cannot be edited.');
-
         $data = $request->validate([
             'status' => ['sometimes', Rule::in(['open', 'partially_paid', 'paid', 'closed', 'owe_in'])],
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
+            ...$this->employeeIdsRules($request),
         ]);
+
+        $employeeIds = $data['employee_ids'] ?? null;
+        unset($data['employee_ids']);
+
+        $staffOnly = collect($data)->except(['notes', 'internal_notes'])->isEmpty();
+        if (! $staffOnly) {
+            abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
+                ? 'Owe-in bills cannot be edited. Record a payment instead.'
+                : 'Closed bills cannot be edited.');
+        }
 
         if (($data['status'] ?? null) === 'closed' && ! $this->isPaidBill($bill)) {
             abort(422, 'Only paid bills can be closed.');
@@ -198,8 +214,19 @@ class BillController extends Controller
             abort(422, 'Use the Owe In action to mark a bill on credit.');
         }
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
+        if ($employeeIds !== null) {
+            $this->syncBillEmployees($bill, $employeeIds);
+        }
 
-        return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments']));
+        return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position']));
+    }
+
+    public function syncEmployees(Request $request, Bill $bill): JsonResponse
+    {
+        $data = $request->validate($this->employeeIdsRules($request));
+        $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
+
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
     }
 
     public function close(Request $request, Bill $bill): JsonResponse
@@ -239,19 +266,21 @@ class BillController extends Controller
     private function storeGeneric(Request $request, string $type): JsonResponse
     {
         $data = $request->validate([
-            'customer_name' => ['required', 'string', 'max:255'],
-            'customer_phone' => ['required', 'regex:/^[0-9+() -]{7,20}$/'],
+            'customer_name' => ['nullable', 'string', 'max:255'],
+            'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'customer_address' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
+            'internal_notes' => ['nullable', 'string'],
             'admission_date' => ['nullable', 'date'],
+            ...$this->employeeIdsRules($request),
         ]);
 
         $bill = DB::transaction(function () use ($data, $request, $type) {
-            $customer = Customer::firstOrCreate(
-                ['phone' => $data['customer_phone']],
-                ['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? null],
+            $customer = Customer::resolveFromIntake(
+                $data['customer_name'] ?? null,
+                $data['customer_phone'] ?? null,
+                $data['customer_address'] ?? null,
             );
-            $customer->update(['name' => $data['customer_name'], 'address' => $data['customer_address'] ?? $customer->address]);
 
             return $this->openBill($request, $customer->id, $data, $type);
         });
@@ -261,7 +290,7 @@ class BillController extends Controller
 
     private function openBill(Request $request, int $customerId, array $data, string $type, ?int $vehicleId = null, ?string $sourceType = null, ?int $sourceId = null): Bill
     {
-        return Bill::create([
+        $bill = Bill::create([
             'bill_number' => BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
             'vehicle_id' => $vehicleId,
             'customer_id' => $customerId,
@@ -269,13 +298,48 @@ class BillController extends Controller
             'odometer' => $data['odometer'] ?? null,
             'mileage' => $data['mileage'] ?? null,
             'notes' => $data['notes'] ?? null,
+            'internal_notes' => $data['internal_notes'] ?? null,
             'job_kind' => BusinessTypes::usesVehicleJobs($type)
                 ? ($data['job_kind'] ?? Bill::JOB_KIND_REPAIR)
                 : Bill::JOB_KIND_REPAIR,
             'source_type' => $sourceType,
             'source_id' => $sourceId,
             'created_by' => $request->user()->id,
-        ])->load(['customer', 'vehicle', 'items', 'payments']);
+        ]);
+        $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
+
+        return $bill->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function employeeIdsRules(Request $request): array
+    {
+        return [
+            'employee_ids' => ['nullable', 'array'],
+            'employee_ids.*' => ['integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
+        ];
+    }
+
+    /**
+     * @param  list<int|string>|null  $employeeIds
+     */
+    private function syncBillEmployees(Bill $bill, ?array $employeeIds): void
+    {
+        $ids = collect($employeeIds ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $validIds = $ids->isEmpty()
+            ? []
+            : Employee::query()->whereIn('id', $ids)->pluck('id')->all();
+
+        $bill->employees()->sync(
+            collect($validIds)->mapWithKeys(fn (int $id) => [$id => ['tenant_id' => $bill->tenant_id]])->all()
+        );
     }
 
     private function jobType(Request $request): string

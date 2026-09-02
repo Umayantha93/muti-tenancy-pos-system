@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\Expense;
+use App\Models\LaborItem;
 use App\Models\Part;
 use App\Models\ServiceAddon;
 use App\Services\BillCalculator;
@@ -35,14 +36,17 @@ class BillItemController extends Controller
             'unit_price' => ['nullable', 'numeric', 'min:0'],
             'purchase_unit_cost' => ['nullable', 'numeric', 'min:0'],
             'service_addon_id' => ['nullable', Rule::exists('service_addons', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id);
+        $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
 
         $kind = BusinessTypes::billItemKind($data['type']);
         $allowQty = (bool) ($typeMeta[$data['type']]['allow_qty'] ?? false)
             || $kind === 'stock'
-            || $data['type'] === 'service_addon';
+            || $data['type'] === 'service_addon'
+            || $data['type'] === 'labor';
 
         if ($data['type'] === 'customer_part') {
             if (blank($data['description'] ?? null)) {
@@ -114,6 +118,7 @@ class BillItemController extends Controller
             $item = $bill->items()->create([
                 'part_id' => $part?->id,
                 'service_addon_id' => $data['service_addon_id'] ?? null,
+                'labor_item_id' => $data['labor_item_id'] ?? null,
                 'type' => $data['type'],
                 'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
                 'included_services' => $data['included_services'] ?? null,
@@ -130,6 +135,36 @@ class BillItemController extends Controller
         });
 
         return response()->json(['item' => $item->load('part'), 'bill' => $bill->fresh()], 201);
+    }
+
+    public function update(Request $request, Bill $bill, BillItem $item, BillCalculator $calculator): JsonResponse
+    {
+        abort_unless($item->bill_id === $bill->id, 404);
+        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
+            ? 'Owe-in bills cannot be edited. Record a payment instead.'
+            : 'Closed bills cannot be edited.');
+
+        $data = $request->validate([
+            'quantity' => ['sometimes', 'numeric', 'gt:0'],
+            'unit_price' => ['sometimes', 'numeric', 'min:0'],
+        ]);
+
+        if ($item->type !== 'labor') {
+            abort(422, 'Only labor hours can be updated on this bill.');
+        }
+
+        DB::transaction(function () use ($data, $bill, $item, $calculator) {
+            $quantity = (float) ($data['quantity'] ?? $item->quantity);
+            $unitPrice = (float) ($data['unit_price'] ?? $item->unit_price);
+            $item->update([
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                'line_total' => round($unitPrice * $quantity, 2),
+            ]);
+            $calculator->recalculate($bill);
+        });
+
+        return response()->json(['item' => $item->fresh(), 'bill' => $bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments'])]);
     }
 
     public function destroy(Bill $bill, BillItem $item, BillCalculator $calculator): JsonResponse

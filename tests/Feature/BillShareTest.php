@@ -24,7 +24,11 @@ class BillShareTest extends TestCase
             ->assertJsonPath('bill_number', $bill->bill_number)
             ->assertJsonPath('customer.name', 'Nimal Perera')
             ->assertJsonPath('vehicle.number_plate', 'CAB-1234')
-            ->assertJsonPath('tenant.business_name', $bill->tenant->business_name);
+            ->assertJsonPath('tenant.business_name', $bill->tenant->business_name)
+            ->assertJsonPath('items.0.hide_hours', true)
+            ->assertJsonPath('items.0.quantity', null)
+            ->assertJsonPath('items.0.unit_price', null)
+            ->assertJsonPath('items.0.line_total', '6000.00');
     }
 
     public function test_shared_bill_link_still_works_when_sms_apps_append_punctuation(): void
@@ -97,7 +101,7 @@ class BillShareTest extends TestCase
         $this->postJson("/api/bills/{$billId}/items", [
             'type' => 'labor',
             'description' => 'Oil change',
-            'quantity' => 1,
+            'quantity' => 1.5,
             'unit_price' => 4000,
         ])->assertCreated();
 
