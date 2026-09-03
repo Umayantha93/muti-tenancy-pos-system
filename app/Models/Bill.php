@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'mileage',
     'notes',
     'internal_notes',
+    'additional_note_color',
     'status',
     'job_kind',
     'owe_in_due_date',

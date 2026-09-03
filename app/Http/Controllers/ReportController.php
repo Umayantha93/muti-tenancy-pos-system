@@ -8,6 +8,7 @@ use App\Models\Employee;
 use App\Models\Part;
 use App\Models\Payroll;
 use App\Models\Product;
+use App\Support\BusinessTypes;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -51,7 +52,8 @@ class ReportController extends Controller
         $parts = Part::query()->get(['id', 'name', 'stock_qty', 'cost_price', 'price']);
         $products = Product::query()->get(['id', 'name', 'stock_qty', 'cost_price', 'price']);
         $stockItems = $parts->concat($products);
-        $lowStock = $stockItems->filter(fn ($item) => (int) $item->stock_qty <= 5)->values();
+        $lowThreshold = $request->user()->tenant?->business_type === BusinessTypes::PAINT ? 250 : 5;
+        $lowStock = $stockItems->filter(fn ($item) => (int) $item->stock_qty <= $lowThreshold)->values();
 
         $payrollMonth = (int) $from->month;
         $payrollYear = (int) $from->year;

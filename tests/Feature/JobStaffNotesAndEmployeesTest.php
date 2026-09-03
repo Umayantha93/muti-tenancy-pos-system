@@ -30,7 +30,7 @@ class JobStaffNotesAndEmployeesTest extends TestCase
         $this->assertSame([], $bill['employees']);
     }
 
-    public function test_internal_notes_are_hidden_from_the_customer_share_bill(): void
+    public function test_additional_notes_appear_on_the_customer_share_bill_for_garage(): void
     {
         Sanctum::actingAs($this->garageUser());
 
@@ -40,6 +40,7 @@ class JobStaffNotesAndEmployeesTest extends TestCase
             'number_plate' => 'CAB-1234',
             'notes' => 'Customer-facing note',
             'internal_notes' => 'Staff only: customer argued about price',
+            'additional_note_color' => 'red',
         ])->assertCreated()->json('id');
 
         $bill = Bill::withoutGlobalScopes()->findOrFail($billId);
@@ -52,6 +53,8 @@ class JobStaffNotesAndEmployeesTest extends TestCase
             ->assertOk()
             ->assertJsonMissingPath('internal_notes')
             ->assertJsonMissingPath('notes')
+            ->assertJsonPath('additional_note', 'Staff only: customer argued about price')
+            ->assertJsonPath('additional_note_color', 'red')
             ->assertJsonPath('bill_number', $bill->bill_number);
     }
 

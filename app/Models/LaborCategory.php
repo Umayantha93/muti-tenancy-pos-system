@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Support\BusinessTypes;
 use App\Support\LaborCatalogDefaults;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -13,14 +14,18 @@ class LaborCategory extends Model
 {
     use BelongsToTenant;
 
-    public static function seedDefaultsFor(int $tenantId): void
+    public static function seedDefaultsFor(int $tenantId, ?string $businessType = null): void
     {
         if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->exists()) {
             return;
         }
 
         $rate = LaborCatalogDefaults::hourlyRate();
-        foreach (LaborCatalogDefaults::catalog() as $categoryIndex => $category) {
+        $catalog = $businessType === BusinessTypes::PAINT
+            ? LaborCatalogDefaults::paintCatalog()
+            : LaborCatalogDefaults::catalog();
+
+        foreach ($catalog as $categoryIndex => $category) {
             $row = new static;
             $row->forceFill([
                 'tenant_id' => $tenantId,
@@ -35,7 +40,7 @@ class LaborCategory extends Model
                     'labor_category_id' => $row->id,
                     'name' => $item['name'],
                     'hourly_rate' => $rate,
-                    'standard_hours' => $item['hours'],
+                    'standard_hours' => (float) $item['hours'],
                     'sort_order' => ($itemIndex + 1) * 10,
                     'active' => true,
                 ])->save();

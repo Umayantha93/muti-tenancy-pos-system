@@ -43,7 +43,8 @@ class DashboardController extends Controller
 
         $lowStock = null;
         if ($user->canAccessFeature('parts_inventory')) {
-            $lowStock = Part::where('stock_qty', '<=', 5)->count();
+            $lowThreshold = $type === BusinessTypes::PAINT ? 250 : 5;
+            $lowStock = Part::where('stock_qty', '<=', $lowThreshold)->count();
         } elseif ($user->canAccessFeature('product_catalog')) {
             $lowStock = Product::where('stock_qty', '<=', 5)->count();
         }

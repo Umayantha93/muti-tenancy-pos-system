@@ -290,4 +290,48 @@ class LaborCatalogDefaults
             ],
         ];
     }
+
+    /**
+     * Paint labor is hours × hourly rate, same engine as garage. Owner edits rates.
+     *
+     * @return list<array{name: string, items: list<array{name: string, hours: float}>}>
+     */
+    public static function paintCatalog(): array
+    {
+        return [
+            [
+                'name' => 'Prep',
+                'items' => [
+                    ['name' => 'Wash & degrease', 'hours' => 0.5],
+                    ['name' => 'Masking', 'hours' => 1.0],
+                    ['name' => 'Panel strip', 'hours' => 1.5],
+                    ['name' => 'Rust treatment', 'hours' => 1.0],
+                    ['name' => 'Body filler', 'hours' => 2.0],
+                    ['name' => 'Guide coat sand', 'hours' => 1.0],
+                ],
+            ],
+            [
+                'name' => 'Paint',
+                'items' => [
+                    ['name' => 'Primer spray', 'hours' => 1.0],
+                    ['name' => 'Base coat', 'hours' => 1.5],
+                    ['name' => 'Metallic / pearl', 'hours' => 2.0],
+                    ['name' => 'Color blend into adjacent panel', 'hours' => 2.5],
+                    ['name' => 'Clear coat', 'hours' => 1.5],
+                    ['name' => 'Spot repair', 'hours' => 1.0],
+                ],
+            ],
+            [
+                'name' => 'Finish',
+                'items' => [
+                    ['name' => 'Bake / flash', 'hours' => 0.75],
+                    ['name' => 'Wet sand', 'hours' => 1.5],
+                    ['name' => 'Compound', 'hours' => 1.0],
+                    ['name' => 'Polish', 'hours' => 1.0],
+                    ['name' => 'Reassemble trim', 'hours' => 1.0],
+                    ['name' => 'Quality check', 'hours' => 0.5],
+                ],
+            ],
+        ];
+    }
 }

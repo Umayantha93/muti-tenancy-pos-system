@@ -14,8 +14,8 @@ class ServiceAddonController extends Controller
     public function index(Request $request): JsonResponse
     {
         $tenant = $request->user()->tenant;
-        if ($tenant?->business_type === BusinessTypes::GARAGE) {
-            ServiceAddon::seedDefaultsFor((int) $tenant->id);
+        if ($tenant && BusinessTypes::usesServiceAddonWorkspace($tenant->business_type)) {
+            ServiceAddon::seedDefaultsFor((int) $tenant->id, $tenant->business_type);
         }
 
         $addons = ServiceAddon::query()
@@ -29,7 +29,7 @@ class ServiceAddonController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertAddonWorkspace($request);
         $data = $this->validated($request, creating: true);
         $included = $data['included_addon_ids'] ?? [];
         unset($data['included_addon_ids']);
@@ -48,7 +48,7 @@ class ServiceAddonController extends Controller
 
     public function update(Request $request, ServiceAddon $addon): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertAddonWorkspace($request);
         $data = $this->validated($request, creating: false, addonId: $addon->id);
         $included = array_key_exists('included_addon_ids', $data) ? $data['included_addon_ids'] : null;
         unset($data['included_addon_ids']);
@@ -66,7 +66,7 @@ class ServiceAddonController extends Controller
 
     public function destroy(Request $request, ServiceAddon $addon): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertAddonWorkspace($request);
         $addon->inclusions()->detach();
         $addon->delete();
 
@@ -114,11 +114,12 @@ class ServiceAddonController extends Controller
         }
     }
 
-    private function assertGarage(Request $request): void
+    private function assertAddonWorkspace(Request $request): void
     {
-        if ($request->user()->tenant?->business_type !== BusinessTypes::GARAGE) {
+        $type = (string) $request->user()->tenant?->business_type;
+        if (! BusinessTypes::usesServiceAddonWorkspace($type)) {
             throw ValidationException::withMessages([
-                'business_type' => ['Service addons are only available for garages.'],
+                'business_type' => ['Service addons are only available for garages and paint shops.'],
             ]);
         }
     }

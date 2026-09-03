@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -38,14 +39,18 @@ class ServiceAddon extends Model
         ];
     }
 
-    public static function seedDefaultsFor(int $tenantId): void
+    public static function seedDefaultsFor(int $tenantId, ?string $businessType = null): void
     {
         if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->exists()) {
             return;
         }
 
+        $catalog = $businessType === BusinessTypes::PAINT
+            ? static::paintCatalog()
+            : static::defaultCatalog();
+
         $created = [];
-        foreach (static::defaultCatalog() as $row) {
+        foreach ($catalog as $row) {
             $addon = new static;
             $addon->forceFill([
                 'tenant_id' => $tenantId,
@@ -56,6 +61,10 @@ class ServiceAddon extends Model
                 'active' => true,
             ])->save();
             $created[$row['name']] = $addon;
+        }
+
+        if ($businessType === BusinessTypes::PAINT) {
+            return;
         }
 
         $full = $created['Full service'] ?? null;
@@ -69,6 +78,21 @@ class ServiceAddon extends Model
             ->filter()
             ->all();
         $full->inclusions()->sync($ids);
+    }
+
+    /**
+     * @return list<array{name: string, price: float, sort_order: int}>
+     */
+    public static function paintCatalog(): array
+    {
+        return [
+            ['name' => 'Bumper respray', 'price' => 25000, 'sort_order' => 10],
+            ['name' => 'Scratch & blend', 'price' => 12000, 'sort_order' => 20],
+            ['name' => 'Full body — solid', 'price' => 95000, 'sort_order' => 30],
+            ['name' => 'Full body — metallic', 'price' => 120000, 'sort_order' => 40],
+            ['name' => 'Alloy refurb', 'price' => 8500, 'sort_order' => 50],
+            ['name' => 'Interior spray', 'price' => 18000, 'sort_order' => 60],
+        ];
     }
 
     /**

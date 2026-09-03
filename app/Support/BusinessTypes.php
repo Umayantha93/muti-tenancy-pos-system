@@ -10,6 +10,8 @@ class BusinessTypes
 
     public const DEVICE_REPAIR = 'device_repair';
 
+    public const PAINT = 'paint';
+
     public const PHOTOGRAPHY = 'photography';
 
     public const CLOTHING = 'clothing';
@@ -24,7 +26,7 @@ class BusinessTypes
     public static function all(): array
     {
         return [
-            self::GARAGE, self::TYRE, self::DEVICE_REPAIR,
+            self::GARAGE, self::TYRE, self::DEVICE_REPAIR, self::PAINT,
             self::PHOTOGRAPHY, self::CLOTHING, self::SALON, self::COTTAGE,
         ];
     }
@@ -43,6 +45,7 @@ class BusinessTypes
             self::GARAGE => $garageFamily,
             self::TYRE => $garageFamily,
             self::DEVICE_REPAIR => $garageFamily,
+            self::PAINT => $garageFamily,
             self::PHOTOGRAPHY => array_merge(['photo_bookings', 'photo_packages'], $shared),
             self::CLOTHING => $retailFamily,
             self::SALON => array_merge(['photo_bookings', 'photo_packages', 'retail_pos', 'product_catalog'], $shared),
@@ -101,6 +104,7 @@ class BusinessTypes
     {
         return [
             'garage-pro',
+            'paint-pro',
             'studio-pro',
             'retail-pro',
             'stay-pro',
@@ -128,6 +132,7 @@ class BusinessTypes
             self::COTTAGE => 'stay-pro',
             self::SALON => 'salon-pro',
             self::DEVICE_REPAIR => 'repair-pro',
+            self::PAINT => 'paint-pro',
             default => 'garage-pro',
         };
     }
@@ -176,6 +181,11 @@ class BusinessTypes
                 ['value' => 'part', 'label' => 'Spare', 'kind' => 'stock'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
+            self::PAINT => [
+                ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge', 'allow_qty' => true],
+                ['value' => 'part', 'label' => 'Color / material', 'kind' => 'stock'],
+                ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
+            ],
             default => [
                 ['value' => 'labor', 'label' => 'Labor', 'kind' => 'charge', 'allow_qty' => true],
                 ['value' => 'part', 'label' => 'Inventory', 'kind' => 'stock'],
@@ -222,7 +232,17 @@ class BusinessTypes
 
     public static function usesVehicleJobs(string $type): bool
     {
-        return in_array($type, [self::GARAGE, self::TYRE, self::DEVICE_REPAIR], true);
+        return in_array($type, [self::GARAGE, self::TYRE, self::DEVICE_REPAIR, self::PAINT], true);
+    }
+
+    public static function usesLaborCatalog(string $type): bool
+    {
+        return in_array($type, [self::GARAGE, self::PAINT], true);
+    }
+
+    public static function usesServiceAddonWorkspace(string $type): bool
+    {
+        return in_array($type, [self::GARAGE, self::PAINT], true);
     }
 
     public static function billItemKind(string $type): string

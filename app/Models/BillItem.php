@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'part_id',
     'service_addon_id',
     'labor_item_id',
+    'panel_group_id',
+    'panel_name',
     'type',
     'description',
     'included_services',

@@ -64,7 +64,7 @@ class BillSmsController extends Controller
     private function garageVehiclePlate(Bill $bill): ?string
     {
         $businessType = $bill->tenant?->business_type ?? BusinessTypes::GARAGE;
-        if ($businessType !== BusinessTypes::GARAGE) {
+        if (! BusinessTypes::usesVehicleJobs($businessType)) {
             return null;
         }
 
