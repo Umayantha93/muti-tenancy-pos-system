@@ -14,8 +14,8 @@ class LaborCatalogController extends Controller
     public function index(Request $request): JsonResponse
     {
         $tenant = $request->user()->tenant;
-        if ($tenant?->business_type === BusinessTypes::GARAGE) {
-            LaborCategory::seedDefaultsFor((int) $tenant->id);
+        if ($tenant && BusinessTypes::usesLaborCatalog($tenant->business_type)) {
+            LaborCategory::seedDefaultsFor((int) $tenant->id, $tenant->business_type);
         }
 
         $categories = LaborCategory::query()
@@ -29,7 +29,7 @@ class LaborCatalogController extends Controller
 
     public function storeCategory(Request $request): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertLaborCatalogTenant($request);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -45,7 +45,7 @@ class LaborCatalogController extends Controller
 
     public function updateCategory(Request $request, LaborCategory $labor_category): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertLaborCatalogTenant($request);
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -57,7 +57,7 @@ class LaborCatalogController extends Controller
 
     public function destroyCategory(Request $request, LaborCategory $labor_category): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertLaborCatalogTenant($request);
         $labor_category->delete();
 
         return response()->json(null, 204);
@@ -65,7 +65,7 @@ class LaborCatalogController extends Controller
 
     public function storeItem(Request $request, LaborCategory $labor_category): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertLaborCatalogTenant($request);
         $data = $this->itemPayload($request, creating: true);
 
         $item = $labor_category->items()->create([
@@ -79,7 +79,7 @@ class LaborCatalogController extends Controller
 
     public function updateItem(Request $request, LaborItem $labor_item): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertLaborCatalogTenant($request);
         $labor_item->update($this->itemPayload($request, creating: false));
 
         return $this->moneyJson($labor_item->fresh());
@@ -87,7 +87,7 @@ class LaborCatalogController extends Controller
 
     public function destroyItem(Request $request, LaborItem $labor_item): JsonResponse
     {
-        $this->assertGarage($request);
+        $this->assertLaborCatalogTenant($request);
         $labor_item->delete();
 
         return response()->json(null, 204);
@@ -115,11 +115,12 @@ class LaborCatalogController extends Controller
         return $data;
     }
 
-    private function assertGarage(Request $request): void
+    private function assertLaborCatalogTenant(Request $request): void
     {
-        if ($request->user()->tenant?->business_type !== BusinessTypes::GARAGE) {
+        $type = (string) $request->user()->tenant?->business_type;
+        if (! BusinessTypes::usesLaborCatalog($type)) {
             throw ValidationException::withMessages([
-                'business_type' => ['Repair labor catalog is only available for garages.'],
+                'business_type' => ['Labor catalog is only available for garages and paint shops.'],
             ]);
         }
     }

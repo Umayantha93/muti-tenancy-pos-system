@@ -63,6 +63,7 @@ class BillController extends Controller
             'odometer' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
+            'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
             'tyre_size' => ['nullable', 'string', 'max:40'],
@@ -128,6 +129,7 @@ class BillController extends Controller
             'mileage' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
+            'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
             ...$this->employeeIdsRules($request),
@@ -150,6 +152,7 @@ class BillController extends Controller
             'customer_address' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
+            'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
             ...$this->employeeIdsRules($request),
         ]);
@@ -168,6 +171,7 @@ class BillController extends Controller
                 'admission_date' => $data['admission_date'] ?? today(),
                 'notes' => $data['notes'] ?? null,
                 'internal_notes' => $data['internal_notes'] ?? null,
+            'additional_note_color' => $data['additional_note_color'] ?? null,
                 'job_kind' => Bill::JOB_KIND_PARTS_SALE,
                 'created_by' => $request->user()->id,
             ]);
@@ -192,6 +196,7 @@ class BillController extends Controller
             'status' => ['sometimes', Rule::in(['open', 'partially_paid', 'paid', 'closed', 'owe_in'])],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
+            'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             ...$this->employeeIdsRules($request),
@@ -200,7 +205,7 @@ class BillController extends Controller
         $employeeIds = $data['employee_ids'] ?? null;
         unset($data['employee_ids']);
 
-        $staffOnly = collect($data)->except(['notes', 'internal_notes'])->isEmpty();
+        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color'])->isEmpty();
         if (! $staffOnly) {
             abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
                 ? 'Owe-in bills cannot be edited. Record a payment instead.'
@@ -271,6 +276,7 @@ class BillController extends Controller
             'customer_address' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
+            'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
             ...$this->employeeIdsRules($request),
         ]);
@@ -299,6 +305,7 @@ class BillController extends Controller
             'mileage' => $data['mileage'] ?? null,
             'notes' => $data['notes'] ?? null,
             'internal_notes' => $data['internal_notes'] ?? null,
+            'additional_note_color' => $data['additional_note_color'] ?? null,
             'job_kind' => BusinessTypes::usesVehicleJobs($type)
                 ? ($data['job_kind'] ?? Bill::JOB_KIND_REPAIR)
                 : Bill::JOB_KIND_REPAIR,

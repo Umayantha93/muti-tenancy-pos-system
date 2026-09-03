@@ -107,6 +107,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::post('/bills/{bill}/owe-in', [BillController::class, 'oweIn']);
             Route::put('/bills/{bill}/employees', [BillController::class, 'syncEmployees']);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
+            Route::post('/bills/{bill}/items/panel', [BillItemController::class, 'storePanel']);
             Route::put('/bills/{bill}/items/{item}', [BillItemController::class, 'update']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);

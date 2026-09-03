@@ -11,6 +11,7 @@ use App\Models\TenantFeePayment;
 use App\Models\User;
 use App\Services\ImprovmxMailService;
 use App\Support\BusinessTypes;
+use App\Support\PaintStockDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -142,10 +143,13 @@ class SuperAdminTenantController extends Controller
             $this->audit($request, 'tenant.created', $tenant, ['business_name' => $tenant->business_name]);
 
             if (BusinessTypes::usesVehicleJobs($data['business_type'])) {
-                ServiceAddon::seedDefaultsFor((int) $tenant->id);
+                ServiceAddon::seedDefaultsFor((int) $tenant->id, $data['business_type']);
             }
-            if ($data['business_type'] === BusinessTypes::GARAGE) {
-                LaborCategory::seedDefaultsFor((int) $tenant->id);
+            if (BusinessTypes::usesLaborCatalog($data['business_type'])) {
+                LaborCategory::seedDefaultsFor((int) $tenant->id, $data['business_type']);
+            }
+            if ($data['business_type'] === BusinessTypes::PAINT) {
+                PaintStockDefaults::seedFor((int) $tenant->id);
             }
 
             return $tenant;
