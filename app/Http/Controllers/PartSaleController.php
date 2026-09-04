@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\Part;
 use App\Models\PartSale;
 use App\Services\BillCalculator;
+use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,7 @@ class PartSaleController extends Controller
             'notes' => ['nullable', 'string'],
             'payment_method' => ['nullable', 'string', 'max:50'],
             'payment_amount' => ['nullable', 'numeric', 'min:0'],
+            'discount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.part_id' => ['required', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
@@ -62,8 +64,9 @@ class PartSaleController extends Controller
                 'created_by' => $request->user()->id,
             ]);
 
+            $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE));
             $bill = Bill::create([
-                'bill_number' => 'PART-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'bill_number' => BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
                 'customer_id' => $customer->id,
                 'admission_date' => today(),
                 'notes' => $data['notes'] ?? null,
@@ -88,6 +91,18 @@ class PartSaleController extends Controller
                     'unit_price' => $unitPrice,
                     'line_total' => $lineTotal,
                     'purchase_unit_cost' => $part->cost_price,
+                ]);
+            }
+
+            $discount = (float) ($data['discount'] ?? 0);
+            if ($discount > 0) {
+                BillItem::create([
+                    'bill_id' => $bill->id,
+                    'type' => 'discount',
+                    'description' => 'Discount',
+                    'quantity' => 1,
+                    'unit_price' => $discount,
+                    'line_total' => $discount,
                 ]);
             }
 

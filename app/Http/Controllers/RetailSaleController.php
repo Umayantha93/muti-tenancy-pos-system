@@ -62,8 +62,9 @@ class RetailSaleController extends Controller
                 'created_by' => $request->user()->id,
             ]);
 
+            $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::CLOTHING));
             $bill = Bill::create([
-                'bill_number' => BusinessTypes::billPrefix(BusinessTypes::CLOTHING).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'bill_number' => BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
                 'customer_id' => $customer->id,
                 'admission_date' => today(),
                 'notes' => $data['notes'] ?? null,
