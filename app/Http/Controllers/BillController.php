@@ -278,8 +278,17 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
             ...$this->employeeIdsRules($request),
         ]);
+
+        if (($data['job_kind'] ?? null) === Bill::JOB_KIND_REPAIR) {
+            abort_unless(
+                $request->user()->canAccessFeature('repair_bills'),
+                422,
+                'Repair bills are not enabled for this shop.'
+            );
+        }
 
         $bill = DB::transaction(function () use ($data, $request, $type) {
             $customer = Customer::resolveFromIntake(
@@ -296,8 +305,16 @@ class BillController extends Controller
 
     private function openBill(Request $request, int $customerId, array $data, string $type, ?int $vehicleId = null, ?string $sourceType = null, ?int $sourceId = null): Bill
     {
+        $jobKind = $data['job_kind']
+            ?? (BusinessTypes::usesVehicleJobs($type)
+                ? Bill::JOB_KIND_REPAIR
+                : (BusinessTypes::usesStoreCounter($type) ? Bill::JOB_KIND_PARTS_SALE : Bill::JOB_KIND_REPAIR));
+        $prefix = BusinessTypes::usesStoreCounter($type) && $jobKind === Bill::JOB_KIND_REPAIR
+            ? 'REP'
+            : BusinessTypes::billPrefix($type);
+
         $bill = Bill::create([
-            'bill_number' => BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+            'bill_number' => $prefix.'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
             'vehicle_id' => $vehicleId,
             'customer_id' => $customerId,
             'admission_date' => $data['admission_date'] ?? today(),
@@ -306,9 +323,7 @@ class BillController extends Controller
             'notes' => $data['notes'] ?? null,
             'internal_notes' => $data['internal_notes'] ?? null,
             'additional_note_color' => $data['additional_note_color'] ?? null,
-            'job_kind' => BusinessTypes::usesVehicleJobs($type)
-                ? ($data['job_kind'] ?? Bill::JOB_KIND_REPAIR)
-                : Bill::JOB_KIND_REPAIR,
+            'job_kind' => $jobKind,
             'source_type' => $sourceType,
             'source_id' => $sourceId,
             'created_by' => $request->user()->id,

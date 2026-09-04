@@ -28,7 +28,7 @@ class ImprovmxMailService
         $response = Http::withBasicAuth('api', (string) config('services.improvmx.api_key'))
             ->acceptJson()
             ->timeout(20)
-            ->post("https://api.improvmx.com/v3/domains/{$domain}/emails/outbound", [
+            ->post("https://api.improvmx.com/v4/domains/{$domain}/emails/outbound", [
                 'from' => config('services.improvmx.from'),
                 'to' => $payload['to'],
                 'subject' => $payload['subject'],

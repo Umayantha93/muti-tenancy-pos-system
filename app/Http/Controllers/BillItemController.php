@@ -40,6 +40,14 @@ class BillItemController extends Controller
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
+        if (BusinessTypes::usesStoreCounter($businessType) && ($data['type'] ?? '') === 'labor') {
+            abort_unless(
+                $request->user()->canAccessFeature('repair_bills') && $bill->job_kind === Bill::JOB_KIND_REPAIR,
+                422,
+                'Repair charges can only be added to a repair bill.'
+            );
+        }
+
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id);
         $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
         $this->assertLineReady($data, $typeMeta);

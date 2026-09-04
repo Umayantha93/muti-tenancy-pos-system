@@ -45,6 +45,7 @@ class SuperAdminTenantController extends Controller
         return response()->json([
             'business_types' => BusinessTypes::all(),
             'defaults' => $type ? BusinessTypes::defaults($type) : [],
+            'optional' => $type ? BusinessTypes::optionalFeatures($type) : [],
             'features' => Feature::query()
                 ->when($type, fn ($query) => $query->whereIn('key', $keys))
                 ->orderBy('sort_order')
@@ -136,8 +137,8 @@ class SuperAdminTenantController extends Controller
                 'role' => 'business_owner',
                 'status' => 'active',
             ]);
-            $allowed = BusinessTypes::defaults($data['business_type']);
-            $requested = $data['features'] ?? $allowed;
+            $allowed = BusinessTypes::featuresForType($data['business_type']);
+            $requested = $data['features'] ?? BusinessTypes::defaults($data['business_type']);
             $featureIds = Feature::whereIn('key', array_values(array_intersect($requested, $allowed)))->pluck('id');
             $tenant->features()->sync($featureIds->mapWithKeys(fn ($id) => [$id => ['is_enabled' => true]]));
             $this->audit($request, 'tenant.created', $tenant, ['business_name' => $tenant->business_name]);
@@ -425,6 +426,7 @@ class SuperAdminTenantController extends Controller
         return response()->json([
             'available' => Feature::query()->whereIn('key', $keys)->orderBy('sort_order')->orderBy('name')->get(),
             'enabled' => $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key'),
+            'optional' => BusinessTypes::optionalFeatures($tenant->business_type),
             'business_type' => $tenant->business_type,
         ]);
     }
@@ -432,7 +434,7 @@ class SuperAdminTenantController extends Controller
     public function updateFeatures(Request $request, Tenant $tenant): JsonResponse
     {
         $data = $request->validate(['features' => ['required', 'array'], 'features.*' => ['boolean']]);
-        $allowed = BusinessTypes::defaults($tenant->business_type);
+        $allowed = BusinessTypes::featuresForType($tenant->business_type);
         $features = Feature::whereIn('key', array_keys($data['features']))
             ->whereIn('key', $allowed)
             ->get();
