@@ -89,9 +89,21 @@ class Tenant extends Model
         return $this->users()->where('is_secondary_view', true)->first();
     }
 
+    protected static function booted(): void
+    {
+        static::created(function (Tenant $tenant): void {
+            Branch::ensureDefault($tenant);
+        });
+    }
+
     public function users(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    public function branches(): HasMany
+    {
+        return $this->hasMany(Branch::class);
     }
 
     public function features(): BelongsToMany

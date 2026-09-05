@@ -22,6 +22,7 @@ class AttendanceController extends Controller
         ]);
 
         return response()->json(Attendance::with('employee')
+            ->tap(fn ($query) => \App\Support\BranchQuery::constrainViaEmployee($query))
             ->when(isset($data['employee_id']), fn ($query) => $query->where('employee_id', $data['employee_id']))
             ->when(isset($data['month']), fn ($query) => $query->whereMonth('date', $data['month']))
             ->when(isset($data['year']), fn ($query) => $query->whereYear('date', $data['year']))
@@ -107,6 +108,7 @@ class AttendanceController extends Controller
                 ->whereBetween('date', [$checkIn->copy()->startOfDay(), $checkIn->copy()->endOfDay()])
                 ->first() ?? new Attendance(['employee_id' => $employee->id, 'date' => $checkIn->toDateString()]);
             $attendance->tenant_id = $employee->tenant_id;
+            $attendance->branch_id = $employee->home_branch_id;
             $attendance->fill([
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,

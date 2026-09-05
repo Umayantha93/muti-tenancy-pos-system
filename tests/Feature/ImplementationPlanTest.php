@@ -11,13 +11,11 @@ use App\Models\StockReceipt;
 use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class ImplementationPlanTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_garage_bill_without_vat_keeps_today_totals(): void
     {

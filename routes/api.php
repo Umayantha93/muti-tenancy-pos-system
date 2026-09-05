@@ -9,6 +9,7 @@ use App\Http\Controllers\BillPaymentController;
 use App\Http\Controllers\BillProfitController;
 use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
+use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
 use App\Http\Controllers\CustomerController;
@@ -27,8 +28,10 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RetailSaleController;
 use App\Http\Controllers\ServiceAddonController;
+use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
+use App\Http\Controllers\SuperAdminBranchController;
 use App\Http\Controllers\SuperAdminInventoryController;
 use App\Http\Controllers\SuperAdminTenantController;
 use App\Http\Controllers\SuperAdminUserController;
@@ -36,7 +39,9 @@ use App\Http\Controllers\MeController;
 use App\Http\Controllers\TenantProfileController;
 use App\Http\Controllers\TenantStaffController;
 use App\Http\Controllers\VehicleController;
+use App\Http\Controllers\WarrantyController;
 use App\Http\Controllers\WorkShiftController;
+use App\Support\SessionPayload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -45,11 +50,8 @@ Route::get('/auth/branding', [AuthController::class, 'branding'])->middleware('t
 Route::post('/attendance/ingest', [AttendanceController::class, 'ingest'])->middleware('throttle:120,1');
 Route::get('/bills/shared/{token}', [BillShareController::class, 'show'])->middleware('throttle:60,1');
 
-Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(function () {
-        Route::get('/user', fn (Request $request) => [
-            'user' => $request->user()->load(['tenant', 'employee']),
-            'features' => $request->user()->accessibleFeatureKeys(),
-        ]);
+Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.context'])->group(function () {
+        Route::get('/user', fn (Request $request) => SessionPayload::for($request->user()));
     Route::post('/auth/logout', [AuthController::class, 'logout']);
 
     Route::prefix('super-admin')->middleware('role:super_admin')->group(function () {
@@ -64,6 +66,11 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         Route::put('/tenants/{tenant}/features', [SuperAdminTenantController::class, 'updateFeatures']);
         Route::get('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'users']);
         Route::post('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'storeUser']);
+        Route::get('/tenants/{tenant}/branches', [SuperAdminBranchController::class, 'index']);
+        Route::post('/tenants/{tenant}/branches', [SuperAdminBranchController::class, 'store']);
+        Route::put('/tenants/{tenant}/branches/{branch}', [SuperAdminBranchController::class, 'update']);
+        Route::post('/tenants/{tenant}/branches/{branch}/deactivate', [SuperAdminBranchController::class, 'deactivate']);
+        Route::post('/tenants/{tenant}/branches/{branch}/activate', [SuperAdminBranchController::class, 'activate']);
         Route::put('/tenants/{tenant}/dual-financial-view', [SuperAdminTenantController::class, 'updateDualFinancialView']);
         Route::get('/tenants/{tenant}/fee-payments', [SuperAdminTenantController::class, 'feePayments']);
         Route::put('/tenants/{tenant}/fee-payments/{year}/{month}', [SuperAdminTenantController::class, 'updateFeePayment']);
@@ -103,8 +110,10 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
             Route::apiResource('bills', BillController::class)->only(['index', 'store', 'show', 'update']);
             Route::post('/bills/from-vehicle', [BillController::class, 'storeFromVehicle']);
             Route::post('/bills/instant', [BillController::class, 'storeInstant']);
+            Route::post('/bills/quick', [BillController::class, 'storeQuick']);
             Route::post('/bills/{bill}/close', [BillController::class, 'close']);
             Route::post('/bills/{bill}/owe-in', [BillController::class, 'oweIn']);
+            Route::post('/bills/{bill}/move-branch', [BillController::class, 'moveBranch']);
             Route::put('/bills/{bill}/employees', [BillController::class, 'syncEmployees']);
             Route::post('/bills/{bill}/items', [BillItemController::class, 'store']);
             Route::post('/bills/{bill}/items/panel', [BillItemController::class, 'storePanel']);
@@ -117,6 +126,11 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
+
+        Route::middleware('feature:warranties')->group(function () {
+            Route::get('/warranties', [WarrantyController::class, 'index']);
+            Route::put('/bills/{bill}/items/{item}/warranty', [WarrantyController::class, 'update']);
+        });
 
         Route::middleware('feature:parts_inventory')->group(function () {
             Route::get('/parts', [PartController::class, 'index']);
@@ -173,9 +187,15 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active'])->group(funct
 
         Route::get('/me', [MeController::class, 'show']);
         Route::put('/me', [MeController::class, 'update']);
+        Route::post('/me/active-branch', [BranchController::class, 'activate']);
         Route::get('/me/leaves', [MeController::class, 'leaves']);
         Route::post('/me/leaves', [MeController::class, 'applyLeave']);
         Route::get('/me/shifts', [MeController::class, 'shifts']);
+
+        Route::get('/branches', [BranchController::class, 'index']);
+        Route::get('/branches/{branch}', [BranchController::class, 'summary']);
+        Route::put('/branches/{branch}', [BranchController::class, 'update']);
+        Route::post('/stock-transfers', [StockTransferController::class, 'store'])->middleware('role:business_owner');
 
         Route::prefix('tenant')->middleware('role:business_owner')->group(function () {
             Route::get('/profile', [TenantProfileController::class, 'show']);

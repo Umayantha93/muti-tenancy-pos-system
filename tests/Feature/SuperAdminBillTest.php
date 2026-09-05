@@ -7,13 +7,11 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class SuperAdminBillTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_super_admin_can_reopen_edit_close_and_delete_tenant_bills(): void
     {

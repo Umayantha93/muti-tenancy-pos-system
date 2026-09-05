@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Models\Concerns\StampsBranch;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,11 +12,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'employee_id', 'month', 'year', 'days_present', 'days_absent', 'hours_worked', 'overtime_hours',
     'base_salary', 'overtime_pay', 'allowances_total', 'target_incentive', 'gross_pay',
     'epf_employee', 'epf_employer', 'etf_employer', 'unpaid_leave_days',
-    'bonus', 'deductions', 'net_salary', 'generated_at', 'generated_by',
+    'bonus', 'deductions', 'net_salary', 'generated_at', 'generated_by', 'branch_id',
 ])]
 class Payroll extends Model
 {
-    use BelongsToTenant;
+    use BelongsToTenant, StampsBranch;
     protected function casts(): array
     {
         return [

@@ -10,13 +10,11 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class OwnerOpsTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_credit_inventory_can_be_settled_in_steps_and_shows_remaining(): void
     {

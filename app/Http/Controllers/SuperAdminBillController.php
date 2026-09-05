@@ -15,6 +15,7 @@ use App\Models\RetailSale;
 use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Services\BillCalculator;
+use App\Services\BranchInventory;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -113,7 +114,7 @@ class SuperAdminBillController extends Controller
             $bill->load('items');
             foreach ($bill->items as $item) {
                 if ($item->part_id) {
-                    Part::whereKey($item->part_id)->increment('stock_qty', (int) $item->quantity);
+                    $item->part?->returnStock((int) $item->quantity, $bill->branch_id);
                 }
                 if ($item->purchase_expense_id) {
                     Expense::whereKey($item->purchase_expense_id)->delete();
@@ -205,7 +206,7 @@ class SuperAdminBillController extends Controller
             $part = ! empty($data['part_id'])
                 ? Part::where('tenant_id', $bill->tenant_id)->lockForUpdate()->findOrFail($data['part_id'])
                 : null;
-            if ($part && $part->stock_qty < $quantity) {
+            if ($part && BranchInventory::partQty($part->id, $bill->branch_id) < $quantity) {
                 throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part.']]);
             }
 
@@ -250,7 +251,7 @@ class SuperAdminBillController extends Controller
             ]);
             $item->tenant_id = $bill->tenant_id;
             $item->save();
-            $part?->takeStock((int) $quantity);
+            $part?->takeStock((int) $quantity, $bill->branch_id);
             $calculator->recalculate($bill);
 
             return $item;
@@ -281,12 +282,12 @@ class SuperAdminBillController extends Controller
                 $delta = (int) $newQty - (int) $item->quantity;
                 if ($delta > 0) {
                     $part = Part::where('tenant_id', $bill->tenant_id)->lockForUpdate()->findOrFail($item->part_id);
-                    if ($part->stock_qty < $delta) {
+                    if (BranchInventory::partQty($part->id, $bill->branch_id) < $delta) {
                         throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part.']]);
                     }
-                    $part->decrement('stock_qty', $delta);
+                    $part->takeStock($delta, $bill->branch_id);
                 } elseif ($delta < 0) {
-                    Part::whereKey($item->part_id)->increment('stock_qty', abs($delta));
+                    $item->part?->returnStock(abs($delta), $bill->branch_id);
                 }
             }
 
@@ -316,7 +317,7 @@ class SuperAdminBillController extends Controller
 
         DB::transaction(function () use ($bill, $item, $calculator) {
             if ($item->part_id) {
-                Part::whereKey($item->part_id)->increment('stock_qty', (int) $item->quantity);
+                $item->part?->returnStock((int) $item->quantity, $bill->branch_id);
             }
             if ($item->purchase_expense_id) {
                 Expense::whereKey($item->purchase_expense_id)->delete();

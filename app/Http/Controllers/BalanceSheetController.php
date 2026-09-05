@@ -10,6 +10,7 @@ use App\Models\ExpenseSettlement;
 use App\Models\Payroll;
 use App\Services\BillProfitAnalyzer;
 use App\Services\MonetaryView;
+use App\Support\BranchQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -42,8 +43,8 @@ class BalanceSheetController extends Controller
     private function summary(int $month, int $year, MonetaryView $view, bool $withBreakdown = true): array
     {
         if ($view->active()) {
-            $payments = BillPayment::query()
-                ->with(['bill.items'])
+            $payments = BranchQuery::constrainViaBill(BillPayment::query()
+                ->with(['bill.items']))
                 ->whereYear('paid_at', $year)
                 ->whereMonth('paid_at', $month)
                 ->get()
@@ -52,8 +53,8 @@ class BalanceSheetController extends Controller
                     $payment->bill?->items ?? []
                 ));
 
-            $advances = BillItem::query()
-                ->with(['bill.items'])
+            $advances = BranchQuery::constrainViaBill(BillItem::query()
+                ->with(['bill.items']))
                 ->where('type', 'advance')
                 ->whereYear('created_at', $year)
                 ->whereMonth('created_at', $month)
@@ -63,9 +64,9 @@ class BalanceSheetController extends Controller
                     $item->bill?->items ?? []
                 ));
 
-            $manualExpenses = Expense::postedIn($month, $year);
+            $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
             $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
-            $salaryTotal = (float) Payroll::where('year', $year)->where('month', $month)->sum('net_salary');
+            $salaryTotal = (float) BranchQuery::constrain(Payroll::query())->where('year', $year)->where('month', $month)->sum('net_salary');
             $income = round((float) $payments + (float) $advances, 2);
             $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal), 2);
             $result = [
@@ -92,11 +93,11 @@ class BalanceSheetController extends Controller
             return $result;
         }
 
-        $payments = (float) BillPayment::whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
-        $advances = (float) BillItem::where('type', 'advance')->whereYear('created_at', $year)->whereMonth('created_at', $month)->sum('line_total');
-        $manualExpenses = Expense::postedIn($month, $year);
+        $payments = (float) BranchQuery::constrainViaBill(BillPayment::query())->whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
+        $advances = (float) BranchQuery::constrainViaBill(BillItem::query())->where('type', 'advance')->whereYear('created_at', $year)->whereMonth('created_at', $month)->sum('line_total');
+        $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
         $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
-        $salaryTotal = (float) Payroll::where('year', $year)->where('month', $month)->sum('net_salary');
+        $salaryTotal = (float) BranchQuery::constrain(Payroll::query())->where('year', $year)->where('month', $month)->sum('net_salary');
         $income = $payments + $advances;
         $expenses = $manualTotal + $salaryTotal;
         $result = ['income' => $income, 'expenses' => $expenses, 'net_profit' => $income - $expenses];
@@ -138,6 +139,7 @@ class BalanceSheetController extends Controller
 
         BillPayment::query()
             ->with(['bill:id,bill_number', 'bill.items'])
+            ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
             ->whereYear('paid_at', $year)
             ->whereMonth('paid_at', $month)
             ->orderBy('paid_at')
@@ -161,6 +163,7 @@ class BalanceSheetController extends Controller
 
         BillItem::query()
             ->with(['bill:id,bill_number', 'bill.items'])
+            ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
             ->where('type', 'advance')
             ->whereYear('created_at', $year)
             ->whereMonth('created_at', $month)
@@ -185,6 +188,7 @@ class BalanceSheetController extends Controller
 
         Expense::query()
             ->postedIn($month, $year)
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->orderBy('expense_date')
             ->get()
             ->each(function (Expense $expense) use ($rows, $view) {
@@ -206,7 +210,13 @@ class BalanceSheetController extends Controller
             });
 
         ExpenseSettlement::query()
-            ->with('expense:id,description,category')
+            ->with('expense:id,description,category,branch_id')
+            ->whereHas('expense', function ($query) {
+                $id = BranchQuery::idForRead();
+                if ($id !== null) {
+                    $query->where('branch_id', $id);
+                }
+            })
             ->whereYear('settled_on', $year)
             ->whereMonth('settled_on', $month)
             ->orderBy('settled_on')
@@ -230,6 +240,7 @@ class BalanceSheetController extends Controller
 
         Expense::query()
             ->credit()
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->whereYear('expense_date', $year)
             ->whereMonth('expense_date', $month)
             ->orderBy('expense_date')
@@ -252,7 +263,7 @@ class BalanceSheetController extends Controller
             });
 
         $analyzer = app(BillProfitAnalyzer::class);
-        Bill::query()
+        BranchQuery::constrain(Bill::query())
             ->with(['items.part'])
             ->whereNotNull('closed_at')
             ->whereYear('closed_at', $year)
@@ -278,7 +289,7 @@ class BalanceSheetController extends Controller
                 ]);
             });
 
-        Payroll::query()
+        BranchQuery::constrain(Payroll::query())
             ->with('employee:id,name')
             ->where('year', $year)
             ->where('month', $month)
@@ -330,6 +341,7 @@ class BalanceSheetController extends Controller
     {
         $items = Expense::query()
             ->credit()
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->with('settlements')
             ->orderBy('due_date')
             ->orderBy('expense_date')
@@ -376,6 +388,12 @@ class BalanceSheetController extends Controller
     private function settlementsTotal(int $month, int $year): float
     {
         return (float) ExpenseSettlement::query()
+            ->whereHas('expense', function ($query) {
+                $id = BranchQuery::idForRead();
+                if ($id !== null) {
+                    $query->where('branch_id', $id);
+                }
+            })
             ->whereYear('settled_on', $year)
             ->whereMonth('settled_on', $month)
             ->sum('amount');
@@ -386,7 +404,7 @@ class BalanceSheetController extends Controller
      */
     private function billReceivables(MonetaryView $view): array
     {
-        $bills = Bill::query()->where('status', 'owe_in')->get(['balance_due']);
+        $bills = BranchQuery::constrain(Bill::query())->where('status', 'owe_in')->get(['balance_due']);
         $total = (float) $bills->sum('balance_due');
 
         return [

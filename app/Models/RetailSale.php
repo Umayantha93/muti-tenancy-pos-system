@@ -3,14 +3,15 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Models\Concerns\StampsBranch;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['customer_id', 'bill_id', 'status', 'notes', 'created_by'])]
+#[Fillable(['customer_id', 'bill_id', 'status', 'notes', 'created_by', 'branch_id'])]
 class RetailSale extends Model
 {
-    use BelongsToTenant;
+    use BelongsToTenant, StampsBranch;
 
     public function customer(): BelongsTo
     {

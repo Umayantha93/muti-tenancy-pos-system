@@ -6,6 +6,7 @@ use App\Models\Expense;
 use App\Models\Part;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
+use App\Services\BranchInventory;
 use App\Support\InventoryCosting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,6 +41,8 @@ class PartController extends Controller
             ->when($request->filled('year'), fn ($query) => $query->where('year', $request->integer('year')))
             ->orderBy($sort, $direction)
             ->paginate($request->integer('per_page', 20));
+
+        $parts->getCollection()->transform(fn (Part $part) => BranchInventory::overlayPart($part));
 
         return $this->moneyJson($parts);
     }
@@ -384,7 +387,7 @@ class PartController extends Controller
 
     public function show(Part $part): JsonResponse
     {
-        return $this->moneyJson($part);
+        return $this->moneyJson(BranchInventory::overlayPart($part));
     }
 
     public function update(Request $request, Part $part): JsonResponse
@@ -435,16 +438,16 @@ class PartController extends Controller
         [$part, $expense] = DB::transaction(function () use ($data, $part, $request) {
             $qty = (int) $data['quantity'];
             $unitCost = (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
+            $shopQty = BranchInventory::partQty($part->id);
             $blendedCost = InventoryCosting::weightedAverageCost(
-                (int) $part->stock_qty,
+                $shopQty,
                 $part->cost_price,
                 $qty,
                 $unitCost,
             );
-            $part->update([
-                'stock_qty' => (int) $part->stock_qty + $qty,
-                'cost_price' => $blendedCost,
-            ]);
+            BranchInventory::addPart($part, $qty);
+            $part->refresh();
+            $part->update(['cost_price' => $blendedCost]);
             $expense = $this->recordPurchaseExpense(
                 $request,
                 $part->refresh(),
@@ -459,7 +462,7 @@ class PartController extends Controller
             return [$part->refresh(), $expense];
         });
 
-        return response()->json(['part' => $part, 'expense' => $expense]);
+        return response()->json(['part' => BranchInventory::overlayPart($part), 'expense' => $expense]);
     }
 
     private function validated(Request $request, ?Part $part = null): array

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Models\Concerns\StampsBranch;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -21,10 +22,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'updated_by',
     'supplier_id',
     'stock_receipt_id',
+    'branch_id',
 ])]
 class Expense extends Model
 {
-    use BelongsToTenant;
+    use BelongsToTenant, StampsBranch;
 
     public const STATUS_PAID = 'paid';
 

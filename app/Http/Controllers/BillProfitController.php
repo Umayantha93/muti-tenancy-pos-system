@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bill;
 use App\Services\BillProfitAnalyzer;
+use App\Support\BranchQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -23,13 +24,13 @@ class BillProfitController extends Controller
         $to = $data['date_to'] ?? now()->toDateString();
         $jobKind = $data['job_kind'] ?? null;
 
-        $base = fn () => Bill::query()
+        $base = fn () => BranchQuery::constrain(Bill::query())
             ->whereDate('admission_date', '>=', $from)
             ->whereDate('admission_date', '<=', $to)
             ->when($jobKind, fn ($query) => $query->where('job_kind', $jobKind));
 
         $bills = $base()
-            ->with(['customer', 'vehicle', 'items.part', 'payments'])
+            ->with(['customer', 'vehicle', 'items.part', 'payments', 'branch:id,name,code'])
             ->latest('admission_date')
             ->orderByDesc('id')
             ->paginate($data['per_page'] ?? 50);
@@ -45,6 +46,7 @@ class BillProfitController extends Controller
                 'owe_in_due_date' => $bill->owe_in_due_date?->toDateString(),
                 'customer' => $bill->customer,
                 'vehicle' => $bill->vehicle,
+                'branch' => $bill->branch,
                 'amount_paid' => $bill->amount_paid,
                 'balance_due' => $bill->balance_due,
                 'subtotal' => $bill->subtotal,

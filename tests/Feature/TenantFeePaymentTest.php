@@ -7,13 +7,11 @@ use App\Models\Tenant;
 use App\Models\TenantFeePayment;
 use App\Models\User;
 use Carbon\Carbon;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class TenantFeePaymentTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_payment_due_soon_is_false_when_current_month_is_marked_paid(): void
     {

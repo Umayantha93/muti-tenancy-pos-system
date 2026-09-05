@@ -6,6 +6,7 @@ use App\Models\Expense;
 use App\Models\Product;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
+use App\Services\BranchInventory;
 use App\Support\InventoryCosting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,6 +25,8 @@ class ProductController extends Controller
             ->when($request->boolean('active_only'), fn ($q) => $q->where('active', true))
             ->latest()
             ->paginate($request->integer('per_page', 30));
+
+        $products->getCollection()->transform(fn (Product $product) => BranchInventory::overlayProduct($product));
 
         return $this->moneyJson($products);
     }
@@ -48,7 +51,7 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        return $this->moneyJson($product);
+        return $this->moneyJson(BranchInventory::overlayProduct($product));
     }
 
     public function update(Request $request, Product $product): JsonResponse
@@ -101,14 +104,16 @@ class ProductController extends Controller
             $unitCost = $unitCostProvided
                 ? (float) $data['unit_cost']
                 : (float) ($product->cost_price ?? 0);
+            $shopQty = BranchInventory::productQty($product->id);
             $blendedCost = InventoryCosting::weightedAverageCost(
-                (int) $product->stock_qty,
+                $shopQty,
                 $product->cost_price,
                 $qty,
                 $unitCost,
             );
+            BranchInventory::returnProduct($product, $qty);
+            $product->refresh();
             $product->update([
-                'stock_qty' => (int) $product->stock_qty + $qty,
                 'cost_price' => $blendedCost,
             ]);
 

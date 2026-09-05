@@ -6,14 +6,12 @@ use App\Models\Bill;
 use App\Models\Feature;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class BillShareTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_guest_can_view_a_shared_bill_by_token(): void
     {

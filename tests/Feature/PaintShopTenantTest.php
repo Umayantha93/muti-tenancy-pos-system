@@ -9,13 +9,11 @@ use App\Models\Part;
 use App\Models\ServiceAddon;
 use App\Models\User;
 use App\Support\BusinessTypes;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class PaintShopTenantTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_super_admin_onboard_seeds_paint_catalogs_not_garage_defaults(): void
     {

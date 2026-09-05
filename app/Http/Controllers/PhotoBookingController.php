@@ -7,6 +7,7 @@ use App\Models\BillItem;
 use App\Models\Customer;
 use App\Models\PhotoBooking;
 use App\Models\PhotoPackage;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class PhotoBookingController extends Controller
     {
         $bookings = PhotoBooking::query()
             ->with(['customer', 'package', 'bill.items', 'bill.payments'])
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = '%'.$request->string('search').'%';

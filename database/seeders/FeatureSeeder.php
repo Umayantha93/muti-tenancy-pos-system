@@ -30,6 +30,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'bill_sms', 'name' => 'Bill SMS', 'description' => 'Send quotation / paid bill links to customers by SMS', 'group' => 'Service Intake', 'sort_order' => 31],
             ['key' => 'bill_profits', 'name' => 'Bill Profits Analysis', 'description' => 'Bill revenue, inventory cost, and credit-bill profit reporting', 'group' => 'Service Intake', 'sort_order' => 32],
             ['key' => 'repair_bills', 'name' => 'Repair', 'description' => 'Repair bills and repair profit for stores (phones, parts counters). Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 33],
+            ['key' => 'warranties', 'name' => 'Warranties', 'description' => 'Add a warranty on the bill from the purchase date (1 year, 2 years, or a custom end date).', 'group' => 'Service Intake', 'sort_order' => 34],
             ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Garage parts and stock', 'group' => 'Inventory', 'sort_order' => 40],
             ['key' => 'product_catalog', 'name' => 'Product catalog', 'description' => 'Clothing SKUs, sizes, and stock', 'group' => 'Inventory', 'sort_order' => 41],
             ['key' => 'cottage_rooms', 'name' => 'Rooms', 'description' => 'Cottage rooms and rates', 'group' => 'Inventory', 'sort_order' => 42],

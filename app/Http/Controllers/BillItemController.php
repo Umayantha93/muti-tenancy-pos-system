@@ -9,7 +9,9 @@ use App\Models\LaborItem;
 use App\Models\Part;
 use App\Models\ServiceAddon;
 use App\Services\BillCalculator;
+use App\Services\BranchInventory;
 use App\Support\BusinessTypes;
+use App\Support\WarrantyPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +40,9 @@ class BillItemController extends Controller
             'purchase_unit_cost' => ['nullable', 'numeric', 'min:0'],
             'service_addon_id' => ['nullable', Rule::exists('service_addons', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
+            'warranty_starts_on' => ['nullable', 'date'],
+            'warranty_until' => ['nullable', 'date'],
         ]);
 
         if (BusinessTypes::usesStoreCounter($businessType) && ($data['type'] ?? '') === 'labor') {
@@ -189,7 +194,7 @@ class BillItemController extends Controller
 
             foreach ($lines as $line) {
                 if ($line->part_id) {
-                    Part::whereKey($line->part_id)->increment('stock_qty', (int) $line->quantity);
+                    $line->part?->returnStock((int) $line->quantity, $bill->branch_id);
                 }
                 if ($line->purchase_expense_id) {
                     Expense::whereKey($line->purchase_expense_id)->delete();
@@ -275,8 +280,8 @@ class BillItemController extends Controller
         }
 
         $part = ! empty($data['part_id']) ? Part::lockForUpdate()->findOrFail($data['part_id']) : null;
-        if ($part && $part->stock_qty < $quantity) {
-            throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part.']]);
+        if ($part && BranchInventory::partQty($part->id, $bill->branch_id) < $quantity) {
+            throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part at this shop.']]);
         }
 
         $unitPrice = $data['type'] === 'customer_part'
@@ -316,8 +321,16 @@ class BillItemController extends Controller
             'purchase_unit_cost' => $purchaseUnitCost,
             'purchase_expense_id' => $expense?->id,
             'line_total' => round($unitPrice * $quantity, 2),
+            ...($request->user()->canAccessFeature('warranties')
+                ? WarrantyPeriod::resolve(
+                    $data['warranty_starts_on'] ?? null,
+                    $data['warranty_months'] ?? null,
+                    $data['warranty_until'] ?? null,
+                    $bill->admission_date,
+                )
+                : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
         ]);
-        $part?->takeStock((int) $quantity);
+        $part?->takeStock((int) $quantity, $bill->branch_id);
 
         return $item;
     }

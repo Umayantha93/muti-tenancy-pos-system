@@ -79,6 +79,7 @@ class PayrollGenerator
                         'net_salary' => $net,
                         'generated_at' => now(),
                         'generated_by' => $request->user()->id,
+                        'branch_id' => $employee->home_branch_id,
                     ],
                 )->load('employee');
             });

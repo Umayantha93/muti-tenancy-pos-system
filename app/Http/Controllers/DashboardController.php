@@ -12,6 +12,7 @@ use App\Models\Payroll;
 use App\Models\PhotoBooking;
 use App\Models\Product;
 use App\Services\MonetaryView;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,50 +30,55 @@ class DashboardController extends Controller
 
         $monthlyIncome = $finance ? $this->incomeFor(
             $view,
-            BillPayment::query()->with(['bill.items'])->whereYear('paid_at', now()->year)->whereMonth('paid_at', now()->month)->get(),
-            BillItem::query()->with(['bill.items'])->where('type', 'advance')->whereYear('created_at', now()->year)->whereMonth('created_at', now()->month)->get(),
+            BranchQuery::constrainViaBill(BillPayment::query()->with(['bill.items']))->whereYear('paid_at', now()->year)->whereMonth('paid_at', now()->month)->get(),
+            BranchQuery::constrainViaBill(BillItem::query()->with(['bill.items']))->where('type', 'advance')->whereYear('created_at', now()->year)->whereMonth('created_at', now()->month)->get(),
         ) : null;
 
         $monthlyExpensesRaw = $finance
-            ? (float) Expense::postedIn((int) now()->month, (int) now()->year)->sum('amount')
-                + (float) Payroll::where('year', now()->year)->where('month', now()->month)->sum('net_salary')
+            ? (float) BranchQuery::constrain(Expense::postedIn((int) now()->month, (int) now()->year))->sum('amount')
+                + (float) BranchQuery::constrain(Payroll::query())->where('year', now()->year)->where('month', now()->month)->sum('net_salary')
             : null;
         $monthlyExpenses = $finance
             ? ($view->active() ? $view->scaleExpense((float) $monthlyExpensesRaw) : $monthlyExpensesRaw)
             : null;
 
         $lowStock = null;
+        $branchId = BranchQuery::idForRead($request);
         if ($user->canAccessFeature('parts_inventory')) {
             $lowThreshold = $type === BusinessTypes::PAINT ? 250 : 5;
-            $lowStock = Part::where('stock_qty', '<=', $lowThreshold)->count();
+            $lowStock = $branchId
+                ? \App\Models\BranchStock::query()->where('branch_id', $branchId)->whereNotNull('part_id')->where('qty', '<=', $lowThreshold)->count()
+                : Part::where('stock_qty', '<=', $lowThreshold)->count();
         } elseif ($user->canAccessFeature('product_catalog')) {
-            $lowStock = Product::where('stock_qty', '<=', 5)->count();
+            $lowStock = $branchId
+                ? \App\Models\BranchStock::query()->where('branch_id', $branchId)->whereNotNull('product_id')->where('qty', '<=', 5)->count()
+                : Product::where('stock_qty', '<=', 5)->count();
         }
 
         $todayIncome = $billing ? $this->incomeFor(
             $view,
-            BillPayment::query()->with(['bill.items'])->whereDate('paid_at', today())->get(),
-            BillItem::query()->with(['bill.items'])->where('type', 'advance')->whereDate('created_at', today())->get(),
+            BranchQuery::constrainViaBill(BillPayment::query()->with(['bill.items']))->whereDate('paid_at', today())->get(),
+            BranchQuery::constrainViaBill(BillItem::query()->with(['bill.items']))->where('type', 'advance')->whereDate('created_at', today())->get(),
         ) : null;
 
         $recentBills = $billing
-            ? Bill::with(['customer', 'vehicle', 'items', 'payments'])->latest()->limit(5)->get()
+            ? BranchQuery::constrain(Bill::with(['customer', 'vehicle', 'items', 'payments', 'branch:id,name']))->latest()->limit(5)->get()
             : collect();
 
         return response()->json([
             'features' => $user->accessibleFeatureKeys(),
             'business_type' => $type,
             'today_income' => $todayIncome,
-            'open_bills' => $billing ? Bill::whereIn('status', ['open', 'partially_paid', 'owe_in'])->count() : null,
+            'open_bills' => $billing ? BranchQuery::constrain(Bill::query())->whereIn('status', ['open', 'partially_paid', 'owe_in'])->count() : null,
             'low_stock_parts' => $inventory ? $lowStock : null,
             'upcoming_bookings' => $user->canAccessFeature('photo_bookings')
                 ? $view->transform(
-                    PhotoBooking::with(['customer', 'package'])->where('scheduled_at', '>=', now())->whereNotIn('status', ['cancelled', 'delivered'])->orderBy('scheduled_at')->limit(5)->get()
+                    BranchQuery::constrain(PhotoBooking::with(['customer', 'package']))->where('scheduled_at', '>=', now())->whereNotIn('status', ['cancelled', 'delivered'])->orderBy('scheduled_at')->limit(5)->get()
                 )
                 : [],
             'active_stays' => $user->canAccessFeature('cottage_stays')
                 ? $view->transform(
-                    CottageStay::with(['customer', 'room'])->whereIn('status', ['reserved', 'checked_in'])->orderBy('check_in')->limit(5)->get()
+                    BranchQuery::constrain(CottageStay::with(['customer', 'room']))->whereIn('status', ['reserved', 'checked_in'])->orderBy('check_in')->limit(5)->get()
                 )
                 : [],
             'monthly_income' => $monthlyIncome,

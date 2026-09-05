@@ -14,15 +14,33 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['tenant_id', 'employee_id', 'name', 'email', 'password', 'role', 'status', 'is_secondary_view'])]
+#[Fillable(['tenant_id', 'employee_id', 'home_branch_id', 'last_branch_id', 'name', 'email', 'password', 'role', 'status', 'is_secondary_view'])]
 #[Hidden(['password', 'remember_token', 'is_secondary_view'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
+    protected static function booted(): void
+    {
+        static::creating(function (User $user): void {
+            if (! $user->tenant_id) {
+                return;
+            }
+            $default = Branch::defaultIdFor($user->tenant_id);
+            if ($default && ! $user->last_branch_id) {
+                $user->last_branch_id = $default;
+            }
+            if ($default && $user->role === 'staff' && ! $user->home_branch_id) {
+                $user->home_branch_id = $default;
+            }
+        });
+    }
+
     public function tenant(): BelongsTo { return $this->belongsTo(Tenant::class); }
     public function employee(): BelongsTo { return $this->belongsTo(Employee::class); }
+    public function homeBranch(): BelongsTo { return $this->belongsTo(Branch::class, 'home_branch_id'); }
+    public function lastBranch(): BelongsTo { return $this->belongsTo(Branch::class, 'last_branch_id'); }
     public function permissions(): BelongsToMany { return $this->belongsToMany(Feature::class, 'user_permissions')->withPivot('can_access')->withTimestamps(); }
 
     public function linkedEmployee(): ?Employee

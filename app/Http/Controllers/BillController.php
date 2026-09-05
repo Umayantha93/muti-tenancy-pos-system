@@ -3,9 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bill;
+use App\Models\BillItem;
+use App\Models\BillPayment;
 use App\Models\Customer;
 use App\Models\Employee;
 use App\Models\Vehicle;
+use App\Services\BillCalculator;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,18 +30,20 @@ class BillController extends Controller
         ]);
 
         $bills = Bill::query()
-            ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position'])
+            ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position', 'branch:id,name,code,address,phone'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
                 $query->where(fn ($nested) => $nested->where('bill_number', 'like', $search)
+                    ->orWhere('notes', 'like', $search)
                     ->orWhereHas('vehicle', fn ($vehicle) => $vehicle->where('number_plate', 'like', $search))
-                    ->orWhereHas('customer', fn ($customer) => $customer->where('name', 'like', $search)));
+                    ->orWhereHas('customer', fn ($customer) => $customer->where('name', 'like', $search)->orWhere('phone', 'like', $search)));
             })
             ->when(! empty($data['date_from']), fn ($query) => $query->whereDate('admission_date', '>=', $data['date_from']))
             ->when(! empty($data['date_to']), fn ($query) => $query->whereDate('admission_date', '<=', $data['date_to']))
             ->queued()
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->paginate($data['per_page'] ?? 15);
 
         return $this->moneyJson($bills);
@@ -183,11 +189,83 @@ class BillController extends Controller
         return response()->json($bill, 201);
     }
 
+    public function storeQuick(Request $request, BillCalculator $calculator): JsonResponse
+    {
+        $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE));
+        abort_unless(BusinessTypes::usesStoreCounter($type), 422, 'Quick bills are for store tenants.');
+
+        $data = $request->validate([
+            'description' => ['required', 'string', 'max:255'],
+            'amount' => ['required', 'numeric', 'min:0'],
+            'quantity' => ['nullable', 'numeric', 'gt:0'],
+            'customer_name' => ['nullable', 'string', 'max:255'],
+            'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
+            'payment_method' => ['nullable', Rule::in(['cash', 'card', 'bank_transfer', 'other'])],
+            'payment_amount' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $bill = DB::transaction(function () use ($data, $request, $calculator) {
+            $name = trim((string) ($data['customer_name'] ?? ''));
+            $phone = trim((string) ($data['customer_phone'] ?? ''));
+            if ($phone !== '') {
+                $customer = Customer::resolveFromIntake($name !== '' ? $name : null, $phone);
+            } elseif ($name !== '') {
+                $customer = Customer::resolveFromIntake($name, null);
+            } else {
+                $customer = Customer::firstOrCreate(
+                    ['phone' => '0000000000'],
+                    ['name' => 'Walk-in customer'],
+                );
+            }
+
+            $quantity = (float) ($data['quantity'] ?? 1);
+            $unitPrice = (float) $data['amount'];
+            $lineTotal = round($unitPrice * $quantity, 2);
+
+            $bill = Bill::create([
+                'bill_number' => 'QCK-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'customer_id' => $customer->id,
+                'admission_date' => today(),
+                'notes' => $data['description'],
+                'job_kind' => Bill::JOB_KIND_PARTS_SALE,
+                'created_by' => $request->user()->id,
+            ]);
+
+            BillItem::create([
+                'bill_id' => $bill->id,
+                'type' => 'charge',
+                'description' => $data['description'],
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                'line_total' => $lineTotal,
+            ]);
+            $calculator->recalculate($bill);
+
+            $payAmount = array_key_exists('payment_amount', $data)
+                ? (float) $data['payment_amount']
+                : $lineTotal;
+            if ($payAmount > 0) {
+                BillPayment::create([
+                    'bill_id' => $bill->id,
+                    'amount' => $payAmount,
+                    'method' => $data['payment_method'] ?? 'cash',
+                    'paid_at' => now(),
+                    'received_by' => $request->user()->id,
+                ]);
+                $calculator->recalculate($bill->fresh());
+            }
+
+            return $bill->fresh()->load(['customer', 'items', 'payments']);
+        });
+
+        return $this->moneyJson($bill, 201);
+    }
+
     public function show(Bill $bill): JsonResponse
     {
         $bill->ensureShareToken();
 
-        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
+        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position', 'branch:id,name,code,address,phone']));
     }
 
     public function update(Request $request, Bill $bill): JsonResponse
@@ -266,6 +344,40 @@ class BillController extends Controller
         ]);
 
         return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+    }
+
+    public function moveBranch(Request $request, Bill $bill): JsonResponse
+    {
+        abort_unless($request->user()->role === 'business_owner', 403);
+        $data = $request->validate([
+            'branch_id' => ['required', Rule::exists('branches', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+        abort_if((int) $bill->branch_id === (int) $data['branch_id'], 422, 'This bill is already in that shop.');
+
+        $fromId = (int) $bill->branch_id;
+        $toId = (int) $data['branch_id'];
+
+        DB::transaction(function () use ($bill, $fromId, $toId) {
+            $bill->load('items.part');
+            foreach ($bill->items as $item) {
+                if (! $item->part_id || ! $item->part) {
+                    continue;
+                }
+                $qty = (int) $item->quantity;
+                $item->part->returnStock($qty, $fromId);
+                $item->part->takeStock($qty, $toId);
+            }
+            $bill->update(['branch_id' => $toId, 'updated_by' => auth()->id()]);
+            if ($bill->source_type && $bill->source_id) {
+                $source = $bill->source;
+                if ($source && isset($source->branch_id)) {
+                    $source->update(['branch_id' => $toId]);
+                }
+            }
+        });
+
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'branch:id,name,code,address,phone']));
     }
 
     private function storeGeneric(Request $request, string $type): JsonResponse

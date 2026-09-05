@@ -3,9 +3,12 @@
 namespace Database\Seeders;
 
 use App\Models\Feature;
+use App\Models\LaborCategory;
+use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\BusinessTypes;
+use App\Support\PaintStockDefaults;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -38,6 +41,17 @@ class TenantUserSeeder extends Seeder
             ]);
 
             $tenant->features()->sync($this->featureMatrix($tenantData['business_type']));
+            $branch = \App\Models\Branch::ensureDefault($tenant);
+
+            if (BusinessTypes::usesVehicleJobs($tenantData['business_type'])) {
+                ServiceAddon::seedDefaultsFor((int) $tenant->id, $tenantData['business_type']);
+            }
+            if (BusinessTypes::usesLaborCatalog($tenantData['business_type'])) {
+                LaborCategory::seedDefaultsFor((int) $tenant->id, $tenantData['business_type']);
+            }
+            if ($tenantData['business_type'] === BusinessTypes::PAINT) {
+                PaintStockDefaults::seedFor((int) $tenant->id);
+            }
 
             User::updateOrCreate(['email' => $tenantData['owner_email']], [
                 'tenant_id' => $tenant->id,
@@ -45,6 +59,8 @@ class TenantUserSeeder extends Seeder
                 'password' => Hash::make('password'),
                 'role' => 'business_owner',
                 'status' => 'active',
+                'home_branch_id' => $branch->id,
+                'last_branch_id' => $branch->id,
             ]);
         }
     }
@@ -95,6 +111,36 @@ class TenantUserSeeder extends Seeder
                 'payment_plan' => 'monthly',
                 'plan_amount' => 18000,
             ],
+            [
+                'business_name' => 'MyDearShop',
+                'business_type' => BusinessTypes::STORE,
+                'owner_name' => 'Charls',
+                'owner_phone' => '0771002003',
+                'owner_email' => 'charlsjayasundara@gmail.com',
+                'plan' => 'store-pro',
+                'payment_plan' => 'monthly',
+                'plan_amount' => 15000,
+            ],
+            [
+                'business_name' => 'SpeedFix Auto Care',
+                'business_type' => BusinessTypes::GARAGE,
+                'owner_name' => 'SpeedFix Owner',
+                'owner_phone' => '0772003004',
+                'owner_email' => 'owner@speedfix.lk',
+                'plan' => 'garage-pro',
+                'payment_plan' => 'monthly',
+                'plan_amount' => 15000,
+            ],
+            [
+                'business_name' => 'Mr Paint',
+                'business_type' => BusinessTypes::PAINT,
+                'owner_name' => 'Paint Owner',
+                'owner_phone' => '0773004005',
+                'owner_email' => 'owner@paint.lk',
+                'plan' => 'paint-pro',
+                'payment_plan' => 'monthly',
+                'plan_amount' => 15000,
+            ],
         ];
     }
 
@@ -103,7 +149,12 @@ class TenantUserSeeder extends Seeder
      */
     private function featureMatrix(string $businessType): array
     {
-        return Feature::whereIn('key', BusinessTypes::defaults($businessType))
+        $keys = BusinessTypes::defaults($businessType);
+        if ($businessType === BusinessTypes::STORE) {
+            $keys[] = 'warranties';
+        }
+
+        return Feature::whereIn('key', $keys)
             ->pluck('id')
             ->mapWithKeys(fn (int $id) => [$id => ['is_enabled' => true]])
             ->all();

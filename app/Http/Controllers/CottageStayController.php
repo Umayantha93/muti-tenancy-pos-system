@@ -7,6 +7,7 @@ use App\Models\BillItem;
 use App\Models\CottageRoom;
 use App\Models\CottageStay;
 use App\Models\Customer;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,7 @@ class CottageStayController extends Controller
     {
         $stays = CottageStay::query()
             ->with(['customer', 'room', 'bill.items', 'bill.payments'])
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('from'), fn ($q) => $q->whereDate('check_out', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('check_in', '<=', $request->date('to')))
@@ -71,6 +73,7 @@ class CottageStayController extends Controller
                 'notes' => $data['notes'] ?? null,
                 'status' => $data['status'] ?? 'reserved',
                 'created_by' => $request->user()->id,
+                'branch_id' => $room->branch_id,
             ]);
 
             if ($request->boolean('create_bill', true)) {
@@ -86,6 +89,7 @@ class CottageStayController extends Controller
                     'subtotal' => $total,
                     'balance_due' => $total,
                     'created_by' => $request->user()->id,
+                    'branch_id' => $room->branch_id,
                 ]);
                 BillItem::create([
                     'bill_id' => $bill->id,
@@ -147,8 +151,8 @@ class CottageStayController extends Controller
         $from = Carbon::create($year, $month)->startOfMonth()->toDateString();
         $to = Carbon::create($year, $month)->endOfMonth()->toDateString();
 
-        $rooms = CottageRoom::query()->orderBy('name')->get(['id', 'name', 'status']);
-        $stays = CottageStay::query()
+        $rooms = BranchQuery::constrain(CottageRoom::query())->orderBy('name')->get(['id', 'name', 'status']);
+        $stays = BranchQuery::constrain(CottageStay::query())
             ->with(['customer:id,name', 'room:id,name'])
             ->whereNotIn('status', ['cancelled'])
             ->whereDate('check_out', '>', $from)
