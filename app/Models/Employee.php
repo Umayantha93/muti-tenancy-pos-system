@@ -11,11 +11,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'name', 'nic', 'phone', 'position', 'base_salary', 'overtime_hourly_rate', 'fingerprint_id',
-    'active', 'epf_enabled', 'paid_leave_days_per_year', 'allowances', 'default_shift_id',
+    'active', 'epf_enabled', 'paid_leave_days_per_year', 'allowances', 'default_shift_id', 'home_branch_id',
 ])]
 class Employee extends Model
 {
     use BelongsToTenant;
+
+    protected static function booted(): void
+    {
+        static::creating(function (Employee $employee): void {
+            if (! $employee->home_branch_id && $employee->tenant_id) {
+                $employee->home_branch_id = Branch::defaultIdFor($employee->tenant_id);
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -30,6 +39,11 @@ class Employee extends Model
     public function user(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    public function homeBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'home_branch_id');
     }
 
     public function attendance(): HasMany

@@ -13,6 +13,7 @@ class EmployeeController extends Controller
     {
         return $this->moneyJson(Employee::query()
             ->with('defaultShift:id,name,start_time,end_time,paid_hours')
+            ->with('homeBranch:id,name,code')
             ->when($request->boolean('active_only'), fn ($query) => $query->where('active', true))
             ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
             ->orderBy('name')->paginate($request->integer('per_page', 20)));
@@ -61,6 +62,7 @@ class EmployeeController extends Controller
             'epf_enabled' => ['sometimes', 'boolean'],
             'paid_leave_days_per_year' => ['nullable', 'integer', 'min:0', 'max:366'],
             'default_shift_id' => ['nullable', Rule::exists('work_shifts', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'home_branch_id' => [$employee ? 'sometimes' : 'nullable', Rule::exists('branches', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'allowances' => ['nullable', 'array'],
             'allowances.*.name' => ['required_with:allowances', 'string', 'max:80'],
             'allowances.*.amount' => ['required_with:allowances', 'numeric', 'min:0'],

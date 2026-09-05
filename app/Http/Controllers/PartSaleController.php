@@ -9,7 +9,9 @@ use App\Models\Customer;
 use App\Models\Part;
 use App\Models\PartSale;
 use App\Services\BillCalculator;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
+use App\Support\WarrantyPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +23,7 @@ class PartSaleController extends Controller
     {
         $sales = PartSale::query()
             ->with(['customer', 'bill.items', 'bill.payments'])
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
@@ -39,6 +42,9 @@ class PartSaleController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.part_id' => ['required', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
+            'items.*.warranty_starts_on' => ['nullable', 'date'],
+            'items.*.warranty_until' => ['nullable', 'date'],
         ]);
 
         $sale = DB::transaction(function () use ($data, $request, $calculator) {
@@ -91,6 +97,14 @@ class PartSaleController extends Controller
                     'unit_price' => $unitPrice,
                     'line_total' => $lineTotal,
                     'purchase_unit_cost' => $part->cost_price,
+                    ...($request->user()->canAccessFeature('warranties')
+                        ? WarrantyPeriod::resolve(
+                            $line['warranty_starts_on'] ?? null,
+                            $line['warranty_months'] ?? null,
+                            $line['warranty_until'] ?? null,
+                            $bill->admission_date,
+                        )
+                        : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
                 ]);
             }
 

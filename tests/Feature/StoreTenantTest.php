@@ -2,19 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Models\Feature;
 use App\Models\LaborCategory;
 use App\Models\Part;
 use App\Models\ServiceAddon;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Support\BusinessTypes;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class StoreTenantTest extends TestCase
 {
-    use RefreshDatabase;
-
     public function test_super_admin_onboards_a_store_without_workshop_or_repair(): void
     {
         $this->seed(\Database\Seeders\FeatureSeeder::class);
@@ -25,6 +24,7 @@ class StoreTenantTest extends TestCase
         $catalogKeys = collect($catalog->json('features'))->pluck('key');
         $this->assertTrue($catalogKeys->contains('parts_inventory'));
         $this->assertTrue($catalogKeys->contains('repair_bills'));
+        $this->assertTrue($catalogKeys->contains('warranties'));
         $this->assertFalse($catalogKeys->contains('admit_vehicle'));
 
         $store = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
@@ -40,6 +40,7 @@ class StoreTenantTest extends TestCase
         $this->assertTrue($keys->contains('billing'));
         $this->assertFalse($keys->contains('admit_vehicle'));
         $this->assertFalse($keys->contains('repair_bills'));
+        $this->assertFalse($keys->contains('warranties'));
         $this->assertFalse($keys->contains('retail_pos'));
 
         $tenantId = $store->json('id');
@@ -74,6 +75,99 @@ class StoreTenantTest extends TestCase
         $this->assertSame('SALE-', substr($sale->json('bill.bill_number'), 0, 5));
         $this->assertSame('parts_sale', $sale->json('bill.job_kind'));
         $this->assertEquals(8, $part->fresh()->stock_qty);
+    }
+
+    public function test_warranties_stay_off_until_the_module_is_enabled(): void
+    {
+        [, $owner] = $this->storeOwner();
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/warranties')->assertForbidden();
+    }
+
+    public function test_store_sale_sets_warranty_on_the_bill_and_lookup_finds_it(): void
+    {
+        [$tenant, $owner] = $this->storeOwner();
+        $this->enableOptionalModule($tenant, 'warranties');
+        Sanctum::actingAs($owner);
+
+        $part = Part::create([
+            'name' => 'Silicone phone case',
+            'brand' => 'Generic',
+            'type' => 'Accessory',
+            'barcode' => 'SKU-9876543210',
+            'price' => 450,
+            'cost_price' => 200,
+            'stock_qty' => 5,
+        ]);
+
+        $sale = $this->postJson('/api/part-sales', [
+            'customer_name' => 'Nimal',
+            'customer_phone' => '0771234567',
+            'items' => [['part_id' => $part->id, 'quantity' => 1, 'warranty_months' => 12]],
+            'payment_amount' => 450,
+            'payment_method' => 'cash',
+        ])->assertCreated();
+
+        $this->assertSame(12, $sale->json('bill.items.0.warranty_months'));
+        $this->assertNotEmpty($sale->json('bill.items.0.warranty_starts_on'));
+        $this->assertNotEmpty($sale->json('bill.items.0.warranty_until'));
+
+        $itemId = $sale->json('bill.items.0.id');
+        $billId = $sale->json('bill.id');
+
+        $this->getJson('/api/warranties?search=0771234567')->assertOk()
+            ->assertJsonPath('data.0.part.name', 'Silicone phone case');
+
+        $this->getJson('/api/warranties?search=SKU-9876543210')->assertOk()
+            ->assertJsonPath('data.0.description', 'Silicone phone case');
+
+        $until = now()->addYears(2)->toDateString();
+        $updated = $this->putJson("/api/bills/{$billId}/items/{$itemId}/warranty", [
+            'warranty_until' => $until,
+        ])->assertOk();
+        $this->assertSame($until, \Illuminate\Support\Carbon::parse($updated->json('item.warranty_until'))->toDateString());
+    }
+
+    public function test_store_quick_bill_creates_a_charge_without_customer(): void
+    {
+        [, $owner] = $this->storeOwner();
+        Sanctum::actingAs($owner);
+
+        $bill = $this->postJson('/api/bills/quick', [
+            'description' => 'DVD write',
+            'amount' => 150,
+            'quantity' => 2,
+            'payment_amount' => 300,
+            'payment_method' => 'cash',
+        ])->assertCreated()->json();
+
+        $this->assertSame('QCK-', substr($bill['bill_number'], 0, 4));
+        $this->assertSame('parts_sale', $bill['job_kind']);
+        $this->assertSame('charge', $bill['items'][0]['type']);
+        $this->assertSame('DVD write', $bill['items'][0]['description']);
+        $this->assertEquals(300.0, (float) $bill['amount_paid']);
+        $this->assertEquals(0.0, (float) $bill['balance_due']);
+    }
+
+    public function test_store_can_add_a_quick_job_line_on_a_sale(): void
+    {
+        [, $owner] = $this->storeOwner();
+        Sanctum::actingAs($owner);
+
+        $bill = $this->postJson('/api/bills', [
+            'customer_name' => 'Walk-in',
+            'job_kind' => 'parts_sale',
+        ])->assertCreated()->json();
+
+        $this->postJson("/api/bills/{$bill['id']}/items", [
+            'type' => 'charge',
+            'description' => 'CD copy',
+            'quantity' => 1,
+            'unit_price' => 100,
+        ])->assertCreated()
+            ->assertJsonPath('item.type', 'charge')
+            ->assertJsonPath('item.description', 'CD copy');
     }
 
     public function test_store_cannot_open_repair_until_super_admin_enables_it(): void
@@ -139,8 +233,14 @@ class StoreTenantTest extends TestCase
             ->assertJsonPath('repair_count', 1);
     }
 
+    private function enableOptionalModule(Tenant $tenant, string $key): void
+    {
+        $feature = Feature::query()->where('key', $key)->firstOrFail();
+        $tenant->features()->syncWithoutDetaching([$feature->id => ['is_enabled' => true]]);
+    }
+
     /**
-     * @return array{0: \App\Models\Tenant, 1: User}
+     * @return array{0: Tenant, 1: User}
      */
     private function storeOwner(): array
     {

@@ -19,6 +19,7 @@ class PayrollController extends Controller
         ]);
 
         return $this->moneyJson(Payroll::with('employee')
+            ->tap(fn ($query) => \App\Support\BranchQuery::constrain($query))
             ->when(isset($data['month']), fn ($query) => $query->where('month', $data['month']))
             ->when(isset($data['year']), fn ($query) => $query->where('year', $data['year']))
             ->when(isset($data['employee_id']), fn ($query) => $query->where('employee_id', $data['employee_id']))

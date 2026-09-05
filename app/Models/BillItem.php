@@ -22,6 +22,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'purchase_unit_cost',
     'purchase_expense_id',
     'line_total',
+    'warranty_months',
+    'warranty_starts_on',
+    'warranty_until',
 ])]
 class BillItem extends Model
 {
@@ -35,6 +38,9 @@ class BillItem extends Model
             'unit_price' => 'decimal:2',
             'purchase_unit_cost' => 'decimal:2',
             'line_total' => 'decimal:2',
+            'warranty_months' => 'integer',
+            'warranty_starts_on' => 'date:Y-m-d',
+            'warranty_until' => 'date:Y-m-d',
         ];
     }
 

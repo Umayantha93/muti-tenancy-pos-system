@@ -31,6 +31,9 @@ class PosDemoDataSeeder extends Seeder
                 if (! $owner->tenant_id) {
                     continue;
                 }
+                if ($owner->tenant?->business_type === \App\Support\BusinessTypes::STORE) {
+                    continue;
+                }
 
                 $tenantId = (int) $owner->tenant_id;
                 $customers = $this->seedCustomers($tenantId);

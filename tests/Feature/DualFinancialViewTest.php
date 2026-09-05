@@ -10,13 +10,11 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class DualFinancialViewTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_primary_sees_real_amounts_and_secondary_sees_scaled_amounts(): void
     {

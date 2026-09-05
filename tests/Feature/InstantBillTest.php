@@ -7,13 +7,11 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class InstantBillTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_instant_bill_opens_without_vehicle_and_accepts_services_and_parts(): void
     {

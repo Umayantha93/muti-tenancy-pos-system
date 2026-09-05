@@ -7,13 +7,11 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class MultiTenancyTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_tenant_queries_and_route_binding_never_expose_another_tenants_data(): void
     {

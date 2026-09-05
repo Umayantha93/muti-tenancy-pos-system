@@ -43,7 +43,7 @@ class BusinessTypes
 
         $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers'], $shared);
         $retailFamily = array_merge(['retail_pos', 'product_catalog', 'suppliers'], $shared);
-        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills'], $shared);
+        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties'], $shared);
 
         return [
             self::GARAGE => $garageFamily,
@@ -66,7 +66,7 @@ class BusinessTypes
     public static function optionalFeatures(string $type): array
     {
         return match ($type) {
-            self::STORE => ['repair_bills'],
+            self::STORE => ['repair_bills', 'warranties'],
             default => [],
         };
     }
@@ -190,6 +190,7 @@ class BusinessTypes
             ],
             self::STORE => [
                 ['value' => 'part', 'label' => 'Item', 'kind' => 'stock', 'allow_qty' => true],
+                ['value' => 'charge', 'label' => 'Quick job', 'kind' => 'charge', 'allow_qty' => true],
                 ['value' => 'labor', 'label' => 'Repair', 'kind' => 'charge'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],

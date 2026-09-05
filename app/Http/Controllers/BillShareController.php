@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bill;
+use App\Models\Branch;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -21,10 +22,11 @@ class BillShareController extends Controller
                 'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
                 'items' => fn ($query) => $query->withoutGlobalScopes()->select([
                     'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_total',
-                    'panel_group_id', 'panel_name',
+                    'panel_group_id', 'panel_name', 'warranty_months', 'warranty_starts_on', 'warranty_until',
                 ]),
                 'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
                 'tenant:id,business_name,business_type,logo,address,tin,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
+                'branch:id,name,address,phone,code',
             ])
             ->firstOrFail();
 
@@ -53,7 +55,12 @@ class BillShareController extends Controller
                 ? $this->paintCustomerItems($bill->items)
                 : $bill->items->map(fn ($item) => $this->shareItem($item, $item->type === 'labor')),
             'payments' => $bill->payments,
-            'tenant' => $bill->tenant,
+                'tenant' => $bill->tenant,
+                'branch' => $bill->branch,
+                'show_shop' => Branch::withoutGlobalScopes()
+                    ->where('tenant_id', $bill->tenant_id)
+                    ->where('status', 'active')
+                    ->count() > 1,
         ]);
     }
 
@@ -112,6 +119,13 @@ class BillShareController extends Controller
             'unit_price' => $hideHours ? null : $item->unit_price,
             'line_total' => $item->line_total,
             'hide_hours' => $hideHours,
+            'warranty_months' => $item->warranty_months,
+            'warranty_starts_on' => $item->warranty_starts_on
+                ? \Illuminate\Support\Carbon::parse($item->warranty_starts_on)->toDateString()
+                : null,
+            'warranty_until' => $item->warranty_until
+                ? \Illuminate\Support\Carbon::parse($item->warranty_until)->toDateString()
+                : null,
         ];
     }
 }

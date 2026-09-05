@@ -13,7 +13,7 @@ class TenantStaffController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        return response()->json(User::where('tenant_id', $request->user()->tenant_id)->where('role', 'staff')->with(['permissions', 'employee'])->get());
+        return response()->json(User::where('tenant_id', $request->user()->tenant_id)->where('role', 'staff')->with(['permissions', 'employee', 'homeBranch'])->get());
     }
 
     public function store(Request $request): JsonResponse
@@ -21,11 +21,15 @@ class TenantStaffController extends Controller
         if ($request->input('employee_id') === '' || $request->input('employee_id') === '0') {
             $request->merge(['employee_id' => null]);
         }
+        if ($request->input('home_branch_id') === '' || $request->input('home_branch_id') === '0') {
+            $request->merge(['home_branch_id' => null]);
+        }
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'unique:users,email'],
             'password' => ['required', 'min:8'],
             'employee_id' => ['nullable', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'home_branch_id' => ['nullable', Rule::exists('branches', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'preset' => ['nullable', Rule::in(['custom', 'shop_floor'])],
         ]);
         abort_if(
@@ -39,6 +43,7 @@ class TenantStaffController extends Controller
             'password' => Hash::make($data['password']),
             'tenant_id' => $request->user()->tenant_id,
             'employee_id' => $data['employee_id'] ?? null,
+            'home_branch_id' => $data['home_branch_id'] ?? null,
             'role' => 'staff',
             'status' => 'active',
         ]);

@@ -8,6 +8,8 @@ use App\Models\BillPayment;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\RetailSale;
+use App\Services\BranchInventory;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +22,7 @@ class RetailSaleController extends Controller
     {
         $sales = RetailSale::query()
             ->with(['customer', 'bill.items', 'bill.payments'])
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->latest()
             ->paginate($request->integer('per_page', 15));
 
@@ -77,7 +80,8 @@ class RetailSaleController extends Controller
             foreach ($data['items'] as $line) {
                 $product = Product::findOrFail($line['product_id']);
                 $qty = (float) $line['quantity'];
-                if ($product->stock_qty < $qty) {
+                $needed = (int) ceil($qty);
+                if (BranchInventory::productQty($product->id) < $needed) {
                     abort(response()->json(['message' => "Insufficient stock for {$product->name}."], 422));
                 }
                 $lineTotal = round($product->price * $qty, 2);
@@ -89,7 +93,7 @@ class RetailSaleController extends Controller
                     'unit_price' => $product->price,
                     'line_total' => $lineTotal,
                 ]);
-                $product->decrement('stock_qty', (int) ceil($qty));
+                $product->takeStock($needed);
                 $subtotal += $lineTotal;
             }
 

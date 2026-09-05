@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Attendance;
 use App\Models\Bill;
+use App\Models\BranchStock;
 use App\Models\Employee;
 use App\Models\Part;
 use App\Models\Payroll;
 use App\Models\Product;
+use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -27,7 +29,7 @@ class ReportController extends Controller
         $from = Carbon::parse($data['from'] ?? now()->startOfMonth())->startOfDay();
         $to = Carbon::parse($data['to'] ?? now()->endOfMonth())->endOfDay();
 
-        $bills = Bill::query()
+        $bills = BranchQuery::constrain(Bill::query())
             ->with('customer:id,name,phone')
             ->whereBetween('admission_date', [$from->toDateString(), $to->toDateString()])
             ->get();
@@ -41,7 +43,7 @@ class ReportController extends Controller
             ])
             ->values();
 
-        $owing = Bill::query()
+        $owing = BranchQuery::constrain(Bill::query())
             ->with('customer:id,name,phone')
             ->whereIn('status', ['open', 'partially_paid', 'owe_in'])
             ->where('balance_due', '>', 0)
@@ -49,20 +51,27 @@ class ReportController extends Controller
             ->limit(50)
             ->get(['id', 'bill_number', 'customer_id', 'status', 'balance_due', 'owe_in_due_date', 'admission_date']);
 
+        $branchId = BranchQuery::idForRead($request);
         $parts = Part::query()->get(['id', 'name', 'stock_qty', 'cost_price', 'price']);
         $products = Product::query()->get(['id', 'name', 'stock_qty', 'cost_price', 'price']);
+        if ($branchId) {
+            $partQtys = BranchStock::query()->where('branch_id', $branchId)->whereNotNull('part_id')->pluck('qty', 'part_id');
+            $productQtys = BranchStock::query()->where('branch_id', $branchId)->whereNotNull('product_id')->pluck('qty', 'product_id');
+            $parts->each(fn (Part $part) => $part->setAttribute('stock_qty', (int) ($partQtys[$part->id] ?? 0)));
+            $products->each(fn (Product $product) => $product->setAttribute('stock_qty', (int) ($productQtys[$product->id] ?? 0)));
+        }
         $stockItems = $parts->concat($products);
         $lowThreshold = $request->user()->tenant?->business_type === BusinessTypes::PAINT ? 250 : 5;
         $lowStock = $stockItems->filter(fn ($item) => (int) $item->stock_qty <= $lowThreshold)->values();
 
         $payrollMonth = (int) $from->month;
         $payrollYear = (int) $from->year;
-        $payrolls = Payroll::with('employee:id,name,position')
+        $payrolls = BranchQuery::constrain(Payroll::with('employee:id,name,position'))
             ->where('month', $payrollMonth)
             ->where('year', $payrollYear)
             ->get();
 
-        $attendanceRows = Attendance::query()
+        $attendanceRows = BranchQuery::constrainViaEmployee(Attendance::query())
             ->whereBetween('date', [$from->toDateString(), $to->toDateString()])
             ->selectRaw('employee_id, sum(hours_worked) as hours, sum(overtime_hours) as overtime, count(*) as days')
             ->groupBy('employee_id')
@@ -87,7 +96,7 @@ class ReportController extends Controller
         $employeeJobs = null;
         if (! empty($data['employee_id'])) {
             $employee = Employee::query()->find($data['employee_id']);
-            $jobs = Bill::query()
+            $jobs = BranchQuery::constrain(Bill::query())
                 ->with(['customer:id,name,phone', 'vehicle:id,number_plate,make,model'])
                 ->whereHas('employees', fn ($query) => $query->where('employees.id', $data['employee_id']))
                 ->whereBetween('admission_date', [$from->toDateString(), $to->toDateString()])

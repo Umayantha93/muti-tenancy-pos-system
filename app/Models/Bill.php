@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Models\Concerns\StampsBranch;
 use App\Models\Tenant;
 use App\Services\BillCalculator;
 use App\Support\BusinessTypes;
@@ -41,10 +42,11 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'updated_by',
     'source_type',
     'source_id',
+    'branch_id',
 ])]
 class Bill extends Model
 {
-    use BelongsToTenant;
+    use BelongsToTenant, StampsBranch;
 
     public const JOB_KIND_REPAIR = 'repair';
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CottageRoom;
+use App\Support\BranchQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -11,6 +12,7 @@ class CottageRoomController extends Controller
     public function index(Request $request): JsonResponse
     {
         $rooms = CottageRoom::query()
+            ->tap(fn ($query) => BranchQuery::constrain($query))
             ->when($request->boolean('active_only'), fn ($q) => $q->where('active', true))
             ->orderBy('name')
             ->get();

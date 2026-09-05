@@ -7,13 +7,11 @@ use App\Models\Feature;
 use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class ServiceJobCardTest extends TestCase
 {
-    use RefreshDatabase;
 
     public function test_admit_can_open_a_service_or_repair_job_card(): void
     {

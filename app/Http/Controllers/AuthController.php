@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
+use App\Support\BranchContext;
+use App\Support\SessionPayload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -31,11 +34,20 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
         }
 
-        return response()->json([
-            'token' => $user->createToken('garage-pos')->plainTextToken,
-            'user' => $user->load(['tenant', 'employee']),
-            'features' => $user->accessibleFeatureKeys(),
-        ]);
+        if ($user->tenant_id) {
+            $active = $user->role === 'staff'
+                ? ($user->home_branch_id ?: Branch::defaultIdFor($user->tenant_id))
+                : ($user->last_branch_id ?: Branch::defaultIdFor($user->tenant_id));
+            if ($active) {
+                BranchContext::set((int) $active, locked: $user->role === 'staff');
+            }
+        }
+
+        $token = $user->createToken('garage-pos')->plainTextToken;
+        $payload = SessionPayload::for($user);
+        $payload['token'] = $token;
+
+        return response()->json($payload);
     }
 
     public function branding(Request $request): JsonResponse
