@@ -48,6 +48,16 @@ class Expense extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function supplier(): BelongsTo
+    {
+        return $this->belongsTo(Supplier::class);
+    }
+
+    public function stockReceipt(): BelongsTo
+    {
+        return $this->belongsTo(StockReceipt::class);
+    }
+
     public function settlements(): HasMany
     {
         return $this->hasMany(ExpenseSettlement::class);

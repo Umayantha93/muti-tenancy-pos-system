@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -93,6 +94,9 @@ class Tenant extends Model
     {
         static::created(function (Tenant $tenant): void {
             Branch::ensureDefault($tenant);
+            if ($tenant->business_type === BusinessTypes::GARAGE) {
+                Supplier::ensureWalkInFor((int) $tenant->id);
+            }
         });
     }
 

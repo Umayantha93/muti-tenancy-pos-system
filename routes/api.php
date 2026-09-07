@@ -18,6 +18,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
+use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
@@ -28,6 +29,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RetailSaleController;
 use App\Http\Controllers\ServiceAddonController;
+use App\Http\Controllers\ServiceOpsReportController;
 use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
@@ -126,9 +128,16 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
+        Route::middleware('feature:job_videos')->group(function () {
+            Route::get('/bills/{bill}/videos', [JobVideoController::class, 'index']);
+            Route::post('/bills/{bill}/videos', [JobVideoController::class, 'store']);
+            Route::get('/bills/{bill}/videos/{video}/file', [JobVideoController::class, 'file']);
+            Route::delete('/bills/{bill}/videos/{video}', [JobVideoController::class, 'destroy']);
+        });
 
         Route::middleware('feature:warranties')->group(function () {
             Route::get('/warranties', [WarrantyController::class, 'index']);
+            Route::put('/bills/{bill}/warranty', [WarrantyController::class, 'updateBill']);
             Route::put('/bills/{bill}/items/{item}/warranty', [WarrantyController::class, 'update']);
         });
 
@@ -252,8 +261,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::middleware('feature:reports')->group(function () {
             Route::get('/reports', [ReportController::class, 'show']);
         });
+        Route::middleware('feature:service_ops_report')->group(function () {
+            Route::get('/reports/service-ops', [ServiceOpsReportController::class, 'show']);
+        });
         Route::middleware('feature:suppliers')->group(function () {
             Route::get('/suppliers', [SupplierController::class, 'index']);
+            Route::get('/suppliers/{supplier}', [SupplierController::class, 'show']);
             Route::post('/suppliers', [SupplierController::class, 'store']);
             Route::put('/suppliers/{supplier}', [SupplierController::class, 'update']);
             Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy']);

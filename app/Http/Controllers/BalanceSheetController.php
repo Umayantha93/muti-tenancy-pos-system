@@ -342,7 +342,7 @@ class BalanceSheetController extends Controller
         $items = Expense::query()
             ->credit()
             ->tap(fn ($query) => BranchQuery::constrain($query))
-            ->with('settlements')
+            ->with(['settlements', 'supplier:id,name,phone'])
             ->orderBy('due_date')
             ->orderBy('expense_date')
             ->get()
@@ -360,6 +360,9 @@ class BalanceSheetController extends Controller
                 return [
                     'id' => $expense->id,
                     'description' => $expense->description,
+                    'supplier_id' => $expense->supplier_id,
+                    'supplier' => $expense->supplier?->name,
+                    'supplier_phone' => $expense->supplier?->phone,
                     'amount' => round($original, 2),
                     'amount_paid' => round($paid, 2),
                     'remaining' => round($remaining, 2),

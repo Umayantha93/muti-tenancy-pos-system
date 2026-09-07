@@ -59,6 +59,11 @@ class BillItem extends Model
         return $this->belongsTo(LaborItem::class);
     }
 
+    public function serviceAddon(): BelongsTo
+    {
+        return $this->belongsTo(ServiceAddon::class);
+    }
+
     public function purchaseExpense(): BelongsTo
     {
         return $this->belongsTo(Expense::class, 'purchase_expense_id');

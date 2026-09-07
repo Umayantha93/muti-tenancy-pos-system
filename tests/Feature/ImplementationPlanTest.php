@@ -175,7 +175,8 @@ class ImplementationPlanTest extends TestCase
 
         $this->assertSame(15, $part->fresh()->stock_qty);
         $this->assertSame(1, Expense::query()->count());
-        $this->assertSame(0, StockReceipt::query()->count());
+        $this->assertSame(1, StockReceipt::query()->count());
+        $this->assertTrue((bool) StockReceipt::query()->first()->supplier->is_system);
     }
 
     public function test_restock_with_supplier_creates_goods_received_note(): void

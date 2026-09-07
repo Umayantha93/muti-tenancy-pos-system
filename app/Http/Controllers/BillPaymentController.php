@@ -29,6 +29,9 @@ class BillPaymentController extends Controller
                 'received_by' => $request->user()->id,
             ]);
             $calculator->recalculate($bill);
+            if ((float) $bill->fresh()->amount_paid > 0 && $bill->hide_amounts) {
+                $bill->update(['hide_amounts' => false]);
+            }
 
             return $payment;
         });

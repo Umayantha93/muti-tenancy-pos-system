@@ -41,12 +41,12 @@ class BusinessTypes
     {
         $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'reports'];
 
-        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers'], $shared);
+        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties'], $shared);
         $retailFamily = array_merge(['retail_pos', 'product_catalog', 'suppliers'], $shared);
         $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties'], $shared);
 
         return [
-            self::GARAGE => $garageFamily,
+            self::GARAGE => array_merge($garageFamily, ['owner_bill_sms', 'service_ops_report', 'job_videos']),
             self::TYRE => $garageFamily,
             self::DEVICE_REPAIR => $garageFamily,
             self::PAINT => $garageFamily,
@@ -67,6 +67,7 @@ class BusinessTypes
     {
         return match ($type) {
             self::STORE => ['repair_bills', 'warranties'],
+            self::GARAGE => ['owner_bill_sms', 'service_ops_report', 'job_videos'],
             default => [],
         };
     }
