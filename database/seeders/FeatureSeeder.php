@@ -30,7 +30,9 @@ class FeatureSeeder extends Seeder
             ['key' => 'bill_sms', 'name' => 'Bill SMS', 'description' => 'Send quotation / paid bill links to customers by SMS', 'group' => 'Service Intake', 'sort_order' => 31],
             ['key' => 'bill_profits', 'name' => 'Bill Profits Analysis', 'description' => 'Bill revenue, inventory cost, and credit-bill profit reporting', 'group' => 'Service Intake', 'sort_order' => 32],
             ['key' => 'repair_bills', 'name' => 'Repair', 'description' => 'Repair bills and repair profit for stores (phones, parts counters). Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 33],
-            ['key' => 'warranties', 'name' => 'Warranties', 'description' => 'Add a warranty on the bill from the purchase date (1 year, 2 years, or a custom end date).', 'group' => 'Service Intake', 'sort_order' => 34],
+            ['key' => 'warranties', 'name' => 'Warranties', 'description' => 'Add a warranty on the job or sale in months or years.', 'group' => 'Service Intake', 'sort_order' => 34],
+            ['key' => 'owner_bill_sms', 'name' => 'Owner bill SMS', 'description' => 'When staff send a bill SMS, also send a copy of the same link to the shop owner. Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 35],
+            ['key' => 'job_videos', 'name' => 'Job videos', 'description' => 'Up to 5 compressed clips on a garage job. Staff-only. Deleted after 6 months. Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 36],
             ['key' => 'parts_inventory', 'name' => 'Parts inventory', 'description' => 'Garage parts and stock', 'group' => 'Inventory', 'sort_order' => 40],
             ['key' => 'product_catalog', 'name' => 'Product catalog', 'description' => 'Clothing SKUs, sizes, and stock', 'group' => 'Inventory', 'sort_order' => 41],
             ['key' => 'cottage_rooms', 'name' => 'Rooms', 'description' => 'Cottage rooms and rates', 'group' => 'Inventory', 'sort_order' => 42],
@@ -40,6 +42,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll', 'group' => 'People', 'sort_order' => 70],
             ['key' => 'balance_sheet', 'name' => 'Finance', 'description' => 'Income, expenses and profit', 'group' => 'Finance', 'sort_order' => 80],
             ['key' => 'reports', 'name' => 'Reports', 'description' => 'Business reporting and trends', 'group' => 'Finance', 'sort_order' => 90],
+            ['key' => 'service_ops_report', 'name' => 'Service operations report', 'description' => 'Count billed garage service addons (sold qty vs inside full service) with revenue. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 91],
         ];
     }
 }

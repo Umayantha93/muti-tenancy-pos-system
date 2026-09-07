@@ -66,6 +66,7 @@ class SuperAdminBillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_mileage' => ['nullable', 'integer', 'min:0'],
         ]);
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
 
@@ -351,6 +352,9 @@ class SuperAdminBillController extends Controller
             $payment->tenant_id = $bill->tenant_id;
             $payment->save();
             $calculator->recalculate($bill);
+            if ((float) $bill->fresh()->amount_paid > 0 && $bill->hide_amounts) {
+                $bill->update(['hide_amounts' => false]);
+            }
         });
 
         $bill->update(['updated_by' => $request->user()->id]);

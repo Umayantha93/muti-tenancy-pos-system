@@ -21,4 +21,14 @@ class StockReceiptItem extends Model
     {
         return $this->belongsTo(StockReceipt::class, 'stock_receipt_id');
     }
+
+    public function part(): BelongsTo
+    {
+        return $this->belongsTo(Part::class);
+    }
+
+    public function product(): BelongsTo
+    {
+        return $this->belongsTo(Product::class);
+    }
 }

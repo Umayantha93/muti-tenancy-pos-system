@@ -6,7 +6,9 @@ use App\Models\Expense;
 use App\Models\Part;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
+use App\Models\Supplier;
 use App\Services\BranchInventory;
+use App\Support\BusinessTypes;
 use App\Support\InventoryCosting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -341,6 +343,7 @@ class PartController extends Controller
                     null,
                     $row['payment_status'] ?? 'paid',
                     $row['due_date'] ?? null,
+                    $this->resolveSupplierId($request, null),
                 );
                 if ($expense) {
                     $expenses++;
@@ -377,6 +380,7 @@ class PartController extends Controller
                 null,
                 $request->input('payment_status', 'paid'),
                 $request->input('due_date'),
+                $this->resolveSupplierId($request, null),
             );
 
             return $part->refresh();
@@ -456,7 +460,7 @@ class PartController extends Controller
                 $data['expense_date'] ?? null,
                 $data['payment_status'] ?? 'paid',
                 $data['due_date'] ?? null,
-                $data['supplier_id'] ?? null,
+                $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
             );
 
             return [$part->refresh(), $expense];
@@ -591,6 +595,17 @@ class PartController extends Controller
         }
 
         return $expense;
+    }
+
+    private function resolveSupplierId(Request $request, mixed $supplierId): ?int
+    {
+        $id = $supplierId ? (int) $supplierId : null;
+        $tenant = $request->user()?->tenant;
+        if ($tenant?->business_type !== BusinessTypes::GARAGE) {
+            return $id;
+        }
+
+        return $id ?: Supplier::ensureWalkInFor((int) $tenant->id)->id;
     }
 
     /**

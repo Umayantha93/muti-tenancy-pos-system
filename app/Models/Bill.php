@@ -22,11 +22,16 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'admission_date',
     'odometer',
     'mileage',
+    'next_service_mileage',
     'notes',
     'internal_notes',
     'additional_note_color',
+    'warranty_months',
+    'warranty_starts_on',
+    'warranty_until',
     'status',
     'job_kind',
+    'hide_amounts',
     'owe_in_due_date',
     'closed_at',
     'subtotal',
@@ -75,6 +80,10 @@ class Bill extends Model
             'admission_date' => 'date:Y-m-d',
             'owe_in_due_date' => 'date:Y-m-d',
             'closed_at' => 'datetime',
+            'warranty_months' => 'integer',
+            'warranty_starts_on' => 'date:Y-m-d',
+            'warranty_until' => 'date:Y-m-d',
+            'hide_amounts' => 'boolean',
             'subtotal' => 'decimal:2',
             'vat_rate' => 'decimal:2',
             'sscl_rate' => 'decimal:2',
@@ -144,6 +153,16 @@ class Bill extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(BillPayment::class);
+    }
+
+    public function videos(): HasMany
+    {
+        return $this->hasMany(BillVideo::class)->latest();
+    }
+
+    public function isRepairNote(): bool
+    {
+        return (bool) $this->hide_amounts && (float) $this->amount_paid <= 0;
     }
 
     public function creator(): BelongsTo

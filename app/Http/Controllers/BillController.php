@@ -67,6 +67,8 @@ class BillController extends Controller
             'model' => ['nullable', 'string', 'max:100'],
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
             'odometer' => ['nullable', 'integer', 'min:0'],
+            'mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_mileage' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
@@ -133,6 +135,7 @@ class BillController extends Controller
             'vehicle_id' => ['required', Rule::exists('vehicles', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_mileage' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
@@ -277,13 +280,23 @@ class BillController extends Controller
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_mileage' => ['nullable', 'integer', 'min:0'],
+            'hide_amounts' => ['sometimes', 'boolean'],
             ...$this->employeeIdsRules($request),
         ]);
 
         $employeeIds = $data['employee_ids'] ?? null;
         unset($data['employee_ids']);
 
-        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color'])->isEmpty();
+        if (array_key_exists('hide_amounts', $data)) {
+            $isGarage = $request->user()->tenant?->business_type === BusinessTypes::GARAGE;
+            abort_unless($isGarage, 422, 'Repair notes are only available on garage jobs.');
+            if ($data['hide_amounts'] && (float) $bill->amount_paid > 0) {
+                abort(422, 'Amounts cannot be hidden after a payment is recorded.');
+            }
+        }
+
+        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts'])->isEmpty();
         if (! $staffOnly) {
             abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
                 ? 'Owe-in bills cannot be edited. Record a payment instead.'
@@ -432,6 +445,7 @@ class BillController extends Controller
             'admission_date' => $data['admission_date'] ?? today(),
             'odometer' => $data['odometer'] ?? null,
             'mileage' => $data['mileage'] ?? null,
+            'next_service_mileage' => $data['next_service_mileage'] ?? null,
             'notes' => $data['notes'] ?? null,
             'internal_notes' => $data['internal_notes'] ?? null,
             'additional_note_color' => $data['additional_note_color'] ?? null,

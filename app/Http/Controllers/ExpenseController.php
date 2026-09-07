@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Expense;
 use App\Models\ExpenseSettlement;
+use App\Models\Supplier;
+use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class ExpenseController extends Controller
 {
@@ -25,6 +28,11 @@ class ExpenseController extends Controller
     {
         $data = $this->validated($request);
         $paid = ($data['payment_status'] ?? Expense::STATUS_PAID) !== Expense::STATUS_CREDIT;
+        $tenant = $request->user()->tenant;
+        if (($data['category'] ?? null) === 'inventory' && $tenant?->business_type === BusinessTypes::GARAGE) {
+            $data['supplier_id'] = $data['supplier_id']
+                ?? Supplier::ensureWalkInFor((int) $tenant->id)->id;
+        }
         $expense = Expense::create([
             ...$data,
             'payment_status' => $paid ? Expense::STATUS_PAID : Expense::STATUS_CREDIT,
@@ -94,6 +102,8 @@ class ExpenseController extends Controller
 
     private function validated(Request $request, bool $update = false): array
     {
+        $tenantId = $request->user()->tenant_id;
+
         return $request->validate([
             'category' => [$update ? 'sometimes' : 'required', 'string', 'max:100', 'not_in:salary'],
             'description' => [$update ? 'sometimes' : 'required', 'string', 'max:255'],
@@ -101,6 +111,10 @@ class ExpenseController extends Controller
             'expense_date' => [$update ? 'sometimes' : 'required', 'date'],
             'payment_status' => ['nullable', 'in:paid,credit'],
             'due_date' => ['nullable', 'date', 'required_if:payment_status,credit'],
+            'supplier_id' => [
+                'nullable',
+                Rule::exists('suppliers', 'id')->where('tenant_id', $tenantId),
+            ],
         ]);
     }
 }

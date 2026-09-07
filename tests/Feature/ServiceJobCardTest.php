@@ -24,6 +24,25 @@ class ServiceJobCardTest extends TestCase
         $this->assertSame(Bill::JOB_KIND_SERVICE, Bill::find($serviceId)->job_kind);
     }
 
+    public function test_service_job_can_store_next_service_mileage(): void
+    {
+        Sanctum::actingAs($this->garageUser('staff'));
+
+        $billId = $this->openJob('service')->json('id');
+
+        $this->putJson("/api/bills/{$billId}", [
+            'mileage' => 45200,
+            'next_service_mileage' => 50200,
+        ])->assertOk()
+            ->assertJsonPath('mileage', 45200)
+            ->assertJsonPath('next_service_mileage', 50200);
+
+        $this->getJson("/api/bills/{$billId}")
+            ->assertOk()
+            ->assertJsonPath('mileage', 45200)
+            ->assertJsonPath('next_service_mileage', 50200);
+    }
+
     public function test_owner_can_manage_service_addons_and_full_service_inclusions(): void
     {
         Sanctum::actingAs($this->garageUser('business_owner'));

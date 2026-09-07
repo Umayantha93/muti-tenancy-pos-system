@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('tenants:expire-demos')->daily();
+Schedule::command('job-videos:prune')->daily();
