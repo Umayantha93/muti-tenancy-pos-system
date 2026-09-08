@@ -163,6 +163,39 @@ class GarageApiTest extends TestCase
         $this->getJson('/api/balance-sheet?month=7&year=2026')->assertForbidden();
     }
 
+    public function test_owner_can_delete_a_part_even_if_it_was_billed(): void
+    {
+        $owner = $this->tenantUser('business_owner');
+        Sanctum::actingAs($owner);
+
+        $unused = Part::create([
+            'name' => 'Spare Cap', 'brand' => 'Generic', 'type' => 'other',
+            'price' => 200, 'cost_price' => 80, 'stock_qty' => 3,
+        ]);
+        $used = Part::create([
+            'name' => 'Oil Filter', 'brand' => 'Bosch', 'type' => 'filter',
+            'price' => 1500, 'cost_price' => 800, 'stock_qty' => 10,
+        ]);
+
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Nimal Perera',
+            'customer_phone' => '0771234567',
+            'number_plate' => 'CAB-9999',
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+
+        $itemId = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'part', 'part_id' => $used->id, 'quantity' => 1,
+        ])->assertCreated()->json('item.id');
+
+        $this->deleteJson("/api/parts/{$used->id}")->assertNoContent();
+        $this->assertNull(Part::find($used->id));
+        $this->assertNull(\App\Models\BillItem::find($itemId)?->part_id);
+
+        $this->deleteJson("/api/parts/{$unused->id}")->assertNoContent();
+        $this->assertNull(Part::find($unused->id));
+    }
+
     public function test_fingerprint_ingestion_and_payroll_feed_balance_sheet(): void
     {
         $admin = $this->tenantUser('business_owner');
