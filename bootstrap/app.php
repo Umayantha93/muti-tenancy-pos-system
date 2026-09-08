@@ -10,6 +10,7 @@ use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\CheckFeatureAccess;
 use App\Http\Middleware\BlockSecondaryFinancialWrites;
 use App\Http\Middleware\ResolveBranchContext;
+use App\Http\Middleware\SetLocale;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -19,6 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->api(prepend: [
+            SetLocale::class,
+        ]);
         $middleware->alias([
             'role' => EnsureRole::class,
             'user.active' => EnsureUserIsActive::class,
@@ -26,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'feature' => CheckFeatureAccess::class,
             'block.secondary.writes' => BlockSecondaryFinancialWrites::class,
             'branch.context' => ResolveBranchContext::class,
+            'locale' => SetLocale::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

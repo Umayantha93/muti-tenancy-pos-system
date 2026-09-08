@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['tenant_id', 'employee_id', 'home_branch_id', 'last_branch_id', 'name', 'email', 'password', 'role', 'status', 'is_secondary_view'])]
+#[Fillable(['tenant_id', 'employee_id', 'home_branch_id', 'last_branch_id', 'name', 'email', 'password', 'role', 'status', 'locale', 'is_secondary_view'])]
 #[Hidden(['password', 'remember_token', 'is_secondary_view'])]
 class User extends Authenticatable
 {

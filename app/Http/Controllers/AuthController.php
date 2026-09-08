@@ -18,7 +18,7 @@ class AuthController extends Controller
         $user = \App\Models\User::where('email', $credentials['email'])->first();
 
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
-            throw ValidationException::withMessages(['email' => ['The provided credentials are incorrect.']]);
+            throw ValidationException::withMessages(['email' => [__('ui.auth.failed')]]);
         }
 
         if ($user->role !== 'super_admin' && $user->tenant) {
@@ -27,11 +27,11 @@ class AuthController extends Controller
         }
 
         if ($user->status !== 'active' || ($user->role !== 'super_admin' && $user->tenant?->status !== 'active')) {
-            throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
+            throw ValidationException::withMessages(['email' => [__('ui.auth.inactive')]]);
         }
 
         if ($user->is_secondary_view && ! $user->tenant?->dual_financial_view_enabled) {
-            throw ValidationException::withMessages(['email' => ['This account is inactive.']]);
+            throw ValidationException::withMessages(['email' => [__('ui.auth.inactive')]]);
         }
 
         if ($user->tenant_id) {

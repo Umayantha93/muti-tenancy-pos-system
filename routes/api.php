@@ -38,6 +38,7 @@ use App\Http\Controllers\SuperAdminIncomeController;
 use App\Http\Controllers\SuperAdminInventoryController;
 use App\Http\Controllers\SuperAdminTenantController;
 use App\Http\Controllers\SuperAdminUserController;
+use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\MeController;
 use App\Http\Controllers\TenantProfileController;
 use App\Http\Controllers\TenantStaffController;
@@ -50,12 +51,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 Route::get('/auth/branding', [AuthController::class, 'branding'])->middleware('throttle:30,1');
+Route::get('/translations', [LocaleController::class, 'show'])->middleware('throttle:60,1');
 Route::post('/attendance/ingest', [AttendanceController::class, 'ingest'])->middleware('throttle:120,1');
 Route::get('/bills/shared/{token}', [BillShareController::class, 'show'])->middleware('throttle:60,1');
 
 Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.context'])->group(function () {
         Route::get('/user', fn (Request $request) => SessionPayload::for($request->user()));
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::put('/locale', [LocaleController::class, 'update']);
 
     Route::prefix('super-admin')->middleware('role:super_admin')->group(function () {
         Route::get('/dashboard', [SuperAdminTenantController::class, 'dashboard']);
