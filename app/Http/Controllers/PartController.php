@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BillItem;
 use App\Models\Expense;
 use App\Models\Part;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
+use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Services\BranchInventory;
 use App\Support\BusinessTypes;
@@ -404,10 +406,17 @@ class PartController extends Controller
 
     public function destroy(Part $part): JsonResponse
     {
-        foreach ($part->images ?? [] as $image) {
-            Storage::disk('public')->delete($image);
-        }
-        $part->delete();
+        DB::transaction(function () use ($part) {
+            $this->reversePartPurchases($part);
+
+            BillItem::query()->where('part_id', $part->id)->update(['part_id' => null]);
+            StockTransfer::query()->where('part_id', $part->id)->update(['part_id' => null]);
+
+            foreach ($part->images ?? [] as $image) {
+                Storage::disk('public')->delete($image);
+            }
+            $part->delete();
+        });
 
         return response()->json(null, 204);
     }
@@ -540,6 +549,122 @@ class PartController extends Controller
         $files = $request->file('images');
         if ($files && ! is_array($files)) {
             $request->files->set('images', [$files]);
+        }
+    }
+
+    /**
+     * Remove purchase expenses, credit payables, and GRNs for this catalog item
+     * so Finance no longer includes its stock cost.
+     */
+    private function reversePartPurchases(Part $part): void
+    {
+        $handledExpenseIds = [];
+        $items = StockReceiptItem::query()
+            ->with('receipt.expense')
+            ->where('part_id', $part->id)
+            ->get();
+
+        foreach ($items->groupBy('stock_receipt_id') as $lines) {
+            $receipt = $lines->first()?->receipt;
+            if (! $receipt) {
+                StockReceiptItem::query()->whereIn('id', $lines->pluck('id'))->delete();
+
+                continue;
+            }
+
+            $receipt->load(['items', 'expense']);
+            $lineTotal = round((float) $lines->sum(
+                fn (StockReceiptItem $row) => (float) $row->quantity * (float) $row->unit_cost
+            ), 2);
+            $others = $receipt->items->reject(fn (StockReceiptItem $row) => (int) $row->part_id === (int) $part->id);
+            $expense = $receipt->expense
+                ?? Expense::query()->where('stock_receipt_id', $receipt->id)->first();
+
+            if ($others->isEmpty()) {
+                $receipt->update(['expense_id' => null]);
+                $this->deleteInventoryExpense($expense);
+                $receipt->delete();
+            } else {
+                StockReceiptItem::query()->whereIn('id', $lines->pluck('id'))->delete();
+                $this->reduceInventoryExpense($expense, $lineTotal);
+            }
+
+            if ($expense) {
+                $handledExpenseIds[] = $expense->id;
+            }
+        }
+
+        $orphans = Expense::query()
+            ->where('category', 'inventory')
+            ->when($handledExpenseIds !== [], fn ($query) => $query->whereNotIn('id', $handledExpenseIds))
+            ->where(function ($query) use ($part) {
+                $query->where('description', 'like', $this->stockPurchaseLike($part->name, false))
+                    ->orWhere('description', 'like', $this->stockPurchaseLike($part->name, true));
+            })
+            ->get();
+
+        foreach ($orphans as $expense) {
+            $this->deleteInventoryExpense($expense);
+        }
+    }
+
+    private function stockPurchaseLike(string $name, bool $credit): string
+    {
+        $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $name);
+
+        return ($credit ? 'Stock purchase on credit: ' : 'Stock purchase: ').$safe.' ×%';
+    }
+
+    private function deleteInventoryExpense(?Expense $expense): void
+    {
+        if (! $expense) {
+            return;
+        }
+
+        $expense->update(['stock_receipt_id' => null]);
+        $expense->delete();
+    }
+
+    private function reduceInventoryExpense(?Expense $expense, float $lineTotal): void
+    {
+        if (! $expense || $lineTotal <= 0) {
+            return;
+        }
+
+        $newAmount = round(max(0, (float) $expense->amount - $lineTotal), 2);
+        if ($newAmount <= 0) {
+            $receipt = $expense->stock_receipt_id
+                ? StockReceipt::query()->find($expense->stock_receipt_id)
+                : null;
+            $receipt?->update(['expense_id' => null]);
+            $this->deleteInventoryExpense($expense);
+
+            return;
+        }
+
+        $newPaid = round(min((float) $expense->amount_paid, $newAmount), 2);
+        $fullyPaid = $newPaid + 0.00001 >= $newAmount;
+        $expense->update([
+            'amount' => $newAmount,
+            'amount_paid' => $newPaid,
+            'payment_status' => $fullyPaid ? Expense::STATUS_PAID : Expense::STATUS_CREDIT,
+            'settled_at' => $fullyPaid ? ($expense->settled_at ?? now()) : null,
+        ]);
+
+        $paid = 0.0;
+        foreach ($expense->settlements()->orderBy('id')->get() as $settlement) {
+            if ($paid >= $newPaid) {
+                $settlement->delete();
+
+                continue;
+            }
+            $next = round($paid + (float) $settlement->amount, 2);
+            if ($next > $newPaid) {
+                $settlement->update(['amount' => round($newPaid - $paid, 2)]);
+                $paid = $newPaid;
+            } else {
+                $paid = $next;
+            }
         }
     }
 

@@ -53,6 +53,60 @@ class OwnerOpsTest extends TestCase
         $this->assertEquals(0, $settled['inventory_payables']['payables_total']);
     }
 
+    public function test_deleting_a_part_removes_its_purchase_from_finance(): void
+    {
+        $user = $this->garageUser();
+        Sanctum::actingAs($user);
+        $part = Part::create([
+            'name' => 'Brake Pads', 'brand' => 'Nissin', 'type' => 'brake',
+            'price' => 7800, 'cost_price' => 6200, 'stock_qty' => 2,
+        ]);
+
+        $this->postJson("/api/parts/{$part->id}/restock", [
+            'quantity' => 50,
+            'unit_cost' => 6200,
+            'payment_status' => 'credit',
+            'due_date' => now()->addDays(30)->toDateString(),
+        ])->assertOk();
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(310000, $sheet['inventory_payables']['payables_total']);
+
+        $this->deleteJson("/api/parts/{$part->id}")->assertNoContent();
+
+        $after = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(0, $after['inventory_payables']['payables_total']);
+        $this->assertEquals(0, $after['expenses']);
+        $this->assertTrue(Expense::query()->where('category', 'inventory')->doesntExist());
+    }
+
+    public function test_deleting_a_paid_part_clears_inventory_expense(): void
+    {
+        $user = $this->garageUser();
+        Sanctum::actingAs($user);
+        $part = Part::create([
+            'name' => 'Oil Filter', 'brand' => 'Bosch', 'type' => 'filter',
+            'price' => 1500, 'cost_price' => 800, 'stock_qty' => 0,
+        ]);
+
+        $this->postJson("/api/parts/{$part->id}/restock", [
+            'quantity' => 10,
+            'unit_cost' => 800,
+            'payment_status' => 'paid',
+        ])->assertOk();
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(8000, $sheet['expenses']);
+        $this->assertEquals(8000, (float) ($sheet['expense_breakdown']['inventory'] ?? 0));
+
+        $this->deleteJson("/api/parts/{$part->id}")->assertNoContent();
+
+        $after = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(0, $after['expenses']);
+        $this->assertEquals(0, (float) ($after['expense_breakdown']['inventory'] ?? 0));
+        $this->assertEquals(0, $after['inventory_payables']['payables_total']);
+    }
+
     public function test_team_and_employee_targets_accept_daily_progress(): void
     {
         $user = $this->garageUser();

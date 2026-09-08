@@ -34,6 +34,7 @@ use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
 use App\Http\Controllers\SuperAdminBranchController;
+use App\Http\Controllers\SuperAdminIncomeController;
 use App\Http\Controllers\SuperAdminInventoryController;
 use App\Http\Controllers\SuperAdminTenantController;
 use App\Http\Controllers\SuperAdminUserController;
@@ -58,6 +59,9 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
 
     Route::prefix('super-admin')->middleware('role:super_admin')->group(function () {
         Route::get('/dashboard', [SuperAdminTenantController::class, 'dashboard']);
+        Route::get('/me', [SuperAdminUserController::class, 'me']);
+        Route::put('/me', [SuperAdminUserController::class, 'updateMe']);
+        Route::get('/income', SuperAdminIncomeController::class);
         Route::get('/feature-catalog', [SuperAdminTenantController::class, 'catalog']);
         Route::apiResource('tenants', SuperAdminTenantController::class);
         Route::post('/tenants/{tenant}', [SuperAdminTenantController::class, 'update']);
