@@ -10,6 +10,7 @@ use App\Models\StockReceiptItem;
 use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Services\BranchInventory;
+use App\Services\PartBarcode;
 use App\Support\BusinessTypes;
 use App\Support\InventoryCosting;
 use Illuminate\Http\JsonResponse;
@@ -114,7 +115,9 @@ class PartController extends Controller
             ['Sample row A3 (Brake Pads): payment_status=credit, due_date filled (YYYY-MM-DD) — credit rows require a due date.'],
             ['due_date is required on a credit row (YYYY-MM-DD). You can also set a default paid/credit when uploading.'],
             ['Expense amount for each row = cost_price × stock_qty (created when stock_qty > 0 and cost_price > 0).'],
-            ['If barcode or sku already exists, stock_qty is added and cost_price becomes a weighted average of old stock + this row’s cost_price × qty.'],
+            ['If barcode or sku already exists for the SAME item name, stock_qty is added (weighted-average cost).'],
+            ['If the same barcode/sku is used for a DIFFERENT name (e.g. Lightning vs USB-C), a new item is created with a generated barcode. The supplier barcode is kept in description.'],
+            ['Rows with a blank barcode get an automatic POS… barcode so stickers and scanning always work.'],
             ['Expense for each row still uses this row’s cost_price × stock_qty (the actual purchase), not the blended catalogue cost.'],
             ['Older templates without payment_status still work — those rows follow the upload default (paid unless you choose credit).'],
             ['Delete both SAMPLE rows before importing your real data. Save as .xlsx.'],
@@ -167,7 +170,9 @@ class PartController extends Controller
 
         $parsed = [];
         $errors = [];
+        /** @var array<string, int> $seenSku index in $parsed */
         $seenSku = [];
+        /** @var array<string, int> $seenBarcode index in $parsed */
         $seenBarcode = [];
 
         foreach ($rows as $index => $row) {
@@ -200,42 +205,6 @@ class PartController extends Controller
             if ($values['year'] !== '' && (! ctype_digit($values['year']) || (int) $values['year'] < 1900 || (int) $values['year'] > now()->year + 1)) {
                 $rowErrors[] = 'year is invalid';
             }
-            if ($values['sku'] !== '') {
-                $skuKey = strtolower($values['sku']);
-                if (isset($seenSku[$skuKey])) {
-                    $rowErrors[] = "sku duplicated with row {$seenSku[$skuKey]}";
-                } else {
-                    $seenSku[$skuKey] = $line;
-                }
-            }
-            if ($values['barcode'] !== '') {
-                $barcodeKey = strtolower($values['barcode']);
-                if (isset($seenBarcode[$barcodeKey])) {
-                    $rowErrors[] = "barcode duplicated with row {$seenBarcode[$barcodeKey]}";
-                } else {
-                    $seenBarcode[$barcodeKey] = $line;
-                }
-            }
-
-            $match = null;
-            if ($values['barcode'] !== '') {
-                $match = Part::query()->where('barcode', $values['barcode'])->first();
-            }
-            if (! $match && $values['sku'] !== '') {
-                $match = Part::query()->where('sku', $values['sku'])->first();
-            }
-            if ($values['sku'] !== '') {
-                $skuOwner = Part::query()->where('sku', $values['sku'])->first();
-                if ($skuOwner && (! $match || $skuOwner->id !== $match->id)) {
-                    $rowErrors[] = 'sku already belongs to another part';
-                }
-            }
-            if ($values['barcode'] !== '') {
-                $barcodeOwner = Part::query()->where('barcode', $values['barcode'])->first();
-                if ($barcodeOwner && (! $match || $barcodeOwner->id !== $match->id)) {
-                    $rowErrors[] = 'barcode already belongs to another part';
-                }
-            }
 
             $rowPayment = $values['payment_status'] !== ''
                 ? $this->normalizePaymentStatus($values['payment_status'])
@@ -254,22 +223,95 @@ class PartController extends Controller
                 continue;
             }
 
+            $sku = $values['sku'] !== '' ? $values['sku'] : null;
+            $barcode = $values['barcode'] !== '' ? $values['barcode'] : null;
+            $description = $values['description'] !== '' ? $values['description'] : null;
+            $name = $values['name'];
+            $qty = (int) $values['stock_qty'];
+
+            // Same barcode/sku + same name in this file → fold into the earlier row (restock).
+            // Same barcode/sku + different name → keep as a new item; clear conflicting codes.
+            if ($barcode !== null) {
+                $barcodeKey = strtolower($barcode);
+                if (isset($seenBarcode[$barcodeKey])) {
+                    $prior = $parsed[$seenBarcode[$barcodeKey]];
+                    if (PartBarcode::namesMatch($prior['name'], $name)) {
+                        $parsed[$seenBarcode[$barcodeKey]]['stock_qty'] += $qty;
+                        continue;
+                    }
+                    $description = PartBarcode::noteSupplierBarcode($description, $barcode);
+                    $barcode = null;
+                }
+            }
+            if ($sku !== null) {
+                $skuKey = strtolower($sku);
+                if (isset($seenSku[$skuKey])) {
+                    $prior = $parsed[$seenSku[$skuKey]];
+                    if (PartBarcode::namesMatch($prior['name'], $name)) {
+                        $parsed[$seenSku[$skuKey]]['stock_qty'] += $qty;
+                        continue;
+                    }
+                    $sku = null;
+                }
+            }
+
+            // Against existing catalogue: merge only when name matches; otherwise free the code.
+            $matchId = null;
+            if ($barcode !== null) {
+                $barcodeOwner = Part::query()->where('barcode', $barcode)->first();
+                if ($barcodeOwner) {
+                    if (PartBarcode::namesMatch($barcodeOwner->name, $name)) {
+                        $matchId = $barcodeOwner->id;
+                    } else {
+                        $description = PartBarcode::noteSupplierBarcode($description, $barcode);
+                        $barcode = null;
+                    }
+                }
+            }
+            if ($sku !== null) {
+                $skuOwner = Part::query()->where('sku', $sku)->first();
+                if ($skuOwner) {
+                    if (PartBarcode::namesMatch($skuOwner->name, $name)) {
+                        if ($matchId !== null && $matchId !== $skuOwner->id) {
+                            $errors[] = "Row {$line}: sku and barcode point at different existing parts";
+
+                            continue;
+                        }
+                        $matchId = $skuOwner->id;
+                    } else {
+                        $sku = null;
+                    }
+                }
+            }
+
+            // Empty barcode → generate now so within-file uniqueness stays consistent.
+            if ($barcode === null) {
+                $barcode = PartBarcode::uniqueForTenant();
+            }
+
+            $parsedIndex = count($parsed);
             $parsed[] = [
                 'line' => $line,
-                'name' => $values['name'],
-                'sku' => $values['sku'] !== '' ? $values['sku'] : null,
-                'barcode' => $values['barcode'] !== '' ? $values['barcode'] : null,
+                'match_id' => $matchId,
+                'name' => $name,
+                'sku' => $sku,
+                'barcode' => $barcode,
                 'brand' => $values['brand'],
                 'type' => $values['type'],
                 'model' => $values['model'] !== '' ? $values['model'] : null,
                 'year' => $values['year'] !== '' ? (int) $values['year'] : null,
                 'price' => round((float) $values['price'], 2),
                 'cost_price' => round((float) $values['cost_price'], 2),
-                'stock_qty' => (int) $values['stock_qty'],
-                'description' => $values['description'] !== '' ? $values['description'] : null,
+                'stock_qty' => $qty,
+                'description' => $description,
                 'payment_status' => $rowPayment,
                 'due_date' => $rowPayment === 'credit' ? $rowDue : null,
             ];
+
+            if ($sku !== null) {
+                $seenSku[strtolower($sku)] = $parsedIndex;
+            }
+            $seenBarcode[strtolower($barcode)] = $parsedIndex;
         }
 
         if ($errors) {
@@ -287,24 +329,23 @@ class PartController extends Controller
             $expenseTotal = 0.0;
 
             foreach ($parsed as $row) {
-                $existing = null;
-                if ($row['barcode']) {
-                    $existing = Part::query()->where('barcode', $row['barcode'])->first();
-                }
-                if (! $existing && $row['sku']) {
-                    $existing = Part::query()->where('sku', $row['sku'])->first();
-                }
+                $existing = $row['match_id']
+                    ? Part::query()->find($row['match_id'])
+                    : null;
 
                 $qty = $row['stock_qty'];
                 $unitCost = $row['cost_price'];
 
                 if ($existing) {
+                    $shopQty = BranchInventory::partQty($existing->id);
                     $blendedCost = InventoryCosting::weightedAverageCost(
-                        (int) $existing->stock_qty,
+                        $shopQty,
                         $existing->cost_price,
                         $qty,
                         $unitCost,
                     );
+                    BranchInventory::addPart($existing, $qty);
+                    $existing->refresh();
                     $existing->update([
                         'name' => $row['name'],
                         'sku' => $row['sku'] ?? $existing->sku,
@@ -315,10 +356,9 @@ class PartController extends Controller
                         'year' => $row['year'],
                         'price' => $row['price'],
                         'cost_price' => $blendedCost,
-                        'description' => $row['description'],
-                        'stock_qty' => $existing->stock_qty + $qty,
+                        'description' => $row['description'] ?? $existing->description,
                     ]);
-                    $part = $existing->refresh();
+                    $part = PartBarcode::ensure($existing->refresh());
                     $updated++;
                 } else {
                     $part = Part::create([
@@ -400,8 +440,14 @@ class PartController extends Controller
     {
         $part->update($this->validated($request, $part));
         $this->storeImages($request, $part);
+        PartBarcode::ensure($part->refresh());
 
         return response()->json($part->refresh());
+    }
+
+    public function ensureBarcode(Part $part): JsonResponse
+    {
+        return response()->json(PartBarcode::ensure($part));
     }
 
     public function destroy(Part $part): JsonResponse
@@ -506,6 +552,11 @@ class PartController extends Controller
             if (array_key_exists($field, $data) && ($data[$field] === null || trim((string) $data[$field]) === '')) {
                 $data[$field] = null;
             }
+        }
+
+        // Creating without a barcode: model hook assigns one. Updating with cleared barcode: drop key so ensure() fills it.
+        if ($part && array_key_exists('barcode', $data) && $data['barcode'] === null) {
+            unset($data['barcode']);
         }
 
         return $data;

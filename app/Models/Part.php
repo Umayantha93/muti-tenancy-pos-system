@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
 use App\Services\BranchInventory;
+use App\Services\PartBarcode;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +19,15 @@ class Part extends Model
 
     protected static function booted(): void
     {
+        static::creating(function (Part $part): void {
+            $barcode = trim((string) ($part->barcode ?? ''));
+            if ($barcode === '') {
+                $part->barcode = PartBarcode::uniqueForTenant(
+                    $part->tenant_id ? (int) $part->tenant_id : null
+                );
+            }
+        });
+
         static::created(function (Part $part): void {
             if (BranchInventory::$mutating) {
                 return;

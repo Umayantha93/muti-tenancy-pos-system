@@ -342,7 +342,7 @@ class BalanceSheetController extends Controller
         $items = Expense::query()
             ->credit()
             ->tap(fn ($query) => BranchQuery::constrain($query))
-            ->with(['settlements', 'supplier:id,name,phone'])
+            ->with(['settlements', 'cheques', 'supplier:id,name,phone'])
             ->orderBy('due_date')
             ->orderBy('expense_date')
             ->get()
@@ -356,6 +356,30 @@ class BalanceSheetController extends Controller
                 $paid = $view->active()
                     ? $view->scaleExpense((float) $expense->amount_paid)
                     : (float) $expense->amount_paid;
+                $pendingTotal = $view->active()
+                    ? $view->scaleExpense($expense->pendingChequeTotal())
+                    : $expense->pendingChequeTotal();
+                $available = $view->active()
+                    ? $view->scaleExpense($expense->availableToPay())
+                    : $expense->availableToPay();
+                $pendingCheques = $expense->cheques
+                    ->where('status', \App\Models\ExpenseCheque::STATUS_PENDING)
+                    ->sortBy('cheque_date')
+                    ->values()
+                    ->map(function (\App\Models\ExpenseCheque $row) use ($view) {
+                        $amount = $view->active()
+                            ? $view->scaleExpense((float) $row->amount)
+                            : (float) $row->amount;
+
+                        return [
+                            'id' => $row->id,
+                            'amount' => round($amount, 2),
+                            'cheque_number' => $row->cheque_number,
+                            'cheque_date' => $row->cheque_date?->toDateString(),
+                            'status' => $row->status,
+                        ];
+                    })
+                    ->all();
 
                 return [
                     'id' => $expense->id,
@@ -366,9 +390,12 @@ class BalanceSheetController extends Controller
                     'amount' => round($original, 2),
                     'amount_paid' => round($paid, 2),
                     'remaining' => round($remaining, 2),
+                    'pending_cheque_total' => round($pendingTotal, 2),
+                    'available_to_pay' => round($available, 2),
                     'expense_date' => $expense->expense_date?->toDateString(),
                     'due_date' => $expense->due_date?->toDateString(),
                     'category' => $expense->category,
+                    'pending_cheques' => $pendingCheques,
                     'settlements' => $expense->settlements
                         ->sortBy('settled_on')
                         ->values()

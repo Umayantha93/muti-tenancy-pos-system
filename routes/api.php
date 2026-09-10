@@ -152,6 +152,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/parts', [PartController::class, 'index']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
+            Route::post('/parts/{part}/ensure-barcode', [PartController::class, 'ensureBarcode']);
             Route::get('/part-sales', [PartSaleController::class, 'index']);
             Route::post('/part-sales', [PartSaleController::class, 'store']);
             Route::get('/part-sales/{sale}', [PartSaleController::class, 'show']);
@@ -302,6 +303,10 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/bill-profits/{bill}', [BillProfitController::class, 'show']);
         });
         Route::middleware('feature:balance_sheet')->group(function () {
+            Route::get('/expenses/cheques/due', [ExpenseController::class, 'dueCheques']);
+            Route::post('/expenses/{expense}/cheques', [ExpenseController::class, 'issueCheque']);
+            Route::post('/expenses/cheques/{cheque}/clear', [ExpenseController::class, 'clearCheque']);
+            Route::post('/expenses/cheques/{cheque}/bounce', [ExpenseController::class, 'bounceCheque']);
             Route::apiResource('expenses', ExpenseController::class)->except('show');
             Route::post('/expenses/{expense}/settle', [ExpenseController::class, 'settle']);
             Route::get('/balance-sheet', BalanceSheetController::class);
