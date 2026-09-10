@@ -114,6 +114,7 @@ class PartController extends Controller
             ['Sample row A2 (Oil Filter): payment_status=paid, due_date blank — paid rows do not need a due date.'],
             ['Sample row A3 (Brake Pads): payment_status=credit, due_date filled (YYYY-MM-DD) — credit rows require a due date.'],
             ['due_date is required on a credit row (YYYY-MM-DD). You can also set a default paid/credit when uploading.'],
+            ['Choose the supplier in the import dialog. That supplier is used for every purchase expense created by the file.'],
             ['Expense amount for each row = cost_price × stock_qty (created when stock_qty > 0 and cost_price > 0).'],
             ['If barcode or sku already exists for the SAME item name, stock_qty is added (weighted-average cost).'],
             ['If the same barcode/sku is used for a DIFFERENT name (e.g. Lightning vs USB-C), a new item is created with a generated barcode. The supplier barcode is kept in description.'],
@@ -139,9 +140,15 @@ class PartController extends Controller
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:5120'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit', 'debit'])],
             'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
+            'supplier_id' => [
+                'nullable',
+                'required_if:payment_status,credit',
+                Rule::exists('suppliers', 'id')->where('tenant_id', $request->user()->tenant_id),
+            ],
         ]);
         $defaultPayment = $this->normalizePaymentStatus($request->input('payment_status', 'paid'));
         $defaultDueDate = $request->input('due_date');
+        $importSupplierId = $this->resolveSupplierId($request, $request->input('supplier_id'));
 
         $path = $request->file('file')->getRealPath();
         $spreadsheet = IOFactory::load($path);
@@ -322,7 +329,7 @@ class PartController extends Controller
             throw ValidationException::withMessages(['file' => ['No part rows found. Keep the header row and add at least one data row.']]);
         }
 
-        $summary = DB::transaction(function () use ($parsed, $request) {
+        $summary = DB::transaction(function () use ($parsed, $request, $importSupplierId) {
             $created = 0;
             $updated = 0;
             $expenses = 0;
@@ -377,15 +384,23 @@ class PartController extends Controller
                     $created++;
                 }
 
+                $rowPayment = $row['payment_status'] ?? 'paid';
+                $rowSupplierId = $importSupplierId;
+                if ($rowPayment === 'credit' && ! $rowSupplierId) {
+                    throw ValidationException::withMessages([
+                        'supplier_id' => ['Pick a supplier for credit / supplier-owe imports.'],
+                    ]);
+                }
+
                 $expense = $this->recordPurchaseExpense(
                     $request,
                     $part,
                     $qty,
                     $unitCost,
                     null,
-                    $row['payment_status'] ?? 'paid',
+                    $rowPayment,
                     $row['due_date'] ?? null,
-                    $this->resolveSupplierId($request, null),
+                    $rowSupplierId,
                 );
                 if ($expense) {
                     $expenses++;
