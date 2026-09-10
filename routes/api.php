@@ -152,6 +152,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/parts', [PartController::class, 'index']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
+            Route::post('/parts/{part}/ensure-barcode', [PartController::class, 'ensureBarcode']);
             Route::get('/part-sales', [PartSaleController::class, 'index']);
             Route::post('/part-sales', [PartSaleController::class, 'store']);
             Route::get('/part-sales/{sale}', [PartSaleController::class, 'show']);
