@@ -63,6 +63,11 @@ class Expense extends Model
         return $this->hasMany(ExpenseSettlement::class);
     }
 
+    public function cheques(): HasMany
+    {
+        return $this->hasMany(ExpenseCheque::class);
+    }
+
     protected static function booted(): void
     {
         static::creating(function (Expense $expense): void {
@@ -83,6 +88,25 @@ class Expense extends Model
     public function remainingAmount(): float
     {
         return round(max(0, (float) $this->amount - (float) $this->amount_paid), 2);
+    }
+
+    public function pendingChequeTotal(): float
+    {
+        if ($this->relationLoaded('cheques')) {
+            return round(
+                (float) $this->cheques
+                    ->where('status', ExpenseCheque::STATUS_PENDING)
+                    ->sum('amount'),
+                2
+            );
+        }
+
+        return round((float) $this->cheques()->pending()->sum('amount'), 2);
+    }
+
+    public function availableToPay(): float
+    {
+        return round(max(0, $this->remainingAmount() - $this->pendingChequeTotal()), 2);
     }
 
     public function isCredit(): bool

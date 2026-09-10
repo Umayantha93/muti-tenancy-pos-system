@@ -17,6 +17,8 @@ return [
         'open_nav' => 'Open navigation',
         'close_overlay' => 'Close navigation overlay',
         'payment_due' => 'Monthly payment due — please pay :amount before month end',
+        'cheques_due' => ':count supplier cheque(s) due for clearance — click here to review',
+        'cheques_due_one' => '1 supplier cheque due for clearance — click here to review',
         'plan_amount' => 'your plan amount',
         'platform_control' => 'Platform control',
         'saas_operations' => 'SaaS operations',

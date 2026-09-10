@@ -302,6 +302,10 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/bill-profits/{bill}', [BillProfitController::class, 'show']);
         });
         Route::middleware('feature:balance_sheet')->group(function () {
+            Route::get('/expenses/cheques/due', [ExpenseController::class, 'dueCheques']);
+            Route::post('/expenses/{expense}/cheques', [ExpenseController::class, 'issueCheque']);
+            Route::post('/expenses/cheques/{cheque}/clear', [ExpenseController::class, 'clearCheque']);
+            Route::post('/expenses/cheques/{cheque}/bounce', [ExpenseController::class, 'bounceCheque']);
             Route::apiResource('expenses', ExpenseController::class)->except('show');
             Route::post('/expenses/{expense}/settle', [ExpenseController::class, 'settle']);
             Route::get('/balance-sheet', BalanceSheetController::class);
