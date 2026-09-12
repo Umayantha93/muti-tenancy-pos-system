@@ -30,7 +30,7 @@ class BillProfitController extends Controller
             ->when($jobKind, fn ($query) => $query->where('job_kind', $jobKind));
 
         $bills = $base()
-            ->with(['customer', 'vehicle', 'items.part', 'payments', 'branch:id,name,code'])
+            ->with(['customer', 'vehicle', 'items.part', 'payments', 'refunds.items', 'branch:id,name,code'])
             ->latest('admission_date')
             ->orderByDesc('id')
             ->paginate($data['per_page'] ?? 50);
@@ -48,13 +48,14 @@ class BillProfitController extends Controller
                 'vehicle' => $bill->vehicle,
                 'branch' => $bill->branch,
                 'amount_paid' => $bill->amount_paid,
+                'amount_refunded' => $bill->amount_refunded,
                 'balance_due' => $bill->balance_due,
                 'subtotal' => $bill->subtotal,
                 ...$summary,
             ];
         });
 
-        $allForPeriod = $base()->with(['items.part'])->get();
+        $allForPeriod = $base()->with(['items.part', 'refunds.items'])->get();
 
         $totals = $allForPeriod->reduce(function (array $carry, Bill $bill) use ($analyzer) {
             $summary = $analyzer->summarize($bill);
@@ -134,6 +135,7 @@ class BillProfitController extends Controller
 
     public function show(Bill $bill, BillProfitAnalyzer $analyzer): JsonResponse
     {
+        $bill->loadMissing(['customer', 'vehicle', 'items.part', 'payments', 'refunds.items', 'branch:id,name,code']);
         $summary = $analyzer->summarize($bill);
 
         return $this->moneyJson([
@@ -148,6 +150,7 @@ class BillProfitController extends Controller
             'branch' => $bill->branch,
             'payments' => $bill->payments,
             'amount_paid' => $bill->amount_paid,
+            'amount_refunded' => $bill->amount_refunded,
             'balance_due' => $bill->balance_due,
             'subtotal' => $bill->subtotal,
             'total_deductions' => $bill->total_deductions,

@@ -268,7 +268,17 @@ class BillController extends Controller
     {
         $bill->ensureShareToken();
 
-        return $this->moneyJson($bill->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position', 'branch:id,name,code,address,phone']));
+        return $this->moneyJson($bill->load([
+            'customer',
+            'vehicle',
+            'items.part',
+            'payments.receiver',
+            'refunds.items.billItem',
+            'refunds.creator:id,name',
+            'creator',
+            'employees:id,name,position',
+            'branch:id,name,code,address,phone',
+        ]));
     }
 
     public function update(Request $request, Bill $bill): JsonResponse
@@ -297,10 +307,11 @@ class BillController extends Controller
         }
 
         $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts'])->isEmpty();
+        if ($bill->isClosed()) {
+            abort(422, 'Closed bills cannot be edited.');
+        }
         if (! $staffOnly) {
-            abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
-                ? 'Owe-in bills cannot be edited. Record a payment instead.'
-                : 'Closed bills cannot be edited.');
+            abort_if($bill->isOweIn(), 422, 'Owe-in bills cannot be edited. Record a payment instead.');
         }
 
         if (($data['status'] ?? null) === 'closed' && ! $this->isPaidBill($bill)) {
@@ -319,6 +330,8 @@ class BillController extends Controller
 
     public function syncEmployees(Request $request, Bill $bill): JsonResponse
     {
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
+
         $data = $request->validate($this->employeeIdsRules($request));
         $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
 

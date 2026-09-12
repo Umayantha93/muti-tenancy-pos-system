@@ -6,6 +6,7 @@ use App\Http\Controllers\BalanceSheetController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
+use App\Http\Controllers\BillRefundController;
 use App\Http\Controllers\BillProfitController;
 use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
@@ -130,6 +131,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
             Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
+            Route::get('/bills/{bill}/refunds', [BillRefundController::class, 'index']);
+            Route::post('/bills/{bill}/refunds', [BillRefundController::class, 'store']);
             Route::get('/service-addons', [ServiceAddonController::class, 'index']);
             Route::get('/labor-catalog', [LaborCatalogController::class, 'index']);
         });

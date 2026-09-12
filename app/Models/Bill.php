@@ -41,6 +41,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'sscl_amount',
     'total_deductions',
     'amount_paid',
+    'amount_refunded',
     'balance_due',
     'customer_balance',
     'created_by',
@@ -91,6 +92,7 @@ class Bill extends Model
             'sscl_amount' => 'decimal:2',
             'total_deductions' => 'decimal:2',
             'amount_paid' => 'decimal:2',
+            'amount_refunded' => 'decimal:2',
             'balance_due' => 'decimal:2',
             'customer_balance' => 'decimal:2',
         ];
@@ -155,9 +157,33 @@ class Bill extends Model
         return $this->hasMany(BillPayment::class);
     }
 
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(BillRefund::class)->latest('refunded_at')->latest('id');
+    }
+
     public function videos(): HasMany
     {
         return $this->hasMany(BillVideo::class)->latest();
+    }
+
+    public function acceptsRefunds(): bool
+    {
+        return $this->isClosed()
+            && (float) $this->amount_paid > 0
+            && round((float) $this->amount_paid - (float) $this->amount_refunded, 2) > 0;
+    }
+
+    public function refundStatus(): string
+    {
+        $refunded = round((float) $this->amount_refunded, 2);
+        if ($refunded <= 0) {
+            return 'none';
+        }
+
+        $paid = round((float) $this->amount_paid, 2);
+
+        return $refunded >= $paid ? 'refunded' : 'partially_refunded';
     }
 
     public function isRepairNote(): bool
