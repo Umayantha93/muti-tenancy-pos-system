@@ -24,6 +24,7 @@ class JobVideoController extends Controller
     public function store(Request $request, Bill $bill, JobVideoConverter $converter): JsonResponse
     {
         $this->assertGarageJob($bill);
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
         abort_if($bill->job_kind === Bill::JOB_KIND_PARTS_SALE, 422, 'Videos can only be added on repair or service jobs.');
         abort_if($bill->videos()->count() >= BillVideo::MAX_PER_BILL, 422, 'This job already has 5 videos.');
 
@@ -67,6 +68,7 @@ class JobVideoController extends Controller
     public function destroy(Bill $bill, BillVideo $video, JobVideoConverter $converter): JsonResponse
     {
         $this->assertGarageJob($bill);
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
         abort_unless($video->bill_id === $bill->id, 404);
         $converter->delete($video->path);
         $video->delete();

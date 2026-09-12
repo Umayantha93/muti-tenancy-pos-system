@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BillPayment;
+use App\Models\BillRefund;
 use App\Models\Expense;
 use App\Models\ExpenseSettlement;
 use App\Models\Payroll;
@@ -64,10 +65,20 @@ class BalanceSheetController extends Controller
                     $item->bill?->items ?? []
                 ));
 
+            $refunds = BranchQuery::constrainViaBill(BillRefund::query()
+                ->with(['bill.items']))
+                ->whereYear('refunded_at', $year)
+                ->whereMonth('refunded_at', $month)
+                ->get()
+                ->sum(fn (BillRefund $refund) => $view->scaleReceipt(
+                    (float) $refund->amount,
+                    $refund->bill?->items ?? []
+                ));
+
             $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
             $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
             $salaryTotal = (float) BranchQuery::constrain(Payroll::query())->where('year', $year)->where('month', $month)->sum('net_salary');
-            $income = round((float) $payments + (float) $advances, 2);
+            $income = round((float) $payments + (float) $advances - (float) $refunds, 2);
             $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal), 2);
             $result = [
                 'income' => $income,
@@ -95,10 +106,11 @@ class BalanceSheetController extends Controller
 
         $payments = (float) BranchQuery::constrainViaBill(BillPayment::query())->whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
         $advances = (float) BranchQuery::constrainViaBill(BillItem::query())->where('type', 'advance')->whereYear('created_at', $year)->whereMonth('created_at', $month)->sum('line_total');
+        $refunds = (float) BranchQuery::constrainViaBill(BillRefund::query())->whereYear('refunded_at', $year)->whereMonth('refunded_at', $month)->sum('amount');
         $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
         $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
         $salaryTotal = (float) BranchQuery::constrain(Payroll::query())->where('year', $year)->where('month', $month)->sum('net_salary');
-        $income = $payments + $advances;
+        $income = $payments + $advances - $refunds;
         $expenses = $manualTotal + $salaryTotal;
         $result = ['income' => $income, 'expenses' => $expenses, 'net_profit' => $income - $expenses];
 
@@ -127,7 +139,7 @@ class BalanceSheetController extends Controller
      *   description: string,
      *   reference: string|null,
      *   category: string,
-     *   type: 'income'|'expense'|'payable'|'bill',
+     *   type: 'income'|'expense'|'payable'|'bill'|'refund',
      *   debit: float,
      *   credit: float,
      *   balance: float
@@ -183,6 +195,31 @@ class BalanceSheetController extends Controller
                     'type' => 'income',
                     'debit' => 0.0,
                     'credit' => $amount,
+                ]);
+            });
+
+        BillRefund::query()
+            ->with(['bill:id,bill_number', 'bill.items'])
+            ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
+            ->whereYear('refunded_at', $year)
+            ->whereMonth('refunded_at', $month)
+            ->orderBy('refunded_at')
+            ->orderBy('id')
+            ->get()
+            ->each(function (BillRefund $refund) use ($rows, $view) {
+                $amount = $view->active()
+                    ? $view->scaleReceipt((float) $refund->amount, $refund->bill?->items ?? [])
+                    : (float) $refund->amount;
+
+                $rows->push([
+                    'date' => $refund->refunded_at?->toDateString(),
+                    'sort_at' => ($refund->refunded_at?->format('Y-m-d') ?? '').' 12:05:00',
+                    'description' => 'Bill refund'.($refund->reason ? ' · '.$refund->reason : ''),
+                    'reference' => $refund->bill?->bill_number,
+                    'category' => 'Refunds',
+                    'type' => 'refund',
+                    'debit' => $amount,
+                    'credit' => 0.0,
                 ]);
             });
 
@@ -321,7 +358,7 @@ class BalanceSheetController extends Controller
             ])
             ->values()
             ->map(function (array $row) use (&$balance) {
-                if (in_array($row['type'], ['income', 'expense'], true)) {
+                if (in_array($row['type'], ['income', 'expense', 'refund'], true)) {
                     $balance = round($balance + $row['credit'] - $row['debit'], 2);
                 }
                 unset($row['sort_at']);
