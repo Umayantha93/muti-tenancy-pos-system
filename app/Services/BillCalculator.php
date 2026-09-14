@@ -13,7 +13,7 @@ class BillCalculator
         $charges = (float) $bill->items()->whereIn('type', BusinessTypes::chargeItemTypes())->sum('line_total');
         $discounts = (float) $bill->items()->whereIn('type', BusinessTypes::discountItemTypes())->sum('line_total');
         $advances = (float) $bill->items()->where('type', 'advance')->sum('line_total');
-        $payments = (float) $bill->payments()->sum('amount');
+        $payments = (float) $bill->payments()->countingTowardPaid()->sum('amount');
         $amountPaid = $advances + $payments;
         $taxable = max(0, $charges - $discounts);
         $vatRate = (float) ($bill->vat_rate ?? 0);

@@ -45,6 +45,7 @@ class BalanceSheetController extends Controller
     {
         if ($view->active()) {
             $payments = BranchQuery::constrainViaBill(BillPayment::query()
+                ->countingTowardPaid()
                 ->with(['bill.items']))
                 ->whereYear('paid_at', $year)
                 ->whereMonth('paid_at', $month)
@@ -104,7 +105,7 @@ class BalanceSheetController extends Controller
             return $result;
         }
 
-        $payments = (float) BranchQuery::constrainViaBill(BillPayment::query())->whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
+        $payments = (float) BranchQuery::constrainViaBill(BillPayment::query()->countingTowardPaid())->whereYear('paid_at', $year)->whereMonth('paid_at', $month)->sum('amount');
         $advances = (float) BranchQuery::constrainViaBill(BillItem::query())->where('type', 'advance')->whereYear('created_at', $year)->whereMonth('created_at', $month)->sum('line_total');
         $refunds = (float) BranchQuery::constrainViaBill(BillRefund::query())->whereYear('refunded_at', $year)->whereMonth('refunded_at', $month)->sum('amount');
         $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
@@ -150,6 +151,7 @@ class BalanceSheetController extends Controller
         $rows = collect();
 
         BillPayment::query()
+            ->countingTowardPaid()
             ->with(['bill:id,bill_number', 'bill.items'])
             ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
             ->whereYear('paid_at', $year)

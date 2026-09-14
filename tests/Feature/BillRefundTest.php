@@ -79,7 +79,7 @@ class BillRefundTest extends TestCase
         $bill = Bill::findOrFail($billId);
         $this->assertSame('1000.00', $bill->amount_refunded);
         $this->assertSame('closed', $bill->status);
-        $this->assertSame('refunded', $bill->refundStatus());
+        $this->assertSame('refunded', $bill->resolvedRefundStatus());
     }
 
     public function test_cannot_refund_more_than_remaining_quantity_or_cash(): void
