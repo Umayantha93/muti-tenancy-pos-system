@@ -341,6 +341,7 @@ class BillController extends Controller
     public function close(Request $request, Bill $bill): JsonResponse
     {
         abort_if($bill->isClosed(), 422, 'This bill is already closed.');
+        abort_if($bill->hasPendingCheques(), 422, 'Clear or bounce pending cheques before closing this bill.');
         abort_unless($this->isPaidBill($bill), 422, 'Only paid bills can be closed.');
 
         $bill->update([

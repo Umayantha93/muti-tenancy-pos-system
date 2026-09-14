@@ -94,7 +94,7 @@ class BillProfitAnalyzer
             'margin' => $revenue > 0 ? round(($profit / $revenue) * 100, 1) : 0.0,
             'billing_type' => $bill->owe_in_due_date ? 'credit' : 'instant',
             'payment_status' => $this->paymentStatus($bill),
-            'refund_status' => $bill->refundStatus(),
+            'refund_status' => $bill->resolvedRefundStatus(),
             'amount_refunded' => round((float) $bill->amount_refunded, 2),
             'job_kind' => $bill->job_kind === Bill::JOB_KIND_SERVICE
                 ? Bill::JOB_KIND_SERVICE

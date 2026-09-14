@@ -8,6 +8,7 @@ use App\Models\Tenant;
 use App\Services\BillCalculator;
 use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -59,6 +60,12 @@ class Bill extends Model
     public const JOB_KIND_SERVICE = 'service';
 
     public const JOB_KIND_PARTS_SALE = 'parts_sale';
+
+    protected $appends = [
+        'has_pending_cheque',
+        'pending_cheque_date',
+        'refund_status',
+    ];
 
     protected static function booted(): void
     {
@@ -174,7 +181,7 @@ class Bill extends Model
             && round((float) $this->amount_paid - (float) $this->amount_refunded, 2) > 0;
     }
 
-    public function refundStatus(): string
+    public function resolvedRefundStatus(): string
     {
         $refunded = round((float) $this->amount_refunded, 2);
         if ($refunded <= 0) {
@@ -184,6 +191,45 @@ class Bill extends Model
         $paid = round((float) $this->amount_paid, 2);
 
         return $refunded >= $paid ? 'refunded' : 'partially_refunded';
+    }
+
+    protected function refundStatus(): Attribute
+    {
+        return Attribute::get(fn () => $this->resolvedRefundStatus());
+    }
+
+    protected function hasPendingCheque(): Attribute
+    {
+        return Attribute::get(function () {
+            if ($this->relationLoaded('payments')) {
+                return $this->payments->contains(fn (BillPayment $payment) => $payment->isPendingCheque());
+            }
+
+            return $this->payments()->pendingCheques()->exists();
+        });
+    }
+
+    protected function pendingChequeDate(): Attribute
+    {
+        return Attribute::get(function () {
+            if ($this->relationLoaded('payments')) {
+                return $this->payments
+                    ->filter(fn (BillPayment $payment) => $payment->isPendingCheque())
+                    ->map(fn (BillPayment $payment) => $payment->cheque_date?->toDateString())
+                    ->filter()
+                    ->sort()
+                    ->first();
+            }
+
+            $date = $this->payments()->pendingCheques()->orderBy('cheque_date')->value('cheque_date');
+
+            return $date ? (string) $date : null;
+        });
+    }
+
+    public function hasPendingCheques(): bool
+    {
+        return (bool) $this->has_pending_cheque;
     }
 
     public function isRepairNote(): bool

@@ -130,6 +130,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::put('/bills/{bill}/items/{item}', [BillItemController::class, 'update']);
             Route::delete('/bills/{bill}/items/{item}', [BillItemController::class, 'destroy']);
             Route::post('/bills/{bill}/payments', [BillPaymentController::class, 'store']);
+            Route::post('/bills/{bill}/payments/{payment}/clear', [BillPaymentController::class, 'clear']);
+            Route::post('/bills/{bill}/payments/{payment}/bounce', [BillPaymentController::class, 'bounce']);
             Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
             Route::get('/bills/{bill}/refunds', [BillRefundController::class, 'index']);
             Route::post('/bills/{bill}/refunds', [BillRefundController::class, 'store']);
