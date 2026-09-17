@@ -26,6 +26,8 @@ class BillController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
+            'assigned_to_me' => ['nullable', 'boolean'],
+            'open_only' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
@@ -33,6 +35,12 @@ class BillController extends Controller
             ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position', 'branch:id,name,code,address,phone'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
+            ->when($request->boolean('assigned_to_me'), function ($query) use ($request) {
+                $employeeId = $request->user()->employee_id;
+                abort_unless($employeeId, 422, 'This login is not linked to a team member.');
+                $query->whereHas('employees', fn ($employees) => $employees->where('employees.id', $employeeId));
+            })
+            ->when($request->boolean('open_only'), fn ($query) => $query->whereIn('status', ['open', 'partially_paid', 'owe_in']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
                 $query->where(fn ($nested) => $nested->where('bill_number', 'like', $search)

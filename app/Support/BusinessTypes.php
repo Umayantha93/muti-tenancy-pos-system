@@ -22,6 +22,8 @@ class BusinessTypes
 
     public const STORE = 'store';
 
+    public const MOBILE_SHOP = 'mobile_shop';
+
     /**
      * @return list<string>
      */
@@ -30,7 +32,7 @@ class BusinessTypes
         return [
             self::GARAGE, self::TYRE, self::DEVICE_REPAIR, self::PAINT,
             self::PHOTOGRAPHY, self::CLOTHING, self::SALON, self::COTTAGE,
-            self::STORE,
+            self::STORE, self::MOBILE_SHOP,
         ];
     }
 
@@ -55,6 +57,7 @@ class BusinessTypes
             self::SALON => array_merge(['photo_bookings', 'photo_packages', 'retail_pos', 'product_catalog'], $shared),
             self::COTTAGE => array_merge(['cottage_rooms', 'cottage_stays'], $shared),
             self::STORE => $storeFamily,
+            self::MOBILE_SHOP => $storeFamily,
         ];
     }
 
@@ -98,7 +101,7 @@ class BusinessTypes
     {
         return match ($type) {
             self::PHOTOGRAPHY, self::SALON => 'ORD',
-            self::CLOTHING, self::STORE => 'SALE',
+            self::CLOTHING, self::STORE, self::MOBILE_SHOP => 'SALE',
             self::COTTAGE => 'STAY',
             self::DEVICE_REPAIR => 'REP',
             default => 'JOB',
@@ -111,7 +114,8 @@ class BusinessTypes
             'shop', 'supermarket' => self::CLOTHING,
             'bike', 'three_wheel', 'auto_ac', 'detailing', 'tyre_shop' => self::TYRE,
             'phone_repair', 'appliance' => self::DEVICE_REPAIR,
-            'communications', 'phone_shop', 'parts_shop', 'mobile_shop' => self::STORE,
+            'communications', 'phone_shop' => self::MOBILE_SHOP,
+            'parts_shop' => self::STORE,
             'spa', 'barber' => self::SALON,
             default => in_array($type, self::all(), true) ? $type : self::GARAGE,
         };
@@ -133,6 +137,7 @@ class BusinessTypes
             'stay-pro',
             'salon-pro',
             'repair-pro',
+            'mobile-pro',
             'Growth',
             'Trial',
             'Custom',
@@ -153,6 +158,7 @@ class BusinessTypes
             self::PHOTOGRAPHY => 'studio-pro',
             self::CLOTHING => 'retail-pro',
             self::STORE => 'store-pro',
+            self::MOBILE_SHOP => 'mobile-pro',
             self::COTTAGE => 'stay-pro',
             self::SALON => 'salon-pro',
             self::DEVICE_REPAIR => 'repair-pro',
@@ -189,7 +195,7 @@ class BusinessTypes
                 ['value' => 'charge', 'label' => 'Other charge', 'kind' => 'charge'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
-            self::STORE => [
+            self::STORE, self::MOBILE_SHOP => [
                 ['value' => 'part', 'label' => 'Item', 'kind' => 'stock', 'allow_qty' => true],
                 ['value' => 'charge', 'label' => 'Quick job', 'kind' => 'charge', 'allow_qty' => true],
                 ['value' => 'labor', 'label' => 'Repair', 'kind' => 'charge'],
@@ -279,7 +285,12 @@ class BusinessTypes
 
     public static function usesStoreCounter(string $type): bool
     {
-        return $type === self::STORE;
+        return in_array($type, [self::STORE, self::MOBILE_SHOP], true);
+    }
+
+    public static function usesDeviceJobs(string $type): bool
+    {
+        return $type === self::DEVICE_REPAIR;
     }
 
     public static function billItemKind(string $type): string

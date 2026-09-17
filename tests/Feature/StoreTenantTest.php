@@ -30,7 +30,7 @@ class StoreTenantTest extends TestCase
         $store = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
             'Kandy Mobile Mart',
             BusinessTypes::STORE,
-            'store@shop.test',
+            fake()->unique()->safeEmail(),
         ))->assertCreated()
             ->assertJsonPath('business_type', 'store')
             ->assertJsonPath('plan', 'store-pro');
@@ -46,6 +46,36 @@ class StoreTenantTest extends TestCase
         $tenantId = $store->json('id');
         $this->assertSame(0, LaborCategory::withoutGlobalScopes()->where('tenant_id', $tenantId)->count());
         $this->assertSame(0, ServiceAddon::withoutGlobalScopes()->where('tenant_id', $tenantId)->count());
+    }
+
+    public function test_super_admin_onboards_a_mobile_shop_with_sales_and_repairs(): void
+    {
+        $this->seed(\Database\Seeders\FeatureSeeder::class);
+        $superAdmin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
+        Sanctum::actingAs($superAdmin);
+
+        $catalog = $this->getJson('/api/super-admin/feature-catalog?business_type=mobile_shop')->assertOk();
+        $catalogKeys = collect($catalog->json('features'))->pluck('key');
+        $this->assertTrue($catalogKeys->contains('parts_inventory'));
+        $this->assertTrue($catalogKeys->contains('repair_bills'));
+        $this->assertTrue($catalogKeys->contains('warranties'));
+        $this->assertFalse($catalogKeys->contains('admit_vehicle'));
+        $this->assertSame([], $catalog->json('optional'));
+
+        $shop = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
+            'Matara Mobile',
+            BusinessTypes::MOBILE_SHOP,
+            fake()->unique()->safeEmail(),
+        ))->assertCreated()
+            ->assertJsonPath('business_type', 'mobile_shop')
+            ->assertJsonPath('plan', 'mobile-pro');
+
+        $keys = collect($shop->json('features'))->pluck('key');
+        $this->assertTrue($keys->contains('parts_inventory'));
+        $this->assertTrue($keys->contains('billing'));
+        $this->assertTrue($keys->contains('repair_bills'));
+        $this->assertTrue($keys->contains('warranties'));
+        $this->assertFalse($keys->contains('admit_vehicle'));
     }
 
     public function test_store_counter_sale_decrements_stock_and_uses_sale_prefix(): void

@@ -9,6 +9,7 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\BranchContext;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -122,12 +123,21 @@ class BranchPlanBTest extends TestCase
         $kandyId = $this->postJson("/api/super-admin/tenants/{$owner->tenant_id}/branches", ['name' => 'Kandy'])->json('id');
 
         Sanctum::actingAs($owner);
-        $this->postJson('/api/stock-transfers', [
+        $created = $this->postJson('/api/stock-transfers', [
             'from_branch_id' => $main->id,
             'to_branch_id' => $kandyId,
-            'part_id' => $part->id,
-            'quantity' => 3,
+            'items' => [
+                ['part_id' => $part->id, 'quantity' => 3],
+            ],
         ])->assertCreated();
+
+        $this->assertSame('pending', $created->json('status'));
+        $this->assertSame(7, (int) BranchStock::query()->where('branch_id', $main->id)->where('part_id', $part->id)->value('qty'));
+        $this->assertSame(0, (int) BranchStock::query()->where('branch_id', $kandyId)->where('part_id', $part->id)->value('qty'));
+
+        $this->getJson('/api/stock-transfers')->assertOk()->assertJsonPath('data.0.id', $created->json('id'));
+
+        $this->postJson('/api/stock-transfers/'.$created->json('id').'/receive')->assertOk();
 
         $this->assertSame(7, (int) BranchStock::query()->where('branch_id', $main->id)->where('part_id', $part->id)->value('qty'));
         $this->assertSame(3, (int) BranchStock::query()->where('branch_id', $kandyId)->where('part_id', $part->id)->value('qty'));
@@ -135,6 +145,7 @@ class BranchPlanBTest extends TestCase
 
     private function owner(): User
     {
+        BranchContext::clear();
         $features = collect(['admit_vehicle', 'customers', 'billing', 'parts_inventory', 'bill_profits', 'balance_sheet', 'reports', 'employees_management'])
             ->map(fn (string $key) => Feature::firstOrCreate(['key' => $key], ['name' => str($key)->headline(), 'group' => 'Other', 'sort_order' => 0]));
         $tenant = Tenant::create([
@@ -143,10 +154,13 @@ class BranchPlanBTest extends TestCase
         ]);
         $tenant->features()->sync($features->mapWithKeys(fn (Feature $feature) => [$feature->id => ['is_enabled' => true]]));
 
-        return User::factory()->create([
+        $user = User::factory()->create([
             'tenant_id' => $tenant->id,
             'role' => 'business_owner',
             'status' => 'active',
         ]);
+        BranchContext::set((int) Branch::defaultIdFor($tenant->id));
+
+        return $user;
     }
 }

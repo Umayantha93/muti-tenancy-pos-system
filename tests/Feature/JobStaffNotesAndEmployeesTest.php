@@ -58,7 +58,8 @@ class JobStaffNotesAndEmployeesTest extends TestCase
 
     public function test_optional_employees_can_be_assigned_and_reported_by_month_or_year(): void
     {
-        Sanctum::actingAs($this->garageUser());
+        $owner = $this->garageUser();
+        Sanctum::actingAs($owner);
         $mechanic = Employee::create([
             'name' => 'Sewu', 'nic' => '199012345678', 'phone' => '0771112222',
             'position' => 'Mechanic', 'base_salary' => 50000, 'fingerprint_id' => 'fp-1', 'active' => true,
@@ -108,6 +109,20 @@ class JobStaffNotesAndEmployeesTest extends TestCase
 
         $this->assertSame(1, $yearReport['employee_jobs']['count']);
         $this->assertSame($assigned['id'], $yearReport['employee_jobs']['jobs'][0]['id']);
+
+        $staff = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+            'employee_id' => $mechanic->id,
+        ]);
+        $staff->permissions()->sync(
+            $owner->tenant->features()->pluck('features.id')->mapWithKeys(fn ($id) => [$id => ['can_access' => true]])
+        );
+        Sanctum::actingAs($staff);
+        $mine = collect($this->getJson('/api/bills?assigned_to_me=1&open_only=1')->assertOk()->json('data'))->pluck('id');
+        $this->assertTrue($mine->contains($assigned['id']));
+        $this->assertTrue($mine->contains($unassigned['id']));
     }
 
     private function garageUser(): User

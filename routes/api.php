@@ -113,6 +113,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::middleware('feature:customers,admit_vehicle,photo_bookings,retail_pos,cottage_stays')->group(function () {
+            Route::get('/customers/{customer}/statement', [CustomerController::class, 'statement']);
             Route::apiResource('customers', CustomerController::class)->except('destroy');
         });
 
@@ -217,7 +218,11 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::get('/branches', [BranchController::class, 'index']);
         Route::get('/branches/{branch}', [BranchController::class, 'summary']);
         Route::put('/branches/{branch}', [BranchController::class, 'update']);
+        Route::get('/stock-transfers', [StockTransferController::class, 'index']);
+        Route::get('/stock-transfers/{stock_transfer}', [StockTransferController::class, 'show']);
         Route::post('/stock-transfers', [StockTransferController::class, 'store'])->middleware('role:business_owner');
+        Route::post('/stock-transfers/{stock_transfer}/receive', [StockTransferController::class, 'receive']);
+        Route::delete('/stock-transfers/{stock_transfer}', [StockTransferController::class, 'destroy'])->middleware('role:business_owner');
 
         Route::prefix('tenant')->middleware('role:business_owner')->group(function () {
             Route::get('/profile', [TenantProfileController::class, 'show']);

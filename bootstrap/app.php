@@ -23,6 +23,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             SetLocale::class,
         ]);
+        $middleware->prependToPriorityList(
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            ResolveBranchContext::class,
+        );
         $middleware->alias([
             'role' => EnsureRole::class,
             'user.active' => EnsureUserIsActive::class,
