@@ -24,6 +24,8 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'odometer',
     'mileage',
     'next_service_mileage',
+    'next_service_due_on',
+    'service_reminder_sent_at',
     'notes',
     'internal_notes',
     'additional_note_color',
@@ -32,6 +34,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'warranty_until',
     'status',
     'job_kind',
+    'floor_status',
     'hide_amounts',
     'owe_in_due_date',
     'closed_at',
@@ -86,6 +89,8 @@ class Bill extends Model
     {
         return [
             'admission_date' => 'date:Y-m-d',
+            'next_service_due_on' => 'date:Y-m-d',
+            'service_reminder_sent_at' => 'datetime',
             'owe_in_due_date' => 'date:Y-m-d',
             'closed_at' => 'datetime',
             'warranty_months' => 'integer',

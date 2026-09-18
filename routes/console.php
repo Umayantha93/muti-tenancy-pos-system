@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('tenants:expire-demos')->daily();
 Schedule::command('job-videos:prune')->daily();
+Schedule::command('service-reminders:send')->dailyAt('08:00');

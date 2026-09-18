@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Feature;
 use App\Models\User;
+use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -69,7 +70,12 @@ class TenantStaffController extends Controller
                 ->wherePivot('is_enabled', true)
                 ->orderBy('features.sort_order')
                 ->orderBy('features.name')
-                ->get(),
+                ->get()
+                ->map(function (Feature $feature) {
+                    $feature->setAttribute('parent', BusinessTypes::parentKey($feature->key));
+
+                    return $feature;
+                }),
             'permissions' => $user->permissions,
         ]);
     }
@@ -78,9 +84,15 @@ class TenantStaffController extends Controller
     {
         $this->ownedStaff($request, $user);
         $data = $request->validate(['permissions' => ['required', 'array'], 'permissions.*' => ['boolean']]);
-        $enabled = $request->user()->tenant->features()->wherePivot('is_enabled', true)->whereIn('features.key', array_keys($data['permissions']))->get();
+        $permissions = $data['permissions'];
+        foreach (BusinessTypes::nestedUnder() as $child => $parent) {
+            if (empty($permissions[$parent])) {
+                $permissions[$child] = false;
+            }
+        }
+        $enabled = $request->user()->tenant->features()->wherePivot('is_enabled', true)->whereIn('features.key', array_keys($permissions))->get();
         $user->permissions()->sync($enabled->mapWithKeys(fn (Feature $feature) => [
-            $feature->id => ['can_access' => (bool) $data['permissions'][$feature->key]],
+            $feature->id => ['can_access' => (bool) ($permissions[$feature->key] ?? false)],
         ]));
 
         return $this->permissions($request, $user);

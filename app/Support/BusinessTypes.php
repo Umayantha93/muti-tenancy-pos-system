@@ -22,6 +22,8 @@ class BusinessTypes
 
     public const STORE = 'store';
 
+    public const MOBILE_SHOP = 'mobile_shop';
+
     /**
      * @return list<string>
      */
@@ -30,7 +32,7 @@ class BusinessTypes
         return [
             self::GARAGE, self::TYRE, self::DEVICE_REPAIR, self::PAINT,
             self::PHOTOGRAPHY, self::CLOTHING, self::SALON, self::COTTAGE,
-            self::STORE,
+            self::STORE, self::MOBILE_SHOP,
         ];
     }
 
@@ -39,22 +41,27 @@ class BusinessTypes
      */
     public static function featureMatrix(): array
     {
-        $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'reports'];
+        $shared = ['customers', 'billing', 'bill_sms', 'bill_whatsapp', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'cash_up', 'reports'];
+        $inventoryExtras = ['purchase_orders', 'part_fitment'];
 
-        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties'], $shared);
+        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties', 'job_bookings', ...$inventoryExtras], $shared);
         $retailFamily = array_merge(['retail_pos', 'product_catalog', 'suppliers'], $shared);
-        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties'], $shared);
+        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory'], $shared);
 
         return [
-            self::GARAGE => array_merge($garageFamily, ['owner_bill_sms', 'service_ops_report', 'job_videos']),
+            self::GARAGE => array_merge($garageFamily, [
+                'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos',
+                'service_reminders', 'service_ops_report',
+            ]),
             self::TYRE => $garageFamily,
-            self::DEVICE_REPAIR => $garageFamily,
+            self::DEVICE_REPAIR => array_merge($garageFamily, ['serial_inventory']),
             self::PAINT => $garageFamily,
             self::PHOTOGRAPHY => array_merge(['photo_bookings', 'photo_packages'], $shared),
             self::CLOTHING => $retailFamily,
             self::SALON => array_merge(['photo_bookings', 'photo_packages', 'retail_pos', 'product_catalog'], $shared),
             self::COTTAGE => array_merge(['cottage_rooms', 'cottage_stays'], $shared),
             self::STORE => $storeFamily,
+            self::MOBILE_SHOP => $storeFamily,
         ];
     }
 
@@ -65,10 +72,21 @@ class BusinessTypes
      */
     public static function optionalFeatures(string $type): array
     {
+        $inventoryExtras = ['purchase_orders', 'part_fitment'];
+        $bay = ['job_bookings'];
+        $whatsapp = ['bill_whatsapp'];
+
         return match ($type) {
-            self::STORE => ['repair_bills', 'warranties'],
-            self::GARAGE => ['owner_bill_sms', 'service_ops_report', 'job_videos'],
-            default => [],
+            self::STORE => ['repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory', ...$whatsapp],
+            self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory', ...$whatsapp],
+            self::GARAGE => [
+                'owner_bill_sms', 'service_ops_report', 'job_videos',
+                'job_board', 'job_bookings', 'service_reminders',
+                ...$inventoryExtras, 'cash_up', ...$whatsapp,
+            ],
+            self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up', ...$whatsapp],
+            self::DEVICE_REPAIR => [...$bay, ...$inventoryExtras, 'serial_inventory', 'cash_up', ...$whatsapp],
+            default => ['cash_up', ...$whatsapp],
         };
     }
 
@@ -98,7 +116,7 @@ class BusinessTypes
     {
         return match ($type) {
             self::PHOTOGRAPHY, self::SALON => 'ORD',
-            self::CLOTHING, self::STORE => 'SALE',
+            self::CLOTHING, self::STORE, self::MOBILE_SHOP => 'SALE',
             self::COTTAGE => 'STAY',
             self::DEVICE_REPAIR => 'REP',
             default => 'JOB',
@@ -111,7 +129,8 @@ class BusinessTypes
             'shop', 'supermarket' => self::CLOTHING,
             'bike', 'three_wheel', 'auto_ac', 'detailing', 'tyre_shop' => self::TYRE,
             'phone_repair', 'appliance' => self::DEVICE_REPAIR,
-            'communications', 'phone_shop', 'parts_shop', 'mobile_shop' => self::STORE,
+            'communications', 'phone_shop' => self::MOBILE_SHOP,
+            'parts_shop' => self::STORE,
             'spa', 'barber' => self::SALON,
             default => in_array($type, self::all(), true) ? $type : self::GARAGE,
         };
@@ -133,6 +152,7 @@ class BusinessTypes
             'stay-pro',
             'salon-pro',
             'repair-pro',
+            'mobile-pro',
             'Growth',
             'Trial',
             'Custom',
@@ -153,6 +173,7 @@ class BusinessTypes
             self::PHOTOGRAPHY => 'studio-pro',
             self::CLOTHING => 'retail-pro',
             self::STORE => 'store-pro',
+            self::MOBILE_SHOP => 'mobile-pro',
             self::COTTAGE => 'stay-pro',
             self::SALON => 'salon-pro',
             self::DEVICE_REPAIR => 'repair-pro',
@@ -189,7 +210,7 @@ class BusinessTypes
                 ['value' => 'charge', 'label' => 'Other charge', 'kind' => 'charge'],
                 ['value' => 'discount', 'label' => 'Discount', 'kind' => 'discount'],
             ],
-            self::STORE => [
+            self::STORE, self::MOBILE_SHOP => [
                 ['value' => 'part', 'label' => 'Item', 'kind' => 'stock', 'allow_qty' => true],
                 ['value' => 'charge', 'label' => 'Quick job', 'kind' => 'charge', 'allow_qty' => true],
                 ['value' => 'labor', 'label' => 'Repair', 'kind' => 'charge'],
@@ -279,7 +300,17 @@ class BusinessTypes
 
     public static function usesStoreCounter(string $type): bool
     {
-        return $type === self::STORE;
+        return in_array($type, [self::STORE, self::MOBILE_SHOP], true);
+    }
+
+    public static function usesCounterHome(string $type): bool
+    {
+        return self::usesStoreCounter($type);
+    }
+
+    public static function usesDeviceJobs(string $type): bool
+    {
+        return $type === self::DEVICE_REPAIR;
     }
 
     public static function billItemKind(string $type): string
@@ -325,5 +356,158 @@ class BusinessTypes
             'charge' => 'Service / charge',
             default => str($type)->replace('_', ' ')->title()->toString(),
         };
+    }
+
+    /**
+     * Nested ticks on the super-admin / staff feature plan. Child => parent.
+     *
+     * @return array<string, string>
+     */
+    public static function nestedUnder(): array
+    {
+        return [
+            'admit_repair' => 'admit_vehicle',
+            'admit_service' => 'admit_vehicle',
+            'job_board' => 'admit_vehicle',
+            'owner_bill_sms' => 'admit_vehicle',
+            'job_videos' => 'admit_vehicle',
+            'service_reminders' => 'bill_sms',
+            'serial_inventory' => 'parts_inventory',
+            'bill_whatsapp' => 'billing',
+        ];
+    }
+
+    public static function parentKey(string $key): ?string
+    {
+        return self::nestedUnder()[$key] ?? null;
+    }
+
+    /**
+     * Extra keys that must also be on for this module.
+     *
+     * @return list<string>
+     */
+    public static function requires(string $key): array
+    {
+        return match ($key) {
+            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos' => ['admit_vehicle'],
+            'service_reminders' => ['bill_sms', 'admit_service'],
+            'service_ops_report' => ['admit_service'],
+            'serial_inventory' => ['parts_inventory'],
+            'bill_whatsapp' => ['billing'],
+            default => [],
+        };
+    }
+
+    /**
+     * @param  list<string>  $enabled
+     * @return list<string>
+     */
+    public static function fillGarageAdmitDefaults(string $type, array $enabled): array
+    {
+        if ($type !== self::GARAGE || ! in_array('admit_vehicle', $enabled, true)) {
+            return $enabled;
+        }
+        if (! in_array('admit_repair', $enabled, true) && ! in_array('admit_service', $enabled, true)) {
+            $enabled[] = 'admit_repair';
+            $enabled[] = 'admit_service';
+        }
+
+        return array_values(array_unique($enabled));
+    }
+
+    /**
+     * Drop children when a parent is off. Reject garage admit with neither kind.
+     *
+     * @param  list<string>  $enabled
+     * @return list<string>
+     */
+    public static function normalizePlan(string $type, array $enabled, bool $rejectEmptyAdmit = true): array
+    {
+        $allowed = self::featuresForType($type);
+        $set = array_flip(array_values(array_intersect($enabled, $allowed)));
+
+        if (! isset($set['admit_vehicle'])) {
+            unset($set['admit_repair'], $set['admit_service'], $set['job_board'], $set['owner_bill_sms'], $set['job_videos']);
+        }
+        if (! isset($set['bill_sms'])) {
+            unset($set['service_reminders']);
+        }
+        if (! isset($set['admit_service'])) {
+            unset($set['service_reminders'], $set['service_ops_report']);
+        }
+        if (! isset($set['parts_inventory']) && ! isset($set['product_catalog'])) {
+            unset($set['serial_inventory']);
+        }
+        if (! isset($set['billing'])) {
+            unset($set['bill_whatsapp']);
+        }
+
+        if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])
+            && ! isset($set['admit_repair']) && ! isset($set['admit_service'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'features' => ['Choose Repair, Service, or both.'],
+            ]);
+        }
+
+        return array_keys($set);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function allowedJobKinds(\App\Models\User $user): array
+    {
+        $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+        if ($type !== self::GARAGE) {
+            return [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE];
+        }
+
+        $attached = $user->tenant?->features()->whereIn('features.key', ['admit_repair', 'admit_service'])->pluck('features.key') ?? collect();
+        if ($attached->isEmpty()) {
+            return $user->canAccessFeature('admit_vehicle')
+                ? [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE]
+                : [];
+        }
+
+        $kinds = [];
+        if ($user->canAccessFeature('admit_repair')) {
+            $kinds[] = \App\Models\Bill::JOB_KIND_REPAIR;
+        }
+        if ($user->canAccessFeature('admit_service')) {
+            $kinds[] = \App\Models\Bill::JOB_KIND_SERVICE;
+        }
+
+        return $kinds;
+    }
+
+    public static function jobKindAllowed(\App\Models\User $user, ?string $kind): bool
+    {
+        if ($kind === null || $kind === \App\Models\Bill::JOB_KIND_PARTS_SALE) {
+            return true;
+        }
+        if (! in_array($kind, [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE], true)) {
+            return true;
+        }
+
+        $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+        if ($type !== self::GARAGE) {
+            return true;
+        }
+
+        return in_array($kind, self::allowedJobKinds($user), true);
+    }
+
+    public static function defaultJobKind(\App\Models\User $user, string $type): string
+    {
+        if (self::usesStoreCounter($type)) {
+            return \App\Models\Bill::JOB_KIND_PARTS_SALE;
+        }
+        $allowed = self::allowedJobKinds($user);
+        if (count($allowed) === 1) {
+            return $allowed[0];
+        }
+
+        return \App\Models\Bill::JOB_KIND_REPAIR;
     }
 }

@@ -3,6 +3,7 @@
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BalanceSheetController;
+use App\Http\Controllers\BayController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\BillProfitController;
 use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\BranchController;
+use App\Http\Controllers\CashUpController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
 use App\Http\Controllers\CustomerController;
@@ -20,9 +22,12 @@ use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
 use App\Http\Controllers\JobVideoController;
+use App\Http\Controllers\JobBoardController;
+use App\Http\Controllers\JobBookingController;
 use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
+use App\Http\Controllers\PartSerialController;
 use App\Http\Controllers\PayrollController;
 use App\Http\Controllers\PhotoBookingController;
 use App\Http\Controllers\PhotoPackageController;
@@ -31,6 +36,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RetailSaleController;
 use App\Http\Controllers\ServiceAddonController;
 use App\Http\Controllers\ServiceOpsReportController;
+use App\Http\Controllers\ServiceReminderController;
 use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
@@ -84,6 +90,9 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::put('/tenants/{tenant}/dual-financial-view', [SuperAdminTenantController::class, 'updateDualFinancialView']);
         Route::get('/tenants/{tenant}/fee-payments', [SuperAdminTenantController::class, 'feePayments']);
         Route::put('/tenants/{tenant}/fee-payments/{year}/{month}', [SuperAdminTenantController::class, 'updateFeePayment']);
+        Route::get('/tenants/{tenant}/setup-fee-payments', [SuperAdminTenantController::class, 'setupFeePayments']);
+        Route::post('/tenants/{tenant}/setup-fee-payments', [SuperAdminTenantController::class, 'storeSetupFeePayment']);
+        Route::delete('/tenants/{tenant}/setup-fee-payments/{setupFeePayment}', [SuperAdminTenantController::class, 'destroySetupFeePayment']);
         Route::get('/tenants/{tenant}/bills', [SuperAdminBillController::class, 'index']);
         Route::get('/tenants/{tenant}/parts', [SuperAdminBillController::class, 'parts']);
         Route::get('/tenants/{tenant}/inventory/parts', [SuperAdminInventoryController::class, 'indexParts']);
@@ -113,6 +122,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::middleware('feature:customers,admit_vehicle,photo_bookings,retail_pos,cottage_stays')->group(function () {
+            Route::get('/customers/outstanding', [CustomerController::class, 'outstanding']);
+            Route::get('/customers/{customer}/statement', [CustomerController::class, 'statement']);
             Route::apiResource('customers', CustomerController::class)->except('destroy');
         });
 
@@ -140,6 +151,25 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
+        Route::middleware('feature:job_bookings')->group(function () {
+            Route::get('/bays', [BayController::class, 'index']);
+            Route::post('/bays', [BayController::class, 'store']);
+            Route::put('/bays/{bay}', [BayController::class, 'update']);
+            Route::delete('/bays/{bay}', [BayController::class, 'destroy']);
+            Route::get('/job-bookings', [JobBookingController::class, 'index']);
+            Route::post('/job-bookings', [JobBookingController::class, 'store']);
+            Route::put('/job-bookings/{job_booking}', [JobBookingController::class, 'update']);
+            Route::delete('/job-bookings/{job_booking}', [JobBookingController::class, 'destroy']);
+            Route::post('/job-bookings/{job_booking}/open-job', [JobBookingController::class, 'openJob']);
+        });
+        Route::middleware('feature:job_board')->group(function () {
+            Route::get('/job-board', [JobBoardController::class, 'index']);
+            Route::put('/bills/{bill}/floor-status', [JobBoardController::class, 'update']);
+        });
+        Route::middleware('feature:service_reminders')->group(function () {
+            Route::get('/service-reminders', [ServiceReminderController::class, 'index']);
+            Route::post('/service-reminders/{bill}/send', [ServiceReminderController::class, 'send']);
+        });
         Route::middleware('feature:job_videos')->group(function () {
             Route::get('/bills/{bill}/videos', [JobVideoController::class, 'index']);
             Route::post('/bills/{bill}/videos', [JobVideoController::class, 'store']);
@@ -161,6 +191,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/part-sales', [PartSaleController::class, 'index']);
             Route::post('/part-sales', [PartSaleController::class, 'store']);
             Route::get('/part-sales/{sale}', [PartSaleController::class, 'show']);
+        });
+
+        Route::middleware('feature:serial_inventory')->group(function () {
+            Route::get('/serials', [PartSerialController::class, 'index']);
+            Route::get('/serials/lookup', [PartSerialController::class, 'lookup']);
+            Route::post('/parts/{part}/serials', [PartSerialController::class, 'store']);
         });
 
         Route::middleware('feature:photo_packages')->group(function () {
@@ -217,7 +253,11 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::get('/branches', [BranchController::class, 'index']);
         Route::get('/branches/{branch}', [BranchController::class, 'summary']);
         Route::put('/branches/{branch}', [BranchController::class, 'update']);
+        Route::get('/stock-transfers', [StockTransferController::class, 'index']);
+        Route::get('/stock-transfers/{stock_transfer}', [StockTransferController::class, 'show']);
         Route::post('/stock-transfers', [StockTransferController::class, 'store'])->middleware('role:business_owner');
+        Route::post('/stock-transfers/{stock_transfer}/receive', [StockTransferController::class, 'receive']);
+        Route::delete('/stock-transfers/{stock_transfer}', [StockTransferController::class, 'destroy'])->middleware('role:business_owner');
 
         Route::prefix('tenant')->middleware('role:business_owner')->group(function () {
             Route::get('/profile', [TenantProfileController::class, 'show']);
@@ -306,6 +346,10 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::middleware('feature:bill_profits')->group(function () {
             Route::get('/bill-profits', [BillProfitController::class, 'index']);
             Route::get('/bill-profits/{bill}', [BillProfitController::class, 'show']);
+        });
+        Route::middleware('feature:cash_up')->group(function () {
+            Route::get('/cash-up', [CashUpController::class, 'show']);
+            Route::post('/cash-up', [CashUpController::class, 'store']);
         });
         Route::middleware('feature:balance_sheet')->group(function () {
             Route::get('/expenses/cheques/due', [ExpenseController::class, 'dueCheques']);

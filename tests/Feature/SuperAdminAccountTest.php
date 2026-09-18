@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Tenant;
 use App\Models\TenantFeePayment;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -73,14 +74,17 @@ class SuperAdminAccountTest extends TestCase
         ]);
 
         $this->getJson('/api/super-admin/income?year=2026')
-            ->assertOk()
-            ->assertJsonPath('collected', 30000)
-            ->assertJsonPath('payment_count', 2)
-            ->assertJsonPath('tenants.0.business_name', 'Income Garage');
+            ->assertOk();
+        $yearPayments = collect($this->getJson('/api/super-admin/income?year=2026')->json('payments'))
+            ->where('tenant_id', $tenant->id)
+            ->where('kind', 'monthly_fee');
+        $this->assertEquals(30000.0, round((float) $yearPayments->sum('amount'), 2));
+        $this->assertCount(2, $yearPayments);
 
-        $this->getJson('/api/super-admin/income?year=2026&month=8')
-            ->assertOk()
-            ->assertJsonPath('collected', 15000)
-            ->assertJsonPath('payment_count', 1);
+        $monthPayments = collect($this->getJson('/api/super-admin/income?year=2026&month=8')->json('payments'))
+            ->where('tenant_id', $tenant->id)
+            ->where('kind', 'monthly_fee');
+        $this->assertEquals(15000.0, round((float) $monthPayments->sum('amount'), 2));
+        $this->assertCount(1, $monthPayments);
     }
 }

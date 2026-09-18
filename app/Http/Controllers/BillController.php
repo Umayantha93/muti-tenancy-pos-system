@@ -26,6 +26,8 @@ class BillController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
+            'assigned_to_me' => ['nullable', 'boolean'],
+            'open_only' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
@@ -33,6 +35,12 @@ class BillController extends Controller
             ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position', 'branch:id,name,code,address,phone'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
+            ->when($request->boolean('assigned_to_me'), function ($query) use ($request) {
+                $employeeId = $request->user()->employee_id;
+                abort_unless($employeeId, 422, 'This login is not linked to a team member.');
+                $query->whereHas('employees', fn ($employees) => $employees->where('employees.id', $employeeId));
+            })
+            ->when($request->boolean('open_only'), fn ($query) => $query->whereIn('status', ['open', 'partially_paid', 'owe_in']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
                 $query->where(fn ($nested) => $nested->where('bill_number', 'like', $search)
@@ -69,6 +77,7 @@ class BillController extends Controller
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_due_on' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
@@ -123,6 +132,11 @@ class BillController extends Controller
                 }
             }
 
+            $jobKind = $data['job_kind'] ?? null;
+            if ($jobKind && ! BusinessTypes::jobKindAllowed($request->user(), $jobKind)) {
+                abort(403, 'This job kind is not enabled for this account.');
+            }
+
             return $this->openBill($request, $customer->id, $data, $this->jobType($request), $vehicle->id);
         });
 
@@ -136,6 +150,7 @@ class BillController extends Controller
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_due_on' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
@@ -145,6 +160,9 @@ class BillController extends Controller
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
+        if (! empty($data['job_kind']) && ! BusinessTypes::jobKindAllowed($request->user(), $data['job_kind'])) {
+            abort(403, 'This job kind is not enabled for this account.');
+        }
         $bill = $this->openBill($request, $vehicle->customer_id, $data, $this->jobType($request), $vehicle->id);
 
         return response()->json($bill, 201);
@@ -291,6 +309,7 @@ class BillController extends Controller
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
+            'next_service_due_on' => ['nullable', 'date'],
             'hide_amounts' => ['sometimes', 'boolean'],
             ...$this->employeeIdsRules($request),
         ]);
@@ -445,9 +464,10 @@ class BillController extends Controller
     private function openBill(Request $request, int $customerId, array $data, string $type, ?int $vehicleId = null, ?string $sourceType = null, ?int $sourceId = null): Bill
     {
         $jobKind = $data['job_kind']
-            ?? (BusinessTypes::usesVehicleJobs($type)
-                ? Bill::JOB_KIND_REPAIR
-                : (BusinessTypes::usesStoreCounter($type) ? Bill::JOB_KIND_PARTS_SALE : Bill::JOB_KIND_REPAIR));
+            ?? BusinessTypes::defaultJobKind($request->user(), $type);
+        if (! BusinessTypes::jobKindAllowed($request->user(), $jobKind)) {
+            abort(403, 'This job kind is not enabled for this account.');
+        }
         $prefix = BusinessTypes::usesStoreCounter($type) && $jobKind === Bill::JOB_KIND_REPAIR
             ? 'REP'
             : BusinessTypes::billPrefix($type);
@@ -460,10 +480,12 @@ class BillController extends Controller
             'odometer' => $data['odometer'] ?? null,
             'mileage' => $data['mileage'] ?? null,
             'next_service_mileage' => $data['next_service_mileage'] ?? null,
+            'next_service_due_on' => $data['next_service_due_on'] ?? null,
             'notes' => $data['notes'] ?? null,
+            'job_kind' => $jobKind,
+            'floor_status' => $data['floor_status'] ?? 'waiting',
             'internal_notes' => $data['internal_notes'] ?? null,
             'additional_note_color' => $data['additional_note_color'] ?? null,
-            'job_kind' => $jobKind,
             'source_type' => $sourceType,
             'source_id' => $sourceId,
             'created_by' => $request->user()->id,

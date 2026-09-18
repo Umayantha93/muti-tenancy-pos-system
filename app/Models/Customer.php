@@ -7,10 +7,17 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'phone', 'address'])]
+#[Fillable(['name', 'phone', 'address', 'sms_opt_in'])]
 class Customer extends Model
 {
     use BelongsToTenant;
+
+    protected function casts(): array
+    {
+        return [
+            'sms_opt_in' => 'boolean',
+        ];
+    }
 
     public static function resolveFromIntake(?string $name, ?string $phone, ?string $address = null): self
     {

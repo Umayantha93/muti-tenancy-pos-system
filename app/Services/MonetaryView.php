@@ -24,6 +24,7 @@ class MonetaryView
         'amount_paid',
         'balance_due',
         'customer_balance',
+        'outstanding_balance',
         'unit_price',
         'line_total',
         'amount',
