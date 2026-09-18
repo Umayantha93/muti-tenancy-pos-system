@@ -8,6 +8,7 @@ use App\Models\LaborCategory;
 use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Models\TenantFeePayment;
+use App\Models\TenantSetupFeePayment;
 use App\Models\User;
 use App\Services\ImprovmxMailService;
 use App\Support\BusinessTypes;
@@ -67,6 +68,7 @@ class SuperAdminTenantController extends Controller
         $month = now()->month;
 
         $paginator = Tenant::withCount('users')->with('features')
+            ->withSum('setupFeePayments', 'amount')
             ->withExists([
                 'feePayments as current_month_paid' => fn ($query) => $query
                     ->where('year', $year)
@@ -80,6 +82,7 @@ class SuperAdminTenantController extends Controller
 
         $paginator->getCollection()->transform(function (Tenant $tenant) {
             $tenant->current_month_paid = (bool) $tenant->current_month_paid;
+            $tenant->withSetupFeeTotals();
 
             return $tenant;
         });
@@ -109,6 +112,7 @@ class SuperAdminTenantController extends Controller
             'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
             'payment_plan' => ['required', Rule::in(BusinessTypes::paymentPlans())],
             'plan_amount' => ['required', 'numeric', 'min:0'],
+            'setup_fee_amount' => ['nullable', 'numeric', 'min:0'],
             'logo' => ['nullable', 'image', 'max:5120'],
             'features' => ['nullable', 'array'],
             'features.*' => ['string', 'exists:features,key'],
@@ -173,7 +177,7 @@ class SuperAdminTenantController extends Controller
         );
 
         return response()->json(array_merge(
-            $tenant->load(['users', 'features'])->toArray(),
+            $tenant->load(['users', 'features'])->withSetupFeeTotals()->toArray(),
             ['welcome_email_sent' => $emailed],
         ), 201);
     }
@@ -190,6 +194,8 @@ class SuperAdminTenantController extends Controller
                 ->where('month', now()->month)
                 ->exists()
         );
+        $payload->loadSum('setupFeePayments', 'amount');
+        $payload->withSetupFeeTotals();
 
         return response()->json($payload);
     }
@@ -220,9 +226,15 @@ class SuperAdminTenantController extends Controller
             'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
             'payment_plan' => ['sometimes', Rule::in(BusinessTypes::paymentPlans())],
             'plan_amount' => ['nullable', 'numeric', 'min:0'],
+            'setup_fee_amount' => ['nullable', 'numeric', 'min:0'],
             'logo' => ['nullable', 'image', 'max:5120'],
         ]);
         $payload = collect($data)->except('logo')->all();
+        if (array_key_exists('setup_fee_amount', $payload)) {
+            $paid = round((float) $tenant->setupFeePayments()->sum('amount'), 2);
+            $next = $payload['setup_fee_amount'] === null ? 0.0 : (float) $payload['setup_fee_amount'];
+            abort_if($next + 0.0001 < $paid, 422, 'One-time payment cannot be less than the amount already received.');
+        }
         if ($phones['owner_phones'] !== null) {
             $payload['owner_phones'] = $phones['owner_phones'];
             $payload['owner_phone'] = $phones['owner_phone'];
@@ -254,7 +266,7 @@ class SuperAdminTenantController extends Controller
 
         $this->audit($request, 'tenant.updated', $tenant, $payload);
 
-        return response()->json($tenant->refresh()->makeVisible(['dual_financial_view_enabled']));
+        return response()->json($tenant->refresh()->loadSum('setupFeePayments', 'amount')->withSetupFeeTotals()->makeVisible(['dual_financial_view_enabled']));
     }
 
     public function feePayments(Tenant $tenant): JsonResponse
@@ -329,6 +341,74 @@ class SuperAdminTenantController extends Controller
         }
 
         return $this->feePayments($tenant);
+    }
+
+    public function setupFeePayments(Tenant $tenant): JsonResponse
+    {
+        $tenant->loadSum('setupFeePayments', 'amount')->withSetupFeeTotals();
+        $payments = $tenant->setupFeePayments()
+            ->with('marker:id,name,email')
+            ->orderByDesc('paid_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (TenantSetupFeePayment $payment) => [
+                'id' => $payment->id,
+                'amount' => $payment->amount,
+                'paid_at' => $payment->paid_at,
+                'notes' => $payment->notes,
+                'marked_by' => $payment->marker?->only(['id', 'name', 'email']),
+            ]);
+
+        return response()->json([
+            'setup_fee_amount' => $tenant->setup_fee_amount,
+            'setup_fee_paid' => $tenant->setup_fee_paid,
+            'setup_fee_balance' => $tenant->setup_fee_balance,
+            'setup_fee_settled' => $tenant->setup_fee_settled,
+            'payments' => $payments,
+        ]);
+    }
+
+    public function storeSetupFeePayment(Request $request, Tenant $tenant): JsonResponse
+    {
+        $total = round((float) ($tenant->setup_fee_amount ?? 0), 2);
+        abort_if($total <= 0, 422, 'Set a one-time payment amount before recording a settlement.');
+
+        $data = $request->validate([
+            'amount' => ['nullable', 'numeric', 'gt:0'],
+            'notes' => ['nullable', 'string', 'max:255'],
+            'paid_at' => ['nullable', 'date'],
+        ]);
+
+        $paid = round((float) $tenant->setupFeePayments()->sum('amount'), 2);
+        $remaining = round(max(0, $total - $paid), 2);
+        abort_if($remaining <= 0, 422, 'This one-time payment is already settled.');
+
+        $amount = round((float) ($data['amount'] ?? $remaining), 2);
+        abort_if($amount > $remaining, 422, 'Settle amount cannot be more than the available balance of LKR '.number_format($remaining, 2, '.', '').'.');
+
+        $tenant->setupFeePayments()->create([
+            'amount' => $amount,
+            'paid_at' => $data['paid_at'] ?? now(),
+            'marked_by' => $request->user()->id,
+            'notes' => $data['notes'] ?? null,
+        ]);
+        $this->audit($request, 'tenant.setup_fee_payment_recorded', $tenant, [
+            'amount' => $amount,
+            'remaining' => round($remaining - $amount, 2),
+        ]);
+
+        return $this->setupFeePayments($tenant);
+    }
+
+    public function destroySetupFeePayment(Request $request, Tenant $tenant, TenantSetupFeePayment $setupFeePayment): JsonResponse
+    {
+        abort_unless($setupFeePayment->tenant_id === $tenant->id, 404);
+
+        $amount = (float) $setupFeePayment->amount;
+        $setupFeePayment->delete();
+        $this->audit($request, 'tenant.setup_fee_payment_removed', $tenant, ['amount' => $amount]);
+
+        return $this->setupFeePayments($tenant);
     }
 
     public function updateDualFinancialView(Request $request, Tenant $tenant): JsonResponse

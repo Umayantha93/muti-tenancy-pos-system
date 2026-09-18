@@ -3,6 +3,7 @@
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BalanceSheetController;
+use App\Http\Controllers\BayController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
@@ -20,6 +21,8 @@ use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
 use App\Http\Controllers\JobVideoController;
+use App\Http\Controllers\JobBoardController;
+use App\Http\Controllers\JobBookingController;
 use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
@@ -31,6 +34,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RetailSaleController;
 use App\Http\Controllers\ServiceAddonController;
 use App\Http\Controllers\ServiceOpsReportController;
+use App\Http\Controllers\ServiceReminderController;
 use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
@@ -84,6 +88,9 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::put('/tenants/{tenant}/dual-financial-view', [SuperAdminTenantController::class, 'updateDualFinancialView']);
         Route::get('/tenants/{tenant}/fee-payments', [SuperAdminTenantController::class, 'feePayments']);
         Route::put('/tenants/{tenant}/fee-payments/{year}/{month}', [SuperAdminTenantController::class, 'updateFeePayment']);
+        Route::get('/tenants/{tenant}/setup-fee-payments', [SuperAdminTenantController::class, 'setupFeePayments']);
+        Route::post('/tenants/{tenant}/setup-fee-payments', [SuperAdminTenantController::class, 'storeSetupFeePayment']);
+        Route::delete('/tenants/{tenant}/setup-fee-payments/{setupFeePayment}', [SuperAdminTenantController::class, 'destroySetupFeePayment']);
         Route::get('/tenants/{tenant}/bills', [SuperAdminBillController::class, 'index']);
         Route::get('/tenants/{tenant}/parts', [SuperAdminBillController::class, 'parts']);
         Route::get('/tenants/{tenant}/inventory/parts', [SuperAdminInventoryController::class, 'indexParts']);
@@ -141,6 +148,25 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
+        Route::middleware('feature:job_bookings')->group(function () {
+            Route::get('/bays', [BayController::class, 'index']);
+            Route::post('/bays', [BayController::class, 'store']);
+            Route::put('/bays/{bay}', [BayController::class, 'update']);
+            Route::delete('/bays/{bay}', [BayController::class, 'destroy']);
+            Route::get('/job-bookings', [JobBookingController::class, 'index']);
+            Route::post('/job-bookings', [JobBookingController::class, 'store']);
+            Route::put('/job-bookings/{job_booking}', [JobBookingController::class, 'update']);
+            Route::delete('/job-bookings/{job_booking}', [JobBookingController::class, 'destroy']);
+            Route::post('/job-bookings/{job_booking}/open-job', [JobBookingController::class, 'openJob']);
+        });
+        Route::middleware('feature:job_board')->group(function () {
+            Route::get('/job-board', [JobBoardController::class, 'index']);
+            Route::put('/bills/{bill}/floor-status', [JobBoardController::class, 'update']);
+        });
+        Route::middleware('feature:service_reminders')->group(function () {
+            Route::get('/service-reminders', [ServiceReminderController::class, 'index']);
+            Route::post('/service-reminders/{bill}/send', [ServiceReminderController::class, 'send']);
+        });
         Route::middleware('feature:job_videos')->group(function () {
             Route::get('/bills/{bill}/videos', [JobVideoController::class, 'index']);
             Route::post('/bills/{bill}/videos', [JobVideoController::class, 'store']);
