@@ -41,7 +41,7 @@ class BusinessTypes
      */
     public static function featureMatrix(): array
     {
-        $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'cash_up', 'reports'];
+        $shared = ['customers', 'billing', 'bill_sms', 'bill_whatsapp', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'cash_up', 'reports'];
         $inventoryExtras = ['purchase_orders', 'part_fitment'];
 
         $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties', 'job_bookings', ...$inventoryExtras], $shared);
@@ -74,18 +74,19 @@ class BusinessTypes
     {
         $inventoryExtras = ['purchase_orders', 'part_fitment'];
         $bay = ['job_bookings'];
+        $whatsapp = ['bill_whatsapp'];
 
         return match ($type) {
-            self::STORE => ['repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory'],
-            self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory'],
+            self::STORE => ['repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory', ...$whatsapp],
+            self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::GARAGE => [
                 'owner_bill_sms', 'service_ops_report', 'job_videos',
                 'job_board', 'job_bookings', 'service_reminders',
-                ...$inventoryExtras, 'cash_up',
+                ...$inventoryExtras, 'cash_up', ...$whatsapp,
             ],
-            self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up'],
-            self::DEVICE_REPAIR => [...$bay, ...$inventoryExtras, 'serial_inventory', 'cash_up'],
-            default => ['cash_up'],
+            self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up', ...$whatsapp],
+            self::DEVICE_REPAIR => [...$bay, ...$inventoryExtras, 'serial_inventory', 'cash_up', ...$whatsapp],
+            default => ['cash_up', ...$whatsapp],
         };
     }
 
@@ -372,6 +373,7 @@ class BusinessTypes
             'job_videos' => 'admit_vehicle',
             'service_reminders' => 'bill_sms',
             'serial_inventory' => 'parts_inventory',
+            'bill_whatsapp' => 'billing',
         ];
     }
 
@@ -392,6 +394,7 @@ class BusinessTypes
             'service_reminders' => ['bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
+            'bill_whatsapp' => ['billing'],
             default => [],
         };
     }
@@ -435,6 +438,9 @@ class BusinessTypes
         }
         if (! isset($set['parts_inventory']) && ! isset($set['product_catalog'])) {
             unset($set['serial_inventory']);
+        }
+        if (! isset($set['billing'])) {
+            unset($set['bill_whatsapp']);
         }
 
         if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])

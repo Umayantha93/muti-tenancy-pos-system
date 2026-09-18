@@ -33,9 +33,29 @@ class CustomerController extends Controller
             $customer->setAttribute('outstanding_balance', round((float) ($customer->outstanding_balance ?? 0), 2));
             $customer->setAttribute('last_bill', $lastBills->get($customer->id));
             $customer->setAttribute('sms_opt_in', (bool) $customer->sms_opt_in);
+            $this->appendAgeing($customer);
 
             return $customer;
         });
+
+        return $this->moneyJson($customers);
+    }
+
+    public function outstanding(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->canAccessFeature('billing'), 403, 'This feature is not available for this account.');
+
+        $customers = Customer::query()
+            ->withCount(['vehicles', 'bills'])
+            ->withSum(['bills as outstanding_balance' => fn ($query) => $query->where('balance_due', '>', 0)], 'balance_due')
+            ->whereHas('bills', fn ($query) => $query->where('balance_due', '>', 0))
+            ->when($request->filled('search'), fn ($query) => $query->where(fn ($nested) => $nested
+                ->where('name', 'like', '%'.$request->string('search').'%')
+                ->orWhere('phone', 'like', '%'.$request->string('search').'%')))
+            ->orderByDesc('outstanding_balance')
+            ->paginate($request->integer('per_page', 50));
+
+        $customers->getCollection()->transform(fn (Customer $customer) => $this->decorate($customer));
 
         return $this->moneyJson($customers);
     }
@@ -88,8 +108,36 @@ class CustomerController extends Controller
         $customer->setAttribute('outstanding_balance', round($outstanding, 2));
         $customer->setAttribute('last_bill', $lastBill);
         $customer->setAttribute('sms_opt_in', (bool) $customer->sms_opt_in);
+        $this->appendAgeing($customer);
 
         return $customer;
+    }
+
+    private function appendAgeing(Customer $customer): void
+    {
+        $oldest = $customer->bills()
+            ->where('balance_due', '>', 0)
+            ->orderBy('admission_date')
+            ->orderBy('id')
+            ->first();
+
+        if (! $oldest) {
+            $customer->setAttribute('outstanding_days', 0);
+            $customer->setAttribute('oldest_unpaid_bill', null);
+
+            return;
+        }
+
+        $oldest->ensureShareToken();
+        $from = $oldest->admission_date?->startOfDay() ?? now()->startOfDay();
+        $customer->setAttribute('outstanding_days', (int) $from->diffInDays(now()->startOfDay()));
+        $customer->setAttribute('oldest_unpaid_bill', [
+            'id' => $oldest->id,
+            'bill_number' => $oldest->bill_number,
+            'admission_date' => $oldest->admission_date?->toDateString(),
+            'balance_due' => $oldest->balance_due,
+            'share_token' => $oldest->share_token,
+        ]);
     }
 
     private function validated(Request $request, bool $update = false): array

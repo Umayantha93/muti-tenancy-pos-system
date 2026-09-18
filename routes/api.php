@@ -12,6 +12,7 @@ use App\Http\Controllers\BillProfitController;
 use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\BranchController;
+use App\Http\Controllers\CashUpController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
 use App\Http\Controllers\CustomerController;
@@ -121,6 +122,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::middleware('feature:customers,admit_vehicle,photo_bookings,retail_pos,cottage_stays')->group(function () {
+            Route::get('/customers/outstanding', [CustomerController::class, 'outstanding']);
             Route::get('/customers/{customer}/statement', [CustomerController::class, 'statement']);
             Route::apiResource('customers', CustomerController::class)->except('destroy');
         });
@@ -344,6 +346,10 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::middleware('feature:bill_profits')->group(function () {
             Route::get('/bill-profits', [BillProfitController::class, 'index']);
             Route::get('/bill-profits/{bill}', [BillProfitController::class, 'show']);
+        });
+        Route::middleware('feature:cash_up')->group(function () {
+            Route::get('/cash-up', [CashUpController::class, 'show']);
+            Route::post('/cash-up', [CashUpController::class, 'store']);
         });
         Route::middleware('feature:balance_sheet')->group(function () {
             Route::get('/expenses/cheques/due', [ExpenseController::class, 'dueCheques']);

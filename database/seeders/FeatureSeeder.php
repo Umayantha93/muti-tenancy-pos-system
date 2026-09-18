@@ -34,6 +34,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'customers', 'name' => 'Customers', 'description' => 'Customer directory and history', 'group' => 'Service Intake', 'sort_order' => 20],
             ['key' => 'billing', 'name' => 'Billing', 'description' => 'Orders, charges, and payments', 'group' => 'Service Intake', 'sort_order' => 30],
             ['key' => 'bill_sms', 'name' => 'Bill SMS', 'description' => 'Send quotation / paid bill links to customers by SMS', 'group' => 'Service Intake', 'sort_order' => 31],
+            ['key' => 'bill_whatsapp', 'name' => 'WhatsApp bill share', 'description' => 'Share quotation / paid bill links with customers on WhatsApp. Nested under Billing. Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 32],
             ['key' => 'service_reminders', 'name' => 'Next-service reminders', 'description' => 'SMS or WhatsApp before the next-service due date. Needs Service jobs and Bill SMS. Off until enabled.', 'group' => 'Service Intake', 'sort_order' => 32],
             ['key' => 'bill_profits', 'name' => 'Bill Profits Analysis', 'description' => 'Bill revenue, inventory cost, and credit-bill profit reporting', 'group' => 'Service Intake', 'sort_order' => 33],
             ['key' => 'repair_bills', 'name' => 'Repair', 'description' => 'Repair bills and repair profit for stores (phones, parts counters). Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 34],
@@ -49,7 +50,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'attendance', 'name' => 'Attendance', 'description' => 'Punch and monthly attendance', 'group' => 'People', 'sort_order' => 60],
             ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll', 'group' => 'People', 'sort_order' => 70],
             ['key' => 'balance_sheet', 'name' => 'Finance', 'description' => 'Income, expenses and profit', 'group' => 'Finance', 'sort_order' => 80],
-            ['key' => 'cash_up', 'name' => 'Day-end cash-up', 'description' => 'Cash, card, bank, and cheque vs drawer count per cashier and shop.', 'group' => 'Finance', 'sort_order' => 81],
+            ['key' => 'cash_up', 'name' => 'Day-end cash-up', 'description' => 'Cash, card, bank, and cheque vs drawer count per cashier and shop. Default on for stores; optional for garage.', 'group' => 'Finance', 'sort_order' => 81],
             ['key' => 'reports', 'name' => 'Reports', 'description' => 'Business reporting and trends', 'group' => 'Finance', 'sort_order' => 90],
             ['key' => 'service_ops_report', 'name' => 'Service operations report', 'description' => 'Count billed garage service addons (sold qty vs inside full service) with revenue. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 91],
         ];
