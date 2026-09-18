@@ -60,7 +60,7 @@ class StoreTenantTest extends TestCase
         $this->assertTrue($catalogKeys->contains('repair_bills'));
         $this->assertTrue($catalogKeys->contains('warranties'));
         $this->assertFalse($catalogKeys->contains('admit_vehicle'));
-        $this->assertSame([], $catalog->json('optional'));
+        $this->assertSame(['purchase_orders', 'part_fitment', 'serial_inventory'], $catalog->json('optional'));
 
         $shop = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
             'Matara Mobile',

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Support\BusinessTypes;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -66,6 +67,13 @@ class User extends Authenticatable
 
         if (! $tenantEnabled) {
             return false;
+        }
+
+        $attached = $this->tenant?->features()->pluck('features.key') ?? collect();
+        foreach (BusinessTypes::requires($key) as $need) {
+            if ($need !== $key && $attached->contains($need) && ! $this->canAccessFeature($need)) {
+                return false;
+            }
         }
 
         return $this->role === 'business_owner' || $this->permissions()

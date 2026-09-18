@@ -46,11 +46,17 @@ class SuperAdminTenantController extends Controller
             'business_types' => BusinessTypes::all(),
             'defaults' => $type ? BusinessTypes::defaults($type) : [],
             'optional' => $type ? BusinessTypes::optionalFeatures($type) : [],
+            'nested' => BusinessTypes::nestedUnder(),
             'features' => Feature::query()
                 ->when($type, fn ($query) => $query->whereIn('key', $keys))
                 ->orderBy('sort_order')
                 ->orderBy('name')
-                ->get(),
+                ->get()
+                ->map(function (Feature $feature) {
+                    $feature->setAttribute('parent', BusinessTypes::parentKey($feature->key));
+
+                    return $feature;
+                }),
             'matrix' => BusinessTypes::featureMatrix(),
         ]);
     }
@@ -139,7 +145,9 @@ class SuperAdminTenantController extends Controller
             ]);
             $allowed = BusinessTypes::featuresForType($data['business_type']);
             $requested = $data['features'] ?? BusinessTypes::defaults($data['business_type']);
-            $featureIds = Feature::whereIn('key', array_values(array_intersect($requested, $allowed)))->pluck('id');
+            $requested = BusinessTypes::fillGarageAdmitDefaults($data['business_type'], array_values(array_intersect($requested, $allowed)));
+            $requested = BusinessTypes::normalizePlan($data['business_type'], $requested);
+            $featureIds = Feature::whereIn('key', $requested)->pluck('id');
             $tenant->features()->sync($featureIds->mapWithKeys(fn ($id) => [$id => ['is_enabled' => true]]));
             $this->audit($request, 'tenant.created', $tenant, ['business_name' => $tenant->business_name]);
 
@@ -424,9 +432,15 @@ class SuperAdminTenantController extends Controller
         $keys = BusinessTypes::featuresForType($tenant->business_type);
 
         return response()->json([
-            'available' => Feature::query()->whereIn('key', $keys)->orderBy('sort_order')->orderBy('name')->get(),
+            'available' => Feature::query()->whereIn('key', $keys)->orderBy('sort_order')->orderBy('name')->get()
+                ->map(function (Feature $feature) {
+                    $feature->setAttribute('parent', BusinessTypes::parentKey($feature->key));
+
+                    return $feature;
+                }),
             'enabled' => $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key'),
             'optional' => BusinessTypes::optionalFeatures($tenant->business_type),
+            'nested' => BusinessTypes::nestedUnder(),
             'business_type' => $tenant->business_type,
         ]);
     }
@@ -435,11 +449,11 @@ class SuperAdminTenantController extends Controller
     {
         $data = $request->validate(['features' => ['required', 'array'], 'features.*' => ['boolean']]);
         $allowed = BusinessTypes::featuresForType($tenant->business_type);
-        $features = Feature::whereIn('key', array_keys($data['features']))
-            ->whereIn('key', $allowed)
-            ->get();
+        $requested = collect($data['features'])->filter()->keys()->all();
+        $normalized = BusinessTypes::normalizePlan($tenant->business_type, $requested);
+        $features = Feature::query()->whereIn('key', $allowed)->get();
         $tenant->features()->sync($features->mapWithKeys(fn (Feature $feature) => [
-            $feature->id => ['is_enabled' => (bool) $data['features'][$feature->key]],
+            $feature->id => ['is_enabled' => in_array($feature->key, $normalized, true)],
         ]));
         $this->audit($request, 'tenant.features_updated', $tenant, $data['features']);
 

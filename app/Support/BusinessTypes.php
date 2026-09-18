@@ -41,16 +41,20 @@ class BusinessTypes
      */
     public static function featureMatrix(): array
     {
-        $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'reports'];
+        $shared = ['customers', 'billing', 'bill_sms', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'cash_up', 'reports'];
+        $inventoryExtras = ['purchase_orders', 'part_fitment'];
 
-        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties'], $shared);
+        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties', 'job_bookings', ...$inventoryExtras], $shared);
         $retailFamily = array_merge(['retail_pos', 'product_catalog', 'suppliers'], $shared);
-        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties'], $shared);
+        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory'], $shared);
 
         return [
-            self::GARAGE => array_merge($garageFamily, ['owner_bill_sms', 'service_ops_report', 'job_videos']),
+            self::GARAGE => array_merge($garageFamily, [
+                'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos',
+                'service_reminders', 'service_ops_report',
+            ]),
             self::TYRE => $garageFamily,
-            self::DEVICE_REPAIR => $garageFamily,
+            self::DEVICE_REPAIR => array_merge($garageFamily, ['serial_inventory']),
             self::PAINT => $garageFamily,
             self::PHOTOGRAPHY => array_merge(['photo_bookings', 'photo_packages'], $shared),
             self::CLOTHING => $retailFamily,
@@ -68,10 +72,20 @@ class BusinessTypes
      */
     public static function optionalFeatures(string $type): array
     {
+        $inventoryExtras = ['purchase_orders', 'part_fitment'];
+        $bay = ['job_bookings'];
+
         return match ($type) {
-            self::STORE => ['repair_bills', 'warranties'],
-            self::GARAGE => ['owner_bill_sms', 'service_ops_report', 'job_videos'],
-            default => [],
+            self::STORE => ['repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory'],
+            self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory'],
+            self::GARAGE => [
+                'owner_bill_sms', 'service_ops_report', 'job_videos',
+                'job_board', 'job_bookings', 'service_reminders',
+                ...$inventoryExtras, 'cash_up',
+            ],
+            self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up'],
+            self::DEVICE_REPAIR => [...$bay, ...$inventoryExtras, 'serial_inventory', 'cash_up'],
+            default => ['cash_up'],
         };
     }
 
@@ -336,5 +350,151 @@ class BusinessTypes
             'charge' => 'Service / charge',
             default => str($type)->replace('_', ' ')->title()->toString(),
         };
+    }
+
+    /**
+     * Nested ticks on the super-admin / staff feature plan. Child => parent.
+     *
+     * @return array<string, string>
+     */
+    public static function nestedUnder(): array
+    {
+        return [
+            'admit_repair' => 'admit_vehicle',
+            'admit_service' => 'admit_vehicle',
+            'job_board' => 'admit_vehicle',
+            'owner_bill_sms' => 'admit_vehicle',
+            'job_videos' => 'admit_vehicle',
+            'service_reminders' => 'bill_sms',
+        ];
+    }
+
+    public static function parentKey(string $key): ?string
+    {
+        return self::nestedUnder()[$key] ?? null;
+    }
+
+    /**
+     * Extra keys that must also be on for this module.
+     *
+     * @return list<string>
+     */
+    public static function requires(string $key): array
+    {
+        return match ($key) {
+            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos' => ['admit_vehicle'],
+            'service_reminders' => ['bill_sms', 'admit_service'],
+            'service_ops_report' => ['admit_service'],
+            default => [],
+        };
+    }
+
+    /**
+     * @param  list<string>  $enabled
+     * @return list<string>
+     */
+    public static function fillGarageAdmitDefaults(string $type, array $enabled): array
+    {
+        if ($type !== self::GARAGE || ! in_array('admit_vehicle', $enabled, true)) {
+            return $enabled;
+        }
+        if (! in_array('admit_repair', $enabled, true) && ! in_array('admit_service', $enabled, true)) {
+            $enabled[] = 'admit_repair';
+            $enabled[] = 'admit_service';
+        }
+
+        return array_values(array_unique($enabled));
+    }
+
+    /**
+     * Drop children when a parent is off. Reject garage admit with neither kind.
+     *
+     * @param  list<string>  $enabled
+     * @return list<string>
+     */
+    public static function normalizePlan(string $type, array $enabled, bool $rejectEmptyAdmit = true): array
+    {
+        $allowed = self::featuresForType($type);
+        $set = array_flip(array_values(array_intersect($enabled, $allowed)));
+
+        if (! isset($set['admit_vehicle'])) {
+            unset($set['admit_repair'], $set['admit_service'], $set['job_board'], $set['owner_bill_sms'], $set['job_videos']);
+        }
+        if (! isset($set['bill_sms'])) {
+            unset($set['service_reminders']);
+        }
+        if (! isset($set['admit_service'])) {
+            unset($set['service_reminders'], $set['service_ops_report']);
+        }
+        if (! isset($set['parts_inventory']) && ! isset($set['product_catalog'])) {
+            unset($set['serial_inventory']);
+        }
+
+        if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])
+            && ! isset($set['admit_repair']) && ! isset($set['admit_service'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'features' => ['Choose Repair, Service, or both.'],
+            ]);
+        }
+
+        return array_keys($set);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function allowedJobKinds(\App\Models\User $user): array
+    {
+        $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+        if ($type !== self::GARAGE) {
+            return [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE];
+        }
+
+        $attached = $user->tenant?->features()->whereIn('features.key', ['admit_repair', 'admit_service'])->pluck('features.key') ?? collect();
+        if ($attached->isEmpty()) {
+            return $user->canAccessFeature('admit_vehicle')
+                ? [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE]
+                : [];
+        }
+
+        $kinds = [];
+        if ($user->canAccessFeature('admit_repair')) {
+            $kinds[] = \App\Models\Bill::JOB_KIND_REPAIR;
+        }
+        if ($user->canAccessFeature('admit_service')) {
+            $kinds[] = \App\Models\Bill::JOB_KIND_SERVICE;
+        }
+
+        return $kinds;
+    }
+
+    public static function jobKindAllowed(\App\Models\User $user, ?string $kind): bool
+    {
+        if ($kind === null || $kind === \App\Models\Bill::JOB_KIND_PARTS_SALE) {
+            return true;
+        }
+        if (! in_array($kind, [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE], true)) {
+            return true;
+        }
+
+        $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+        if ($type !== self::GARAGE) {
+            return true;
+        }
+
+        return in_array($kind, self::allowedJobKinds($user), true);
+    }
+
+    public static function defaultJobKind(\App\Models\User $user, string $type): string
+    {
+        if (self::usesStoreCounter($type)) {
+            return \App\Models\Bill::JOB_KIND_PARTS_SALE;
+        }
+        $allowed = self::allowedJobKinds($user);
+        if (count($allowed) === 1) {
+            return $allowed[0];
+        }
+
+        return \App\Models\Bill::JOB_KIND_REPAIR;
     }
 }

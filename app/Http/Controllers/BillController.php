@@ -131,6 +131,11 @@ class BillController extends Controller
                 }
             }
 
+            $jobKind = $data['job_kind'] ?? null;
+            if ($jobKind && ! BusinessTypes::jobKindAllowed($request->user(), $jobKind)) {
+                abort(403, 'This job kind is not enabled for this account.');
+            }
+
             return $this->openBill($request, $customer->id, $data, $this->jobType($request), $vehicle->id);
         });
 
@@ -153,6 +158,9 @@ class BillController extends Controller
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
+        if (! empty($data['job_kind']) && ! BusinessTypes::jobKindAllowed($request->user(), $data['job_kind'])) {
+            abort(403, 'This job kind is not enabled for this account.');
+        }
         $bill = $this->openBill($request, $vehicle->customer_id, $data, $this->jobType($request), $vehicle->id);
 
         return response()->json($bill, 201);
@@ -453,9 +461,10 @@ class BillController extends Controller
     private function openBill(Request $request, int $customerId, array $data, string $type, ?int $vehicleId = null, ?string $sourceType = null, ?int $sourceId = null): Bill
     {
         $jobKind = $data['job_kind']
-            ?? (BusinessTypes::usesVehicleJobs($type)
-                ? Bill::JOB_KIND_REPAIR
-                : (BusinessTypes::usesStoreCounter($type) ? Bill::JOB_KIND_PARTS_SALE : Bill::JOB_KIND_REPAIR));
+            ?? BusinessTypes::defaultJobKind($request->user(), $type);
+        if (! BusinessTypes::jobKindAllowed($request->user(), $jobKind)) {
+            abort(403, 'This job kind is not enabled for this account.');
+        }
         $prefix = BusinessTypes::usesStoreCounter($type) && $jobKind === Bill::JOB_KIND_REPAIR
             ? 'REP'
             : BusinessTypes::billPrefix($type);
