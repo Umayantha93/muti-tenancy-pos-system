@@ -26,6 +26,7 @@ use App\Http\Controllers\JobBookingController;
 use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
+use App\Http\Controllers\PartSerialController;
 use App\Http\Controllers\PayrollController;
 use App\Http\Controllers\PhotoBookingController;
 use App\Http\Controllers\PhotoPackageController;
@@ -188,6 +189,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/part-sales', [PartSaleController::class, 'index']);
             Route::post('/part-sales', [PartSaleController::class, 'store']);
             Route::get('/part-sales/{sale}', [PartSaleController::class, 'show']);
+        });
+
+        Route::middleware('feature:serial_inventory')->group(function () {
+            Route::get('/serials', [PartSerialController::class, 'index']);
+            Route::get('/serials/lookup', [PartSerialController::class, 'lookup']);
+            Route::post('/parts/{part}/serials', [PartSerialController::class, 'store']);
         });
 
         Route::middleware('feature:photo_packages')->group(function () {

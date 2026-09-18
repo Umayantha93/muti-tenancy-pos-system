@@ -44,7 +44,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'suppliers', 'name' => 'Suppliers', 'description' => 'Supplier directory and goods received notes', 'group' => 'Inventory', 'sort_order' => 43],
             ['key' => 'purchase_orders', 'name' => 'Purchase orders', 'description' => 'PO, partial receive, GRN, and payables. Off until super-admin enables it.', 'group' => 'Inventory', 'sort_order' => 44],
             ['key' => 'part_fitment', 'name' => 'Part fitment / substitutes', 'description' => 'Cross-reference and vehicle fitment at the counter. Off until super-admin enables it.', 'group' => 'Inventory', 'sort_order' => 45],
-            ['key' => 'serial_inventory', 'name' => 'IMEI / serial stock', 'description' => 'Unique-unit phones and devices by IMEI or serial. Off until super-admin enables it.', 'group' => 'Inventory', 'sort_order' => 46],
+            ['key' => 'serial_inventory', 'name' => 'IMEI / serial stock', 'description' => 'Unique-unit phones and devices by IMEI or serial — not a quantity bucket. For store, device repair, and mobile shops. Needs Parts or Product catalog. Off until super-admin enables it.', 'group' => 'Inventory', 'sort_order' => 46],
             ['key' => 'employees_management', 'name' => 'Team', 'description' => 'Employee profiles and records', 'group' => 'People', 'sort_order' => 50],
             ['key' => 'attendance', 'name' => 'Attendance', 'description' => 'Punch and monthly attendance', 'group' => 'People', 'sort_order' => 60],
             ['key' => 'payroll', 'name' => 'Payroll', 'description' => 'Attendance-based monthly payroll', 'group' => 'People', 'sort_order' => 70],

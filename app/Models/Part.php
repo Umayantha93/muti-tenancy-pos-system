@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'images', 'description'])]
+#[Fillable(['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'serialized', 'images', 'description'])]
 class Part extends Model
 {
     use BelongsToTenant;
@@ -48,12 +48,18 @@ class Part extends Model
         return $this->hasMany(BranchStock::class);
     }
 
+    public function serials(): HasMany
+    {
+        return $this->hasMany(PartSerial::class);
+    }
+
     protected function casts(): array
     {
         return [
             'images' => 'array',
             'price' => 'decimal:2',
             'cost_price' => 'decimal:2',
+            'serialized' => 'boolean',
         ];
     }
 

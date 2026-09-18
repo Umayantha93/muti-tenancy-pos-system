@@ -74,7 +74,8 @@ class WarrantyController extends Controller
                         ->orWhereHas('bill', fn ($bill) => $bill->where('bill_number', 'like', $like))
                         ->orWhereHas('bill.customer', fn ($customer) => $customer->where('name', 'like', $like)->orWhere('phone', 'like', $like))
                         ->orWhereHas('bill.vehicle', fn ($vehicle) => $vehicle->where('number_plate', 'like', $like))
-                        ->orWhereHas('part', fn ($part) => $part->where('name', 'like', $like)->orWhere('sku', 'like', $like)->orWhere('barcode', 'like', $like));
+                        ->orWhereHas('part', fn ($part) => $part->where('name', 'like', $like)->orWhere('sku', 'like', $like)->orWhere('barcode', 'like', $like))
+                        ->orWhereHas('serials', fn ($serial) => $serial->where('serial', 'like', $like));
                 });
             })
             ->latest('warranty_until')

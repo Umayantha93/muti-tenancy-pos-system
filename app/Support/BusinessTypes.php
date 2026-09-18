@@ -302,6 +302,11 @@ class BusinessTypes
         return in_array($type, [self::STORE, self::MOBILE_SHOP], true);
     }
 
+    public static function usesCounterHome(string $type): bool
+    {
+        return self::usesStoreCounter($type);
+    }
+
     public static function usesDeviceJobs(string $type): bool
     {
         return $type === self::DEVICE_REPAIR;
@@ -366,6 +371,7 @@ class BusinessTypes
             'owner_bill_sms' => 'admit_vehicle',
             'job_videos' => 'admit_vehicle',
             'service_reminders' => 'bill_sms',
+            'serial_inventory' => 'parts_inventory',
         ];
     }
 
@@ -385,6 +391,7 @@ class BusinessTypes
             'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos' => ['admit_vehicle'],
             'service_reminders' => ['bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
+            'serial_inventory' => ['parts_inventory'],
             default => [],
         };
     }

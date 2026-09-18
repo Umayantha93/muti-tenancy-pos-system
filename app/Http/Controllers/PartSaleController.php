@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\Part;
 use App\Models\PartSale;
 use App\Services\BillCalculator;
+use App\Services\PartSerials;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use App\Support\WarrantyPeriod;
@@ -16,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class PartSaleController extends Controller
 {
@@ -42,6 +44,8 @@ class PartSaleController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.part_id' => ['required', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.serials' => ['nullable', 'array'],
+            'items.*.serials.*' => ['string', 'max:40'],
             'items.*.warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
             'items.*.warranty_starts_on' => ['nullable', 'date'],
             'items.*.warranty_until' => ['nullable', 'date'],
@@ -83,16 +87,25 @@ class PartSaleController extends Controller
             ]);
 
             foreach ($data['items'] as $line) {
-                $part = Part::findOrFail($line['part_id']);
+                $part = Part::lockForUpdate()->findOrFail($line['part_id']);
                 $qty = (int) $line['quantity'];
+                $serials = $line['serials'] ?? [];
+                if (PartSerials::requiredFor($part) || $serials !== []) {
+                    if ($serials === []) {
+                        throw ValidationException::withMessages([
+                            'serials' => ['This item is sold by IMEI / serial. Scan or enter each unit.'],
+                        ]);
+                    }
+                    $qty = count($serials);
+                }
                 $part->takeStock($qty);
                 $unitPrice = (float) $part->price;
                 $lineTotal = round($unitPrice * $qty, 2);
-                BillItem::create([
+                $item = BillItem::create([
                     'bill_id' => $bill->id,
                     'type' => 'part',
                     'part_id' => $part->id,
-                    'description' => $part->name,
+                    'description' => $part->name.($serials !== [] ? ' · '.implode(', ', $serials) : ''),
                     'quantity' => $qty,
                     'unit_price' => $unitPrice,
                     'line_total' => $lineTotal,
@@ -106,6 +119,9 @@ class PartSaleController extends Controller
                         )
                         : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
                 ]);
+                if ($serials !== []) {
+                    PartSerials::sell($part, $serials, $item);
+                }
             }
 
             $discount = (float) ($data['discount'] ?? 0);
