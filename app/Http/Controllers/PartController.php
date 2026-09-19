@@ -15,6 +15,7 @@ use App\Services\PartBarcode;
 use App\Services\PartSerials;
 use App\Support\BusinessTypes;
 use App\Support\InventoryCosting;
+use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -511,6 +512,7 @@ class PartController extends Controller
 
         $data = $request->validate([
             'quantity' => ['nullable', 'integer', 'gt:0', 'required_without:serials'],
+            'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'unit_cost' => ['nullable', 'numeric', 'min:0'],
             'expense_date' => ['nullable', 'date'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
@@ -537,6 +539,14 @@ class PartController extends Controller
 
         [$part, $expense] = DB::transaction(function () use ($data, $part, $request, $serials) {
             $qty = (int) $data['quantity'];
+            $businessType = $request->user()?->tenant?->business_type;
+            $incomingUnit = StockUnit::normalize($data['stock_unit'] ?? $part->stock_unit, $businessType);
+            $partUnit = StockUnit::normalize($part->stock_unit, $businessType);
+            if (StockUnit::isVolume($incomingUnit) && StockUnit::isVolume($partUnit)) {
+                $qty = StockUnit::convertQuantity($qty, $incomingUnit, $partUnit);
+            } elseif ($incomingUnit !== $partUnit) {
+                $part->update(['stock_unit' => $incomingUnit]);
+            }
             $unitCost = (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
             $shopQty = BranchInventory::partQty($part->id);
             $blendedCost = InventoryCosting::weightedAverageCost(
@@ -583,6 +593,7 @@ class PartController extends Controller
             'price' => [$part ? 'sometimes' : 'required', 'numeric', 'min:0'],
             'cost_price' => ['nullable', 'numeric', 'min:0'],
             'stock_qty' => [$part ? 'sometimes' : 'required', 'integer', 'min:0'],
+            'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'serialized' => ['sometimes', 'boolean'],
             'description' => ['nullable', 'string'],
             'images' => ['sometimes', 'array', 'max:5'],
@@ -592,6 +603,20 @@ class PartController extends Controller
         ]);
 
         unset($data['images'], $data['payment_status'], $data['due_date']);
+
+        $businessType = $request->user()?->tenant?->business_type;
+        if ($part) {
+            unset($data['stock_unit']);
+        } else {
+            $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
+        }
+
+        $businessType = $request->user()?->tenant?->business_type;
+        if ($part) {
+            unset($data['stock_unit']);
+        } else {
+            $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
+        }
 
         foreach (['sku', 'barcode'] as $field) {
             if (array_key_exists($field, $data) && ($data[$field] === null || trim((string) $data[$field]) === '')) {

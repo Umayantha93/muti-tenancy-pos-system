@@ -21,6 +21,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
+use App\Http\Controllers\JobPhotoController;
 use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\JobBoardController;
 use App\Http\Controllers\JobBookingController;
@@ -61,6 +62,8 @@ Route::get('/auth/branding', [AuthController::class, 'branding'])->middleware('t
 Route::get('/translations', [LocaleController::class, 'show'])->middleware('throttle:60,1');
 Route::post('/attendance/ingest', [AttendanceController::class, 'ingest'])->middleware('throttle:120,1');
 Route::get('/bills/shared/{token}', [BillShareController::class, 'show'])->middleware('throttle:60,1');
+Route::get('/bills/shared/{token}/photos/{photo}/file', [BillShareController::class, 'photo'])->middleware('throttle:60,1');
+Route::get('/bills/shared/{token}/videos/{video}/file', [BillShareController::class, 'video'])->middleware('throttle:60,1');
 
 Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.context'])->group(function () {
         Route::get('/user', fn (Request $request) => SessionPayload::for($request->user()));
@@ -175,6 +178,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/bills/{bill}/videos', [JobVideoController::class, 'store']);
             Route::get('/bills/{bill}/videos/{video}/file', [JobVideoController::class, 'file']);
             Route::delete('/bills/{bill}/videos/{video}', [JobVideoController::class, 'destroy']);
+        });
+        Route::middleware('feature:job_photos')->group(function () {
+            Route::get('/bills/{bill}/photos', [JobPhotoController::class, 'index']);
+            Route::post('/bills/{bill}/photos', [JobPhotoController::class, 'store']);
+            Route::get('/bills/{bill}/photos/{photo}/file', [JobPhotoController::class, 'file']);
+            Route::delete('/bills/{bill}/photos/{photo}', [JobPhotoController::class, 'destroy']);
         });
 
         Route::middleware('feature:warranties')->group(function () {

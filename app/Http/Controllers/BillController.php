@@ -7,6 +7,7 @@ use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\Customer;
 use App\Models\Employee;
+use App\Models\Part;
 use App\Models\Vehicle;
 use App\Services\BillCalculator;
 use App\Support\BranchQuery;
@@ -171,8 +172,11 @@ class BillController extends Controller
     /**
      * Walk-in / counter bill: same billing workspace as a job card, without registering a vehicle.
      */
-    public function storeInstant(Request $request): JsonResponse
+    public function storeInstant(Request $request, BillCalculator $calculator): JsonResponse
     {
+        $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE));
+        $isGarage = $type === BusinessTypes::GARAGE;
+
         $data = $request->validate([
             'customer_name' => ['nullable', 'string', 'max:255'],
             'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
@@ -181,10 +185,15 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
-            ...$this->employeeIdsRules($request),
+            'payment_method' => ['nullable', 'string', 'max:50'],
+            'payment_amount' => ['nullable', 'numeric', 'min:0'],
+            'items' => ['nullable', 'array'],
+            'items.*.part_id' => ['required', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            ...($isGarage ? [] : $this->employeeIdsRules($request)),
         ]);
 
-        $bill = DB::transaction(function () use ($data, $request) {
+        $bill = DB::transaction(function () use ($data, $request, $calculator, $isGarage) {
             $customer = Customer::resolveFromIntake(
                 $data['customer_name'] ?? null,
                 $data['customer_phone'] ?? null,
@@ -198,13 +207,50 @@ class BillController extends Controller
                 'admission_date' => $data['admission_date'] ?? today(),
                 'notes' => $data['notes'] ?? null,
                 'internal_notes' => $data['internal_notes'] ?? null,
-            'additional_note_color' => $data['additional_note_color'] ?? null,
+                'additional_note_color' => $data['additional_note_color'] ?? null,
                 'job_kind' => Bill::JOB_KIND_PARTS_SALE,
                 'created_by' => $request->user()->id,
             ]);
-            $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
 
-            return $bill->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
+            if (! $isGarage) {
+                $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
+            }
+
+            foreach ($data['items'] ?? [] as $line) {
+                $part = Part::lockForUpdate()->findOrFail($line['part_id']);
+                $qty = (int) $line['quantity'];
+                $part->takeStock($qty);
+                $unitPrice = (float) $part->price;
+                BillItem::create([
+                    'bill_id' => $bill->id,
+                    'type' => 'part',
+                    'part_id' => $part->id,
+                    'description' => $part->name,
+                    'quantity' => $qty,
+                    'unit_price' => $unitPrice,
+                    'line_total' => round($unitPrice * $qty, 2),
+                    'purchase_unit_cost' => $part->cost_price,
+                ]);
+            }
+
+            if (! empty($data['items'])) {
+                $calculator->recalculate($bill);
+                $payAmount = array_key_exists('payment_amount', $data)
+                    ? (float) $data['payment_amount']
+                    : (float) $bill->fresh()->balance_due;
+                if ($payAmount > 0) {
+                    BillPayment::create([
+                        'bill_id' => $bill->id,
+                        'amount' => $payAmount,
+                        'method' => $data['payment_method'] ?? 'cash',
+                        'paid_at' => now(),
+                        'received_by' => $request->user()->id,
+                    ]);
+                    $calculator->recalculate($bill->fresh());
+                }
+            }
+
+            return $bill->fresh()->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
         });
 
         return response()->json($bill, 201);
