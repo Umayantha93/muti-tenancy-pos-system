@@ -50,7 +50,7 @@ class BusinessTypes
 
         return [
             self::GARAGE => array_merge($garageFamily, [
-                'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos',
+                'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos',
                 'service_reminders', 'service_ops_report',
             ]),
             self::TYRE => $garageFamily,
@@ -80,7 +80,7 @@ class BusinessTypes
             self::STORE => ['repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::GARAGE => [
-                'owner_bill_sms', 'service_ops_report', 'job_videos',
+                'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos',
                 'job_board', 'job_bookings', 'service_reminders',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
             ],
@@ -370,6 +370,7 @@ class BusinessTypes
             'admit_service' => 'admit_vehicle',
             'job_board' => 'admit_vehicle',
             'owner_bill_sms' => 'admit_vehicle',
+            'job_photos' => 'admit_vehicle',
             'job_videos' => 'admit_vehicle',
             'service_reminders' => 'bill_sms',
             'serial_inventory' => 'parts_inventory',
@@ -390,7 +391,7 @@ class BusinessTypes
     public static function requires(string $key): array
     {
         return match ($key) {
-            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_videos' => ['admit_vehicle'],
+            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos' => ['admit_vehicle'],
             'service_reminders' => ['bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
@@ -428,7 +429,7 @@ class BusinessTypes
         $set = array_flip(array_values(array_intersect($enabled, $allowed)));
 
         if (! isset($set['admit_vehicle'])) {
-            unset($set['admit_repair'], $set['admit_service'], $set['job_board'], $set['owner_bill_sms'], $set['job_videos']);
+            unset($set['admit_repair'], $set['admit_service'], $set['job_board'], $set['owner_bill_sms'], $set['job_photos'], $set['job_videos']);
         }
         if (! isset($set['bill_sms'])) {
             unset($set['service_reminders']);

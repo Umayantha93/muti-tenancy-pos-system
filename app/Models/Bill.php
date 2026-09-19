@@ -179,6 +179,11 @@ class Bill extends Model
         return $this->hasMany(BillVideo::class)->latest();
     }
 
+    public function photos(): HasMany
+    {
+        return $this->hasMany(BillPhoto::class)->latest();
+    }
+
     public function acceptsRefunds(): bool
     {
         return $this->isClosed()

@@ -56,6 +56,17 @@ class BillItemController extends Controller
             );
         }
 
+        if (
+            BusinessTypes::normalizeLegacy((string) $businessType) === BusinessTypes::GARAGE
+            && $bill->job_kind === Bill::JOB_KIND_PARTS_SALE
+        ) {
+            abort_unless(
+                ($data['type'] ?? '') === 'part' && ! empty($data['part_id']),
+                422,
+                'Instant bills only sell stocked inventory items.'
+            );
+        }
+
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id);
         $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
         $this->assertLineReady($data, $typeMeta);
