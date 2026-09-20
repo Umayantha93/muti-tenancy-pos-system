@@ -565,6 +565,7 @@ return [
         'returned_stock' => 'තොගයට ආපසු',
         'written_off' => 'පාඩුවක් ලෙස ඉවත් කළා',
         'add_item' => 'අයිතමය එක් කරන්න',
+        'bill_items' => 'බිල් අයිතම',
         'payment' => 'ගෙවීම',
         'record_payment' => 'ගෙවීම ලියන්න',
         'packages' => 'පැකේජ',

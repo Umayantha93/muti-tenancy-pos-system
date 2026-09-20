@@ -565,6 +565,7 @@ return [
         'returned_stock' => 'returned to stock',
         'written_off' => 'written off',
         'add_item' => 'Add item',
+        'bill_items' => 'Bill items',
         'payment' => 'Payment',
         'record_payment' => 'Record payment',
         'packages' => 'Packages',
