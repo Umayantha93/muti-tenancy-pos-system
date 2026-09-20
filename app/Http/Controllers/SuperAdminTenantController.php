@@ -243,12 +243,17 @@ class SuperAdminTenantController extends Controller
             $payload['contact_phones'] = $phones['contact_phones'];
             $payload['contact_phone'] = $phones['contact_phone'];
         }
+        $previousType = $tenant->business_type;
         $tenant->update($payload);
         if ($request->hasFile('logo')) {
             if ($tenant->logo) {
                 Storage::disk('public')->delete($tenant->logo);
             }
             $tenant->update(['logo' => $request->file('logo')->store('tenants', 'public')]);
+        }
+
+        if (array_key_exists('business_type', $payload) && $payload['business_type'] !== $previousType) {
+            $this->resyncFeaturesForType($tenant, $payload['business_type']);
         }
 
         if ($owner) {
@@ -672,6 +677,31 @@ class SuperAdminTenantController extends Controller
         }
 
         return $list;
+    }
+
+    private function resyncFeaturesForType(Tenant $tenant, string $type): void
+    {
+        $allowed = BusinessTypes::featuresForType($type);
+        $currentlyOn = $tenant->features()->wherePivot('is_enabled', true)->pluck('features.key')->all();
+        $next = array_values(array_unique(array_merge(
+            BusinessTypes::defaults($type),
+            array_values(array_intersect($currentlyOn, $allowed)),
+        )));
+        $next = BusinessTypes::normalizePlan($type, $next);
+        $features = Feature::query()->whereIn('key', $allowed)->get();
+        $tenant->features()->sync($features->mapWithKeys(fn (Feature $feature) => [
+            $feature->id => ['is_enabled' => in_array($feature->key, $next, true)],
+        ]));
+
+        if (BusinessTypes::usesVehicleJobs($type)) {
+            ServiceAddon::seedDefaultsFor((int) $tenant->id, $type);
+        }
+        if (BusinessTypes::usesLaborCatalog($type)) {
+            LaborCategory::seedDefaultsFor((int) $tenant->id, $type);
+        }
+        if ($type === BusinessTypes::PAINT) {
+            PaintStockDefaults::seedFor((int) $tenant->id);
+        }
     }
 
     private function audit(Request $request, string $action, ?Tenant $tenant, array $metadata = []): void
