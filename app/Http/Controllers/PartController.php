@@ -5,14 +5,17 @@ namespace App\Http\Controllers;
 use App\Models\BillItem;
 use App\Models\Expense;
 use App\Models\Part;
+use App\Models\PartSerial;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
 use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Services\BranchInventory;
 use App\Services\PartBarcode;
+use App\Services\PartSerials;
 use App\Support\BusinessTypes;
 use App\Support\InventoryCosting;
+use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -39,7 +42,14 @@ class PartController extends Controller
                 ->where('name', 'like', '%'.$request->string('search').'%')
                 ->orWhere('sku', 'like', '%'.$request->string('search').'%')
                 ->orWhere('barcode', 'like', '%'.$request->string('search').'%')
-                ->orWhere('brand', 'like', '%'.$request->string('search').'%')))
+                ->orWhere('brand', 'like', '%'.$request->string('search').'%')
+                ->when(
+                    $request->user()?->canAccessFeature('serial_inventory'),
+                    fn ($searchQuery) => $searchQuery->orWhereHas(
+                        'serials',
+                        fn ($serials) => $serials->where('serial', 'like', '%'.PartSerial::normalize((string) $request->string('search')).'%')
+                    )
+                )))
             ->when($request->filled('brand'), fn ($query) => $query->where('brand', $request->string('brand')))
             ->when($request->filled('type'), fn ($query) => $query->where('type', $request->string('type')))
             ->when($request->filled('model'), fn ($query) => $query->where('model', 'like', '%'.$request->string('model').'%'))
@@ -501,16 +511,42 @@ class PartController extends Controller
         }
 
         $data = $request->validate([
-            'quantity' => ['required', 'integer', 'gt:0'],
+            'quantity' => ['nullable', 'integer', 'gt:0', 'required_without:serials'],
+            'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'unit_cost' => ['nullable', 'numeric', 'min:0'],
             'expense_date' => ['nullable', 'date'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
             'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
             'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'serials' => ['nullable', 'array'],
+            'serials.*' => ['string', 'max:40'],
         ]);
 
-        [$part, $expense] = DB::transaction(function () use ($data, $part, $request) {
+        $serials = PartSerials::enabled()
+            ? array_values(array_filter($data['serials'] ?? [], fn ($code) => trim((string) $code) !== ''))
+            : [];
+        if ($serials !== [] || PartSerials::requiredFor($part)) {
+            if ($serials === []) {
+                throw ValidationException::withMessages([
+                    'serials' => ['This item is tracked by IMEI / serial. Enter each unit received.'],
+                ]);
+            }
+            $data['quantity'] = count($serials);
+        }
+        if ((int) ($data['quantity'] ?? 0) < 1) {
+            throw ValidationException::withMessages(['quantity' => ['Enter how many units to add.']]);
+        }
+
+        [$part, $expense] = DB::transaction(function () use ($data, $part, $request, $serials) {
             $qty = (int) $data['quantity'];
+            $businessType = $request->user()?->tenant?->business_type;
+            $incomingUnit = StockUnit::normalize($data['stock_unit'] ?? $part->stock_unit, $businessType);
+            $partUnit = StockUnit::normalize($part->stock_unit, $businessType);
+            if (StockUnit::isVolume($incomingUnit) && StockUnit::isVolume($partUnit)) {
+                $qty = StockUnit::convertQuantity($qty, $incomingUnit, $partUnit);
+            } elseif ($incomingUnit !== $partUnit) {
+                $part->update(['stock_unit' => $incomingUnit]);
+            }
             $unitCost = (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
             $shopQty = BranchInventory::partQty($part->id);
             $blendedCost = InventoryCosting::weightedAverageCost(
@@ -522,6 +558,9 @@ class PartController extends Controller
             BranchInventory::addPart($part, $qty);
             $part->refresh();
             $part->update(['cost_price' => $blendedCost]);
+            if ($serials !== []) {
+                PartSerials::receive($part, $serials);
+            }
             $expense = $this->recordPurchaseExpense(
                 $request,
                 $part->refresh(),
@@ -554,6 +593,8 @@ class PartController extends Controller
             'price' => [$part ? 'sometimes' : 'required', 'numeric', 'min:0'],
             'cost_price' => ['nullable', 'numeric', 'min:0'],
             'stock_qty' => [$part ? 'sometimes' : 'required', 'integer', 'min:0'],
+            'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
+            'serialized' => ['sometimes', 'boolean'],
             'description' => ['nullable', 'string'],
             'images' => ['sometimes', 'array', 'max:5'],
             'images.*' => ['image', 'max:5120'],
@@ -562,6 +603,20 @@ class PartController extends Controller
         ]);
 
         unset($data['images'], $data['payment_status'], $data['due_date']);
+
+        $businessType = $request->user()?->tenant?->business_type;
+        if ($part) {
+            unset($data['stock_unit']);
+        } else {
+            $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
+        }
+
+        $businessType = $request->user()?->tenant?->business_type;
+        if ($part) {
+            unset($data['stock_unit']);
+        } else {
+            $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
+        }
 
         foreach (['sku', 'barcode'] as $field) {
             if (array_key_exists($field, $data) && ($data[$field] === null || trim((string) $data[$field]) === '')) {

@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             TenantUserSeeder::class,
             PosDemoDataSeeder::class,
             MyDearShopDemoSeeder::class,
+            PaintShopDemoSeeder::class,
         ]);
     }
 }

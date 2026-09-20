@@ -31,7 +31,10 @@ class PosDemoDataSeeder extends Seeder
                 if (! $owner->tenant_id) {
                     continue;
                 }
-                if ($owner->tenant?->business_type === \App\Support\BusinessTypes::STORE) {
+                if (in_array($owner->tenant?->business_type, [
+                    \App\Support\BusinessTypes::STORE,
+                    \App\Support\BusinessTypes::PAINT,
+                ], true)) {
                     continue;
                 }
 

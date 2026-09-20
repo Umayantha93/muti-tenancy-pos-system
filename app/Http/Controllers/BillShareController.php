@@ -3,32 +3,32 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bill;
+use App\Models\BillPhoto;
+use App\Models\BillVideo;
 use App\Models\Branch;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BillShareController extends Controller
 {
     public function show(string $token): JsonResponse
     {
-        $token = Bill::normalizeShareToken($token);
-        abort_unless(strlen($token) >= 8, 404);
-
-        $bill = Bill::withoutGlobalScopes()
-            ->where('share_token', $token)
-            ->with([
-                'customer' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name', 'phone', 'address']),
-                'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
-                'items' => fn ($query) => $query->withoutGlobalScopes()->select([
-                    'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_total',
-                    'panel_group_id', 'panel_name', 'warranty_months', 'warranty_starts_on', 'warranty_until',
-                ]),
-                'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
-                'tenant:id,business_name,business_type,logo,address,tin,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
-                'branch:id,name,address,phone,code',
-            ])
-            ->firstOrFail();
+        $bill = $this->resolveBill($token, [
+            'customer' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name', 'phone', 'address']),
+            'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
+            'items' => fn ($query) => $query->withoutGlobalScopes()->select([
+                'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_total',
+                'panel_group_id', 'panel_name', 'warranty_months', 'warranty_starts_on', 'warranty_until',
+            ]),
+            'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
+            'photos' => fn ($query) => $query->withoutGlobalScopes()->latest(),
+            'videos' => fn ($query) => $query->withoutGlobalScopes()->latest(),
+            'tenant:id,business_name,business_type,logo,address,tin,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
+            'branch:id,name,address,phone,code',
+        ]);
 
         $bill->tenant?->setAppends(['logo_url']);
         $isPaint = (string) $bill->tenant?->business_type === BusinessTypes::PAINT;
@@ -61,13 +61,60 @@ class BillShareController extends Controller
                 ? $this->paintCustomerItems($bill->items, $repairNote)
                 : $bill->items->map(fn ($item) => $this->shareItem($item, $item->type === 'labor', $repairNote)),
             'payments' => $repairNote ? [] : $bill->payments,
-                'tenant' => $bill->tenant,
-                'branch' => $bill->branch,
-                'show_shop' => Branch::withoutGlobalScopes()
-                    ->where('tenant_id', $bill->tenant_id)
-                    ->where('status', 'active')
-                    ->count() > 1,
+            'photos' => $bill->photos->map(fn (BillPhoto $photo) => [
+                'id' => $photo->id,
+                'original_name' => $photo->original_name,
+                'size_bytes' => $photo->size_bytes,
+            ])->values(),
+            'videos' => $bill->videos->map(fn (BillVideo $video) => [
+                'id' => $video->id,
+                'original_name' => $video->original_name,
+                'duration_seconds' => $video->duration_seconds,
+                'size_bytes' => $video->size_bytes,
+            ])->values(),
+            'tenant' => $bill->tenant,
+            'branch' => $bill->branch,
+            'show_shop' => Branch::withoutGlobalScopes()
+                ->where('tenant_id', $bill->tenant_id)
+                ->where('status', 'active')
+                ->count() > 1,
         ]);
+    }
+
+    public function photo(string $token, BillPhoto $photo): StreamedResponse
+    {
+        $bill = $this->resolveBill($token);
+        abort_unless($photo->bill_id === $bill->id, 404);
+        abort_unless(Storage::disk('local')->exists($photo->path), 404);
+
+        return Storage::disk('local')->response($photo->path, $photo->original_name ?: 'job-photo.jpg', [
+            'Content-Type' => 'image/jpeg',
+        ]);
+    }
+
+    public function video(string $token, BillVideo $video): StreamedResponse
+    {
+        $bill = $this->resolveBill($token);
+        abort_unless($video->bill_id === $bill->id, 404);
+        abort_unless(Storage::disk('local')->exists($video->path), 404);
+
+        return Storage::disk('local')->response($video->path, $video->original_name ?: 'job-video.mp4', [
+            'Content-Type' => 'video/mp4',
+        ]);
+    }
+
+    /**
+     * @param  array<int|string, mixed>  $with
+     */
+    private function resolveBill(string $token, array $with = []): Bill
+    {
+        $token = Bill::normalizeShareToken($token);
+        abort_unless(strlen($token) >= 8, 404);
+
+        return Bill::withoutGlobalScopes()
+            ->where('share_token', $token)
+            ->with($with)
+            ->firstOrFail();
     }
 
     /**

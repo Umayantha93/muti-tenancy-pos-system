@@ -129,6 +129,7 @@ class ReportController extends Controller
                     'id' => $item->id,
                     'name' => $item->name,
                     'stock_qty' => $item->stock_qty,
+                    'stock_unit' => $item->stock_unit ?? null,
                 ])->values(),
             ],
             'receivables' => $owing,

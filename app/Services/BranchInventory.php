@@ -198,6 +198,37 @@ class BranchInventory
         }
     }
 
+    public static function dispatchPart(Part $part, int $fromBranchId, int $quantity): void
+    {
+        abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
+
+        self::$mutating = true;
+        try {
+            $from = self::lockPartRow($part, $fromBranchId);
+            if ((int) $from->qty < $quantity) {
+                throw ValidationException::withMessages(['quantity' => ['Not enough stock at the sending shop.']]);
+            }
+            $from->decrement('qty', $quantity);
+            self::syncPartTotal($part);
+        } finally {
+            self::$mutating = false;
+        }
+    }
+
+    public static function receivePart(Part $part, int $toBranchId, int $quantity): void
+    {
+        abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
+
+        self::$mutating = true;
+        try {
+            $to = self::lockPartRow($part, $toBranchId);
+            $to->increment('qty', $quantity);
+            self::syncPartTotal($part);
+        } finally {
+            self::$mutating = false;
+        }
+    }
+
     public static function transferProduct(Product $product, int $fromBranchId, int $toBranchId, int $quantity): void
     {
         abort_if($fromBranchId === $toBranchId, 422, 'Choose two different shops.');
@@ -211,6 +242,37 @@ class BranchInventory
             }
             $to = self::lockProductRow($product, $toBranchId);
             $from->decrement('qty', $quantity);
+            $to->increment('qty', $quantity);
+            self::syncProductTotal($product);
+        } finally {
+            self::$mutating = false;
+        }
+    }
+
+    public static function dispatchProduct(Product $product, int $fromBranchId, int $quantity): void
+    {
+        abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
+
+        self::$mutating = true;
+        try {
+            $from = self::lockProductRow($product, $fromBranchId);
+            if ((int) $from->qty < $quantity) {
+                throw ValidationException::withMessages(['quantity' => ['Not enough stock at the sending shop.']]);
+            }
+            $from->decrement('qty', $quantity);
+            self::syncProductTotal($product);
+        } finally {
+            self::$mutating = false;
+        }
+    }
+
+    public static function receiveProduct(Product $product, int $toBranchId, int $quantity): void
+    {
+        abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
+
+        self::$mutating = true;
+        try {
+            $to = self::lockProductRow($product, $toBranchId);
             $to->increment('qty', $quantity);
             self::syncProductTotal($product);
         } finally {

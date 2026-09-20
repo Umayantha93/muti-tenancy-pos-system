@@ -7,6 +7,7 @@ use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\CottageStay;
 use App\Models\Expense;
+use App\Models\JobBooking;
 use App\Models\Part;
 use App\Models\Payroll;
 use App\Models\PhotoBooking;
@@ -74,6 +75,16 @@ class DashboardController extends Controller
             'upcoming_bookings' => $user->canAccessFeature('photo_bookings')
                 ? $view->transform(
                     BranchQuery::constrain(PhotoBooking::with(['customer', 'package']))->where('scheduled_at', '>=', now())->whereNotIn('status', ['cancelled', 'delivered'])->orderBy('scheduled_at')->limit(5)->get()
+                )
+                : [],
+            'upcoming_job_bookings' => $user->canAccessFeature('job_bookings')
+                ? $view->transform(
+                    BranchQuery::constrain(JobBooking::with(['customer', 'bay', 'employee', 'vehicle']))
+                        ->where('starts_at', '>=', now())
+                        ->where('status', '!=', JobBooking::STATUS_CANCELLED)
+                        ->orderBy('starts_at')
+                        ->limit(5)
+                        ->get()
                 )
                 : [],
             'active_stays' => $user->canAccessFeature('cottage_stays')

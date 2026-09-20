@@ -10,6 +10,7 @@ use App\Models\Part;
 use App\Models\ServiceAddon;
 use App\Services\BillCalculator;
 use App\Services\BranchInventory;
+use App\Services\PartSerials;
 use App\Support\BusinessTypes;
 use App\Support\WarrantyPeriod;
 use Illuminate\Http\JsonResponse;
@@ -43,6 +44,8 @@ class BillItemController extends Controller
             'warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
             'warranty_starts_on' => ['nullable', 'date'],
             'warranty_until' => ['nullable', 'date'],
+            'serials' => ['nullable', 'array'],
+            'serials.*' => ['string', 'max:40'],
         ]);
 
         if (BusinessTypes::usesStoreCounter($businessType) && ($data['type'] ?? '') === 'labor') {
@@ -50,6 +53,17 @@ class BillItemController extends Controller
                 $request->user()->canAccessFeature('repair_bills') && $bill->job_kind === Bill::JOB_KIND_REPAIR,
                 422,
                 'Repair charges can only be added to a repair bill.'
+            );
+        }
+
+        if (
+            BusinessTypes::normalizeLegacy((string) $businessType) === BusinessTypes::GARAGE
+            && $bill->job_kind === Bill::JOB_KIND_PARTS_SALE
+        ) {
+            abort_unless(
+                ($data['type'] ?? '') === 'part' && ! empty($data['part_id']),
+                422,
+                'Instant bills only sell stocked inventory items.'
             );
         }
 
@@ -280,6 +294,16 @@ class BillItemController extends Controller
         }
 
         $part = ! empty($data['part_id']) ? Part::lockForUpdate()->findOrFail($data['part_id']) : null;
+        $serials = $data['serials'] ?? [];
+        if ($part && (PartSerials::requiredFor($part) || $serials !== [])) {
+            if ($serials === []) {
+                throw ValidationException::withMessages([
+                    'serials' => ['This item is sold by IMEI / serial. Scan or enter each unit.'],
+                ]);
+            }
+            $quantity = count($serials);
+            $data['description'] = trim(($data['description'] ?? $part->name).' · '.implode(', ', $serials));
+        }
         if ($part && BranchInventory::partQty($part->id, $bill->branch_id) < $quantity) {
             throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part at this shop.']]);
         }
@@ -331,6 +355,9 @@ class BillItemController extends Controller
                 : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
         ]);
         $part?->takeStock((int) $quantity, $bill->branch_id);
+        if ($part && $serials !== []) {
+            PartSerials::sell($part, $serials, $item);
+        }
 
         return $item;
     }

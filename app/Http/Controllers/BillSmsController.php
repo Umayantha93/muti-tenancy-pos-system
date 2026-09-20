@@ -19,6 +19,9 @@ class BillSmsController extends Controller
         if (! filled($phone)) {
             return response()->json(['message' => 'This bill has no customer phone number.'], 422);
         }
+        if ($bill->customer && $bill->customer->sms_opt_in === false) {
+            return response()->json(['message' => 'This customer has opted out of SMS.'], 422);
+        }
 
         $frontend = rtrim((string) config('app.frontend_url', config('app.url')), '/');
         $link = $frontend.'/share/bills/'.$bill->share_token;

@@ -30,7 +30,7 @@ class StoreTenantTest extends TestCase
         $store = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
             'Kandy Mobile Mart',
             BusinessTypes::STORE,
-            'store@shop.test',
+            fake()->unique()->safeEmail(),
         ))->assertCreated()
             ->assertJsonPath('business_type', 'store')
             ->assertJsonPath('plan', 'store-pro');
@@ -46,6 +46,62 @@ class StoreTenantTest extends TestCase
         $tenantId = $store->json('id');
         $this->assertSame(0, LaborCategory::withoutGlobalScopes()->where('tenant_id', $tenantId)->count());
         $this->assertSame(0, ServiceAddon::withoutGlobalScopes()->where('tenant_id', $tenantId)->count());
+    }
+
+    public function test_super_admin_onboards_a_mobile_shop_with_sales_and_repairs(): void
+    {
+        $this->seed(\Database\Seeders\FeatureSeeder::class);
+        $superAdmin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
+        Sanctum::actingAs($superAdmin);
+
+        $catalog = $this->getJson('/api/super-admin/feature-catalog?business_type=mobile_shop')->assertOk();
+        $catalogKeys = collect($catalog->json('features'))->pluck('key');
+        $this->assertTrue($catalogKeys->contains('parts_inventory'));
+        $this->assertTrue($catalogKeys->contains('repair_bills'));
+        $this->assertTrue($catalogKeys->contains('warranties'));
+        $this->assertFalse($catalogKeys->contains('admit_vehicle'));
+        $this->assertSame(['purchase_orders', 'part_fitment', 'serial_inventory', 'bill_whatsapp'], $catalog->json('optional'));
+
+        $shop = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
+            'Matara Mobile',
+            BusinessTypes::MOBILE_SHOP,
+            fake()->unique()->safeEmail(),
+        ))->assertCreated()
+            ->assertJsonPath('business_type', 'mobile_shop')
+            ->assertJsonPath('plan', 'mobile-pro');
+
+        $keys = collect($shop->json('features'))->pluck('key');
+        $this->assertTrue($keys->contains('parts_inventory'));
+        $this->assertTrue($keys->contains('billing'));
+        $this->assertTrue($keys->contains('repair_bills'));
+        $this->assertTrue($keys->contains('warranties'));
+        $this->assertFalse($keys->contains('admit_vehicle'));
+    }
+
+    public function test_super_admin_can_switch_a_store_to_a_mobile_shop(): void
+    {
+        $this->seed(\Database\Seeders\FeatureSeeder::class);
+        $superAdmin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
+        Sanctum::actingAs($superAdmin);
+
+        $store = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
+            'Hydearshop',
+            BusinessTypes::STORE,
+            fake()->unique()->safeEmail(),
+        ))->assertCreated();
+
+        $this->assertFalse(collect($store->json('features'))->pluck('key')->contains('repair_bills'));
+
+        $this->post("/api/super-admin/tenants/".$store->json('id'), [
+            'business_type' => BusinessTypes::MOBILE_SHOP,
+            'plan' => 'mobile-pro',
+        ])->assertOk()->assertJsonPath('business_type', 'mobile_shop');
+
+        $features = $this->getJson('/api/super-admin/tenants/'.$store->json('id').'/features')->assertOk();
+        $this->assertSame('mobile_shop', $features->json('business_type'));
+        $this->assertContains('repair_bills', $features->json('enabled'));
+        $this->assertContains('warranties', $features->json('enabled'));
+        $this->assertSame(['purchase_orders', 'part_fitment', 'serial_inventory', 'bill_whatsapp'], $features->json('optional'));
     }
 
     public function test_store_counter_sale_decrements_stock_and_uses_sale_prefix(): void

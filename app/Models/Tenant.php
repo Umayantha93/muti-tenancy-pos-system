@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'plan',
     'payment_plan',
     'plan_amount',
+    'setup_fee_amount',
     'logo',
 ])]
 class Tenant extends Model
@@ -48,6 +49,7 @@ class Tenant extends Model
             'contact_phones' => 'array',
             'owner_phones' => 'array',
             'plan_amount' => 'decimal:2',
+            'setup_fee_amount' => 'decimal:2',
             'dual_financial_view_enabled' => 'boolean',
             'vat_registered' => 'boolean',
             'sscl_registered' => 'boolean',
@@ -118,6 +120,23 @@ class Tenant extends Model
     public function feePayments(): HasMany
     {
         return $this->hasMany(TenantFeePayment::class);
+    }
+
+    public function setupFeePayments(): HasMany
+    {
+        return $this->hasMany(TenantSetupFeePayment::class);
+    }
+
+    public function withSetupFeeTotals(): static
+    {
+        $total = round((float) ($this->setup_fee_amount ?? 0), 2);
+        $paid = round((float) ($this->setup_fee_payments_sum_amount ?? $this->setupFeePayments()->sum('amount')), 2);
+        $balance = round(max(0, $total - $paid), 2);
+        $this->setAttribute('setup_fee_paid', $paid);
+        $this->setAttribute('setup_fee_balance', $balance);
+        $this->setAttribute('setup_fee_settled', $total > 0 && $balance <= 0);
+
+        return $this;
     }
 
     protected function logoUrl(): Attribute
