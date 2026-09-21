@@ -118,7 +118,68 @@ class PartBarcodeImportTest extends TestCase
         $this->assertSame(0, $result['created']);
         $this->assertSame(1, $result['updated']);
         $this->assertSame(1, Part::query()->count());
-        $this->assertSame(7, Part::query()->first()->stock_qty);
+        $this->assertEquals(7, (float) Part::query()->first()->stock_qty);
+    }
+
+    public function test_import_allows_blank_brand_type_price_and_decimal_qty(): void
+    {
+        $user = $this->owner();
+        Sanctum::actingAs($user);
+
+        $csv = $this->csvFile([
+            ['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'description', 'payment_status', 'due_date'],
+            ['Washer Fluid', '', '', '', '', '', '', '', '', '2', '', 'paid', ''],
+            ['Cabin Filter', '', '', '', '', '', '', '1,200', '', '10 pcs', '', 'paid', ''],
+        ]);
+
+        $result = $this->post('/api/parts/import', [
+            'file' => $csv,
+            'payment_status' => 'paid',
+        ], ['Accept' => 'application/json'])->assertOk()->json();
+
+        $this->assertSame(2, $result['created']);
+
+        $fluid = Part::query()->where('name', 'Washer Fluid')->first();
+        $this->assertSame('Generic', $fluid->brand);
+        $this->assertSame('General', $fluid->type);
+        $this->assertEquals(0, $fluid->price);
+        $this->assertEquals(0, $fluid->cost_price);
+        $this->assertEquals(2, (float) $fluid->stock_qty);
+        $this->assertSame('qty', $fluid->stock_unit);
+
+        $filter = Part::query()->where('name', 'Cabin Filter')->first();
+        $this->assertEquals(1200, $filter->price);
+        $this->assertEquals(10, (float) $filter->stock_qty);
+    }
+
+    public function test_import_unit_column_keeps_litres_and_millilitres(): void
+    {
+        $user = $this->owner();
+        Sanctum::actingAs($user);
+
+        $csv = $this->csvFile([
+            ['name', 'stock_qty', 'unit', 'price', 'cost_price'],
+            ['Coolant 5L', '1.5', 'L', '1050', '787.5'],
+            ['Thinner', '250', 'ML', '8', '4'],
+            ['Oil Filter', '10', 'ITEM', '1500', '900'],
+        ]);
+
+        $this->post('/api/parts/import', [
+            'file' => $csv,
+            'payment_status' => 'paid',
+        ], ['Accept' => 'application/json'])->assertOk();
+
+        $coolant = Part::query()->where('name', 'Coolant 5L')->first();
+        $this->assertEquals(1.5, (float) $coolant->stock_qty);
+        $this->assertSame('l', $coolant->stock_unit);
+
+        $thinner = Part::query()->where('name', 'Thinner')->first();
+        $this->assertEquals(250, (float) $thinner->stock_qty);
+        $this->assertSame('ml', $thinner->stock_unit);
+
+        $filter = Part::query()->where('name', 'Oil Filter')->first();
+        $this->assertEquals(10, (float) $filter->stock_qty);
+        $this->assertSame('qty', $filter->stock_unit);
     }
 
     /**

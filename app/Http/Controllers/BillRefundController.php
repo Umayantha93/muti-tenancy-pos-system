@@ -157,7 +157,7 @@ class BillRefundController extends Controller
                 ]);
 
                 if ($line['disposition'] === BillRefundItem::DISPOSITION_RESTOCK && $item->part) {
-                    $item->part->returnStock((int) $line['quantity'], $locked->branch_id);
+                    $item->part->returnStock((float) $line['quantity'], $locked->branch_id);
                 }
             }
 

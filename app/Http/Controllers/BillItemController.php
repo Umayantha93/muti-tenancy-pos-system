@@ -208,7 +208,7 @@ class BillItemController extends Controller
 
             foreach ($lines as $line) {
                 if ($line->part_id) {
-                    $line->part?->returnStock((int) $line->quantity, $bill->branch_id);
+                    $line->part?->returnStock((float) $line->quantity, $bill->branch_id);
                 }
                 if ($line->purchase_expense_id) {
                     Expense::whereKey($line->purchase_expense_id)->delete();
@@ -260,9 +260,6 @@ class BillItemController extends Controller
         $quantity = (float) ($data['quantity'] ?? 1);
         if (! $allowQty) {
             $quantity = 1;
-        }
-        if ($kind === 'stock' && $quantity !== (float) (int) $quantity) {
-            throw ValidationException::withMessages(['quantity' => ['Stock lines must use a whole quantity.']]);
         }
     }
 
@@ -354,7 +351,7 @@ class BillItemController extends Controller
                 )
                 : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
         ]);
-        $part?->takeStock((int) $quantity, $bill->branch_id);
+        $part?->takeStock((float) $quantity, $bill->branch_id);
         if ($part && $serials !== []) {
             PartSerials::sell($part, $serials, $item);
         }

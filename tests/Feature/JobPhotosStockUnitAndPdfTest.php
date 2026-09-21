@@ -106,17 +106,56 @@ class JobPhotosStockUnitAndPdfTest extends TestCase
             'stock_unit' => 'l',
         ])->assertCreated()->json();
         $this->assertSame('l', $part['stock_unit']);
-        $this->assertSame(10, $part['stock_qty']);
+        $this->assertEquals(10, $part['stock_qty']);
 
         $this->postJson('/api/parts/'.$part['id'].'/restock', [
-            'quantity' => 2000,
-            'stock_unit' => 'ml',
+            'quantity' => 2,
             'unit_cost' => 4100,
             'payment_status' => 'paid',
         ])->assertOk();
 
-        $this->assertSame(12, Part::query()->findOrFail($part['id'])->stock_qty);
+        $this->assertEquals(12, (float) Part::query()->findOrFail($part['id'])->stock_qty);
         $this->assertSame('l', Part::query()->findOrFail($part['id'])->stock_unit);
+
+        $this->postJson('/api/parts/'.$part['id'].'/restock', [
+            'quantity' => 0.5,
+            'unit_cost' => 4100,
+            'payment_status' => 'paid',
+        ])->assertOk();
+
+        $this->assertEquals(12.5, (float) Part::query()->findOrFail($part['id'])->stock_qty);
+    }
+
+    public function test_item_stock_rejects_decimal_qty(): void
+    {
+        $user = $this->garageUser();
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/parts', [
+            'name' => 'Oil Filter',
+            'brand' => 'Bosch',
+            'type' => 'Filter',
+            'price' => 1500,
+            'cost_price' => 900,
+            'stock_qty' => 1.5,
+            'stock_unit' => 'qty',
+        ])->assertUnprocessable();
+
+        $part = $this->postJson('/api/parts', [
+            'name' => 'Oil Filter',
+            'brand' => 'Bosch',
+            'type' => 'Filter',
+            'price' => 1500,
+            'cost_price' => 900,
+            'stock_qty' => 2,
+            'stock_unit' => 'qty',
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$part['id'].'/restock', [
+            'quantity' => 1.5,
+            'unit_cost' => 900,
+            'payment_status' => 'paid',
+        ])->assertUnprocessable();
     }
 
     private function openJob(): Bill
