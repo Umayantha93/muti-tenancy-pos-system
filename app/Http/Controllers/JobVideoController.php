@@ -28,8 +28,33 @@ class JobVideoController extends Controller
         abort_if($bill->job_kind === Bill::JOB_KIND_PARTS_SALE, 422, 'Videos can only be added on repair or service jobs.');
         abort_if($bill->videos()->count() >= BillVideo::MAX_PER_BILL, 422, 'This job already has 5 videos.');
 
+        $videoFile = $request->file('video');
+        if (! $videoFile || ! $videoFile->isValid()) {
+            return response()->json([
+                'message' => 'The video did not reach the server. Use a shorter clip (under 90 seconds and 40 MB).',
+            ], 422);
+        }
+
         $request->validate([
-            'video' => ['required', 'file', 'max:102400', 'mimetypes:video/mp4,video/quicktime,video/webm,video/3gpp'],
+            'video' => [
+                'required',
+                'file',
+                'max:102400',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! $value instanceof \Illuminate\Http\UploadedFile) {
+                        $fail('Use an MP4, MOV, or WebM clip.');
+
+                        return;
+                    }
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    $mime = strtolower((string) $value->getMimeType());
+                    $okExt = in_array($ext, ['mp4', 'mov', 'qt', 'webm', '3gp', '3gpp', 'm4v'], true);
+                    $okMime = str_starts_with($mime, 'video/') || $mime === 'application/octet-stream';
+                    if (! $okExt && ! $okMime) {
+                        $fail('Use an MP4, MOV, or WebM clip.');
+                    }
+                },
+            ],
             'label' => ['nullable', 'string', 'max:40'],
         ]);
 
@@ -61,7 +86,7 @@ class JobVideoController extends Controller
         abort_unless(Storage::disk('local')->exists($video->path), 404);
 
         return Storage::disk('local')->response($video->path, $video->original_name ?: 'job-video.mp4', [
-            'Content-Type' => 'video/mp4',
+            'Content-Type' => $this->contentType($video),
         ]);
     }
 
@@ -101,5 +126,17 @@ class JobVideoController extends Controller
             'created_at' => $video->created_at?->toIso8601String(),
             'expires_at' => $video->expiresAt()->toDateString(),
         ];
+    }
+
+    private function contentType(BillVideo $video): string
+    {
+        $extension = strtolower(pathinfo((string) $video->path, PATHINFO_EXTENSION));
+
+        return match ($extension) {
+            'webm' => 'video/webm',
+            'mov' => 'video/quicktime',
+            '3gp' => 'video/3gpp',
+            default => 'video/mp4',
+        };
     }
 }

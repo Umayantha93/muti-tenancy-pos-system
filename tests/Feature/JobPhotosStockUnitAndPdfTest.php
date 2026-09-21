@@ -66,6 +66,33 @@ class JobPhotosStockUnitAndPdfTest extends TestCase
             ->assertHeader('content-type', 'image/jpeg');
     }
 
+    public function test_photo_upload_rejects_a_missing_file(): void
+    {
+        $user = $this->garageUser(['job_photos']);
+        Sanctum::actingAs($user);
+        $bill = $this->openJob();
+
+        $this->postJson('/api/bills/'.$bill->id.'/photos', [])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'The photo did not reach the server. Try a smaller JPEG or PNG.');
+    }
+
+    public function test_videos_upload_without_ffmpeg(): void
+    {
+        $user = $this->garageUser(['job_videos']);
+        Sanctum::actingAs($user);
+        $bill = $this->openJob();
+
+        Storage::fake('local');
+        $this->post('/api/bills/'.$bill->id.'/videos', [
+            'video' => UploadedFile::fake()->createWithContent('clip.mp4', str_repeat('a', 2048)),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('original_name', 'clip.mp4');
+
+        $this->assertCount(1, $this->getJson('/api/bills/'.$bill->id.'/videos')->assertOk()->json());
+    }
+
     public function test_shared_bill_includes_videos(): void
     {
         $user = $this->garageUser(['job_videos']);

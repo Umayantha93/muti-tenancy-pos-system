@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\BillPhoto;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -27,7 +26,7 @@ class JobPhotoStore
 
         if (! function_exists('imagecreatefromstring')) {
             $path = "job-photos/{$tenantId}/{$billId}/".Str::uuid()->toString().'.jpg';
-            Storage::disk('local')->put($path, $binary);
+            $this->write($path, $binary);
 
             return [
                 'path' => $path,
@@ -64,7 +63,7 @@ class JobPhotoStore
         }
 
         $path = "job-photos/{$tenantId}/{$billId}/".Str::uuid()->toString().'.jpg';
-        Storage::disk('local')->put($path, $jpeg);
+        $this->write($path, $jpeg);
 
         return [
             'path' => $path,
@@ -76,6 +75,13 @@ class JobPhotoStore
     {
         if ($path !== '') {
             Storage::disk('local')->delete($path);
+        }
+    }
+
+    private function write(string $path, string $contents): void
+    {
+        if (! Storage::disk('local')->put($path, $contents)) {
+            throw new RuntimeException('Could not save the photo on the server.');
         }
     }
 }
