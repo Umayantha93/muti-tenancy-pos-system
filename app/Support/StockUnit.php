@@ -2,8 +2,6 @@
 
 namespace App\Support;
 
-use Illuminate\Validation\ValidationException;
-
 class StockUnit
 {
     public const QTY = 'qty';
@@ -27,18 +25,25 @@ class StockUnit
 
     public static function normalize(?string $unit, ?string $businessType = null): string
     {
-        if ($businessType === BusinessTypes::PAINT) {
-            return self::ML;
+        $parsed = self::tryFromImport($unit);
+        if ($parsed !== null) {
+            return $businessType === BusinessTypes::PAINT ? self::ML : $parsed;
         }
 
+        return self::defaultForBusiness($businessType);
+    }
+
+    public static function tryFromImport(?string $unit): ?string
+    {
         $unit = strtolower(trim((string) $unit));
-        if ($unit === 'litre' || $unit === 'liter' || $unit === 'litres' || $unit === 'liters') {
-            $unit = self::L;
-        }
+        $unit = str_replace(['.', ' '], '', $unit);
 
-        return in_array($unit, self::allowed(), true)
-            ? $unit
-            : self::defaultForBusiness($businessType);
+        return match ($unit) {
+            '', 'item', 'items', 'qty', 'quantity', 'pcs', 'pc', 'piece', 'pieces' => self::QTY,
+            'l', 'lt', 'ltr', 'litre', 'liter', 'litres', 'liters' => self::L,
+            'ml', 'millilitre', 'milliliter', 'millilitres', 'milliliters' => self::ML,
+            default => null,
+        };
     }
 
     public static function isVolume(string $unit): bool
@@ -46,35 +51,41 @@ class StockUnit
         return in_array(self::normalize($unit), [self::ML, self::L], true);
     }
 
-    public static function convertQuantity(int $quantity, string $from, string $to): int
+    public static function allowsDecimal(?string $unit, ?string $businessType = null): bool
+    {
+        return self::isVolume(self::normalize($unit, $businessType));
+    }
+
+    public static function isWhole(float|int $quantity): bool
+    {
+        $qty = (float) $quantity;
+
+        return abs($qty - round($qty)) < 0.0005;
+    }
+
+    public static function convertQuantity(float|int $quantity, string $from, string $to): float
     {
         $from = self::normalize($from);
         $to = self::normalize($to);
         if ($from === $to) {
-            return $quantity;
+            return round((float) $quantity, 3);
         }
         if ($from === self::L && $to === self::ML) {
-            return $quantity * 1000;
+            return round((float) $quantity * 1000, 3);
         }
         if ($from === self::ML && $to === self::L) {
-            if ($quantity % 1000 !== 0) {
-                throw ValidationException::withMessages([
-                    'quantity' => ['This item is stocked in litres. Enter whole litres, or switch the unit to ml.'],
-                ]);
-            }
-
-            return intdiv($quantity, 1000);
+            return round((float) $quantity / 1000, 3);
         }
 
-        return $quantity;
+        return round((float) $quantity, 3);
     }
 
     public static function label(?string $unit, ?string $businessType = null): string
     {
         return match (self::normalize($unit, $businessType)) {
-            self::ML => 'ml',
+            self::ML => 'ML',
             self::L => 'L',
-            default => 'qty',
+            default => 'ITEM',
         };
     }
 }

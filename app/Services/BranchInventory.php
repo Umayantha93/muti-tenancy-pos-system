@@ -13,15 +13,15 @@ class BranchInventory
 {
     public static bool $mutating = false;
 
-    public static function partQty(int $partId, ?int $branchId = null): int
+    public static function partQty(int $partId, ?int $branchId = null): float
     {
         $branchId ??= BranchContext::id() ?? Branch::defaultIdFor(Part::withoutGlobalScopes()->find($partId)?->tenant_id);
 
         if (! $branchId) {
-            return (int) (Part::withoutGlobalScopes()->find($partId)?->getRawOriginal('stock_qty') ?? 0);
+            return self::qty(Part::withoutGlobalScopes()->find($partId)?->getRawOriginal('stock_qty') ?? 0);
         }
 
-        return (int) (BranchStock::query()
+        return self::qty(BranchStock::query()
             ->where('branch_id', $branchId)
             ->where('part_id', $partId)
             ->value('qty') ?? 0);
@@ -41,8 +41,9 @@ class BranchInventory
             ->value('qty') ?? 0);
     }
 
-    public static function takePart(Part $part, int $quantity, ?int $branchId = null): void
+    public static function takePart(Part $part, float|int $quantity, ?int $branchId = null): void
     {
+        $quantity = self::qty($quantity);
         if ($quantity <= 0) {
             return;
         }
@@ -52,7 +53,7 @@ class BranchInventory
         self::$mutating = true;
         try {
             $row = self::lockPartRow($part, $branchId);
-            if ((int) $row->qty < $quantity) {
+            if (self::qty($row->qty) + 0.0001 < $quantity) {
                 throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part at this shop.']]);
             }
             $row->decrement('qty', $quantity);
@@ -63,8 +64,9 @@ class BranchInventory
         }
     }
 
-    public static function returnPart(Part $part, int $quantity, ?int $branchId = null): void
+    public static function returnPart(Part $part, float|int $quantity, ?int $branchId = null): void
     {
+        $quantity = self::qty($quantity);
         if ($quantity <= 0) {
             return;
         }
@@ -87,7 +89,7 @@ class BranchInventory
         }
     }
 
-    public static function addPart(Part $part, int $quantity, ?int $branchId = null): void
+    public static function addPart(Part $part, float|int $quantity, ?int $branchId = null): void
     {
         self::returnPart($part, $quantity, $branchId);
     }
@@ -138,11 +140,11 @@ class BranchInventory
         }
     }
 
-    public static function setPartQty(Part $part, int $quantity, ?int $branchId = null): void
+    public static function setPartQty(Part $part, float|int $quantity, ?int $branchId = null): void
     {
         $branchId ??= BranchContext::id() ?? Branch::defaultIdFor($part->tenant_id);
         if (! $branchId) {
-            $part->update(['stock_qty' => $quantity]);
+            $part->update(['stock_qty' => self::qty($quantity)]);
 
             return;
         }
@@ -150,7 +152,7 @@ class BranchInventory
         self::$mutating = true;
         try {
             $row = self::lockPartRow($part, $branchId);
-            $row->update(['qty' => $quantity]);
+            $row->update(['qty' => self::qty($quantity)]);
             self::syncPartTotal($part);
             $part->refresh();
         } finally {
@@ -178,15 +180,16 @@ class BranchInventory
         }
     }
 
-    public static function transferPart(Part $part, int $fromBranchId, int $toBranchId, int $quantity): void
+    public static function transferPart(Part $part, int $fromBranchId, int $toBranchId, float|int $quantity): void
     {
+        $quantity = self::qty($quantity);
         abort_if($fromBranchId === $toBranchId, 422, 'Choose two different shops.');
         abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
 
         self::$mutating = true;
         try {
             $from = self::lockPartRow($part, $fromBranchId);
-            if ((int) $from->qty < $quantity) {
+            if (self::qty($from->qty) + 0.0001 < $quantity) {
                 throw ValidationException::withMessages(['quantity' => ['Not enough stock at the sending shop.']]);
             }
             $to = self::lockPartRow($part, $toBranchId);
@@ -198,14 +201,15 @@ class BranchInventory
         }
     }
 
-    public static function dispatchPart(Part $part, int $fromBranchId, int $quantity): void
+    public static function dispatchPart(Part $part, int $fromBranchId, float|int $quantity): void
     {
+        $quantity = self::qty($quantity);
         abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
 
         self::$mutating = true;
         try {
             $from = self::lockPartRow($part, $fromBranchId);
-            if ((int) $from->qty < $quantity) {
+            if (self::qty($from->qty) + 0.0001 < $quantity) {
                 throw ValidationException::withMessages(['quantity' => ['Not enough stock at the sending shop.']]);
             }
             $from->decrement('qty', $quantity);
@@ -215,8 +219,9 @@ class BranchInventory
         }
     }
 
-    public static function receivePart(Part $part, int $toBranchId, int $quantity): void
+    public static function receivePart(Part $part, int $toBranchId, float|int $quantity): void
     {
+        $quantity = self::qty($quantity);
         abort_if($quantity <= 0, 422, 'Transfer quantity must be greater than zero.');
 
         self::$mutating = true;
@@ -280,7 +285,7 @@ class BranchInventory
         }
     }
 
-    public static function seedPart(Part $part, int $quantity, ?int $branchId = null): void
+    public static function seedPart(Part $part, float|int $quantity, ?int $branchId = null): void
     {
         $branchId ??= BranchContext::id() ?? Branch::defaultIdFor($part->tenant_id);
         if (! $branchId || ! $part->tenant_id) {
@@ -291,7 +296,7 @@ class BranchInventory
         try {
             BranchStock::query()->firstOrCreate(
                 ['branch_id' => $branchId, 'part_id' => $part->id],
-                ['tenant_id' => $part->tenant_id, 'qty' => max(0, $quantity)],
+                ['tenant_id' => $part->tenant_id, 'qty' => max(0, self::qty($quantity))],
             );
             self::syncPartTotal($part);
         } finally {
@@ -380,7 +385,7 @@ class BranchInventory
 
     private static function syncPartTotal(Part $part): void
     {
-        $total = (int) BranchStock::query()->where('part_id', $part->id)->sum('qty');
+        $total = self::qty(BranchStock::query()->where('part_id', $part->id)->sum('qty'));
         Part::withoutGlobalScopes()->whereKey($part->id)->update(['stock_qty' => $total]);
     }
 
@@ -388,5 +393,10 @@ class BranchInventory
     {
         $total = (int) BranchStock::query()->where('product_id', $product->id)->sum('qty');
         Product::withoutGlobalScopes()->whereKey($product->id)->update(['stock_qty' => $total]);
+    }
+
+    private static function qty(mixed $value): float
+    {
+        return round((float) $value, 3);
     }
 }

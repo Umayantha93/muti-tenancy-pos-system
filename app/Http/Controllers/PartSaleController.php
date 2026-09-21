@@ -43,7 +43,7 @@ class PartSaleController extends Controller
             'discount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.part_id' => ['required', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.quantity' => ['required', 'numeric', 'gt:0'],
             'items.*.serials' => ['nullable', 'array'],
             'items.*.serials.*' => ['string', 'max:40'],
             'items.*.warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
@@ -88,7 +88,7 @@ class PartSaleController extends Controller
 
             foreach ($data['items'] as $line) {
                 $part = Part::lockForUpdate()->findOrFail($line['part_id']);
-                $qty = (int) $line['quantity'];
+                $qty = (float) $line['quantity'];
                 $serials = $line['serials'] ?? [];
                 if (PartSerials::requiredFor($part) || $serials !== []) {
                     if ($serials === []) {

@@ -46,7 +46,7 @@ class SuperAdminInventoryController extends Controller
         $this->assertPartTenant($tenant, $part);
 
         $data = $request->validate([
-            'stock_qty' => ['sometimes', 'integer', 'min:0'],
+            'stock_qty' => ['sometimes', 'numeric', 'min:0'],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'cost_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'name' => ['sometimes', 'string', 'max:255'],
@@ -110,7 +110,7 @@ class SuperAdminInventoryController extends Controller
         $this->assertProductTenant($tenant, $product);
 
         $data = $request->validate([
-            'stock_qty' => ['sometimes', 'integer', 'min:0'],
+            'stock_qty' => ['sometimes', 'numeric', 'min:0'],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'cost_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'name' => ['sometimes', 'string', 'max:255'],
