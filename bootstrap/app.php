@@ -19,6 +19,9 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        \App\Console\Commands\ServeCommand::class,
+    ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             SetLocale::class,
@@ -41,4 +44,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+        $exceptions->render(function (\Illuminate\Http\Exceptions\PostTooLargeException $exception, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'message' => 'This file is too large to upload. Use a smaller photo or a clip under 40 MB.',
+                ], 413);
+            }
+        });
     })->create();

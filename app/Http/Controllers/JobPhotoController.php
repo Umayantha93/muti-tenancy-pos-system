@@ -28,8 +28,19 @@ class JobPhotoController extends Controller
         abort_if($bill->job_kind === Bill::JOB_KIND_PARTS_SALE, 422, 'Photos can only be added on repair or service jobs.');
         abort_if($bill->photos()->count() >= BillPhoto::MAX_PER_BILL, 422, 'This job already has 15 photos.');
 
+        $photo = $request->file('photo');
+        if (! $photo || ! $photo->isValid()) {
+            $message = match ($photo?->getError()) {
+                UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'This photo is too large for the server. Try a smaller JPEG.',
+                UPLOAD_ERR_PARTIAL => 'The photo upload was interrupted. Try again.',
+                default => 'The photo did not reach the server. Try a smaller JPEG or PNG.',
+            };
+
+            return response()->json(['message' => $message], 422);
+        }
+
         $request->validate([
-            'photo' => ['required', 'file', 'max:'.BillPhoto::MAX_UPLOAD_KILOBYTES, 'mimetypes:image/jpeg,image/png,image/webp,image/gif'],
+            'photo' => ['required', 'file', 'max:'.BillPhoto::MAX_UPLOAD_KILOBYTES, 'mimes:jpeg,jpg,png,webp,gif'],
             'label' => ['nullable', 'string', 'max:40'],
         ]);
 

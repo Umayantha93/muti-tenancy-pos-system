@@ -23,17 +23,17 @@ class JobVideoConverter
      */
     public function convert(UploadedFile $file, int $tenantId, int $billId): array
     {
-        if (! $this->ffmpegAvailable()) {
-            throw new RuntimeException('Video conversion is not available on this server (ffmpeg missing).');
-        }
-
         $source = $file->getRealPath();
         if (! $source) {
             throw new RuntimeException('Could not read the uploaded video.');
         }
 
+        if (! $this->ffmpegAvailable()) {
+            return $this->storeOriginal($file, $tenantId, $billId);
+        }
+
         $duration = $this->probeDuration($source);
-        if ($duration > BillVideo::MAX_SECONDS + 0.5) {
+        if ($duration !== null && $duration > BillVideo::MAX_SECONDS + 0.5) {
             throw new RuntimeException('Each clip must be 90 seconds or shorter. Trim it on the phone first.');
         }
 
@@ -51,13 +51,15 @@ class JobVideoConverter
 
         if (! $result->successful() || ! is_file($tmp)) {
             @unlink($tmp);
-            throw new RuntimeException('Could not compress this video. Try another clip.');
+
+            return $this->storeOriginal($file, $tenantId, $billId);
         }
 
         $size = (int) filesize($tmp);
         if ($size <= 0 || $size > BillVideo::MAX_OUTPUT_BYTES) {
             @unlink($tmp);
-            throw new RuntimeException('Compressed video is still too large. Use a shorter clip.');
+
+            return $this->storeOriginal($file, $tenantId, $billId);
         }
 
         $storedName = Str::uuid()->toString().'.mp4';
@@ -67,7 +69,39 @@ class JobVideoConverter
 
         return [
             'path' => $path,
-            'duration_seconds' => max(1, (int) round($duration)),
+            'duration_seconds' => max(1, (int) round($duration ?? 1)),
+            'size_bytes' => $size,
+        ];
+    }
+
+    /**
+     * @return array{path: string, duration_seconds: int, size_bytes: int}
+     */
+    private function storeOriginal(UploadedFile $file, int $tenantId, int $billId): array
+    {
+        $source = $file->getRealPath();
+        if (! $source || ! is_file($source)) {
+            throw new RuntimeException('Could not read the uploaded video.');
+        }
+
+        $size = (int) filesize($source);
+        if ($size <= 0 || $size > BillVideo::MAX_OUTPUT_BYTES) {
+            throw new RuntimeException('This video is too large. Use a clip under 40 MB, or 90 seconds or less.');
+        }
+
+        $extension = strtolower((string) $file->getClientOriginalExtension()) ?: 'mp4';
+        if (! in_array($extension, ['mp4', 'mov', 'webm', '3gp'], true)) {
+            $extension = 'mp4';
+        }
+
+        $path = "job-videos/{$tenantId}/{$billId}/".Str::uuid()->toString().'.'.$extension;
+        Storage::disk('local')->put($path, file_get_contents($source) ?: '');
+
+        $duration = $this->ffmpegAvailable() ? $this->probeDuration($source) : null;
+
+        return [
+            'path' => $path,
+            'duration_seconds' => max(1, (int) round($duration ?? 1)),
             'size_bytes' => $size,
         ];
     }
@@ -79,7 +113,7 @@ class JobVideoConverter
         }
     }
 
-    private function probeDuration(string $path): float
+    private function probeDuration(string $path): ?float
     {
         $result = Process::timeout(20)->run([
             'ffprobe', '-v', 'error',
@@ -88,13 +122,10 @@ class JobVideoConverter
             $path,
         ]);
         if (! $result->successful()) {
-            throw new RuntimeException('Could not read this video. Use an MP4 clip of 90 seconds or less.');
+            return null;
         }
         $seconds = (float) trim($result->output());
-        if ($seconds <= 0) {
-            throw new RuntimeException('Could not read this video duration.');
-        }
 
-        return $seconds;
+        return $seconds > 0 ? $seconds : null;
     }
 }
