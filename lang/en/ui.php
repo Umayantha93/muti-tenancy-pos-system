@@ -734,6 +734,7 @@ return [
         'shot' => 'Photo :n',
         'until' => 'until :date',
         'view' => 'View',
+        'hide' => 'Hide',
         'delete' => 'Delete',
         'empty_readonly' => 'No photos on this job.',
         'empty' => 'No photos yet. Take them on the phone, then upload.',
