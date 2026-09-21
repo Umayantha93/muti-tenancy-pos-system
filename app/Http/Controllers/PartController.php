@@ -84,6 +84,7 @@ class PartController extends Controller
                 '1500.00',
                 '900.00',
                 '10',
+                'ITEM',
                 'SAMPLE paid — money already paid; leave due_date blank',
                 'paid',
                 '',
@@ -99,18 +100,19 @@ class PartController extends Controller
                 '7800.00',
                 '4500.00',
                 '5',
+                'ITEM',
                 'SAMPLE credit — supplier owe; due_date required (YYYY-MM-DD)',
                 'credit',
                 $creditDueDate,
             ],
         ], null, 'A2');
 
-        $sheet->getStyle('A1:M1')->getFont()->setBold(true);
-        $sheet->getStyle('A1:M1')->getFill()
+        $sheet->getStyle('A1:N1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:N1')->getFill()
             ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setRGB('167C73');
-        $sheet->getStyle('A1:M1')->getFont()->getColor()->setRGB('FFFFFF');
-        foreach (range('A', 'M') as $column) {
+        $sheet->getStyle('A1:N1')->getFont()->getColor()->setRGB('FFFFFF');
+        foreach (range('A', 'N') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
         $sheet->freezePane('A2');
@@ -118,8 +120,10 @@ class PartController extends Controller
         $instructions = $spreadsheet->createSheet();
         $instructions->setTitle('Instructions');
         $instructions->fromArray([
-            ['Use the Parts sheet. Keep these required headers: name, brand, type, price, cost_price, stock_qty.'],
-            ['Optional columns: sku, barcode, model, year, description, payment_status, due_date.'],
+            ['Use the Parts sheet. The only required header is name. Keep brand, type, price, cost_price, stock_qty, unit if you have them.'],
+            ['Optional columns: sku, barcode, brand, type, model, year, price, cost_price, stock_qty, unit, description, payment_status, due_date.'],
+            ['Blank brand → Generic. Blank type (category) → General. Blank price, cost_price, or stock_qty → 0. Blank unit → ITEM.'],
+            ['unit (after stock_qty) must be ITEM, L, or ML. L and ML may be decimal (1.5). ITEM must be a whole number.'],
             ['payment_status: paid or debit = money already paid (hits Finance now). credit = supplier owe / inventory on credit.'],
             ['Sample row A2 (Oil Filter): payment_status=paid, due_date blank — paid rows do not need a due date.'],
             ['Sample row A3 (Brake Pads): payment_status=credit, due_date filled (YYYY-MM-DD) — credit rows require a due date.'],
@@ -184,6 +188,16 @@ class PartController extends Controller
                 'file' => ['Missing required columns: '.implode(', ', $missing).'. Download a fresh template.'],
             ]);
         }
+        if (! isset($headerIndex['unit'])) {
+            foreach (['stock_unit', 'qty_unit', 'unit_type'] as $alias) {
+                if (isset($headerIndex[$alias])) {
+                    $headerIndex['unit'] = $headerIndex[$alias];
+                    break;
+                }
+            }
+        }
+
+        $businessType = $request->user()?->tenant?->business_type;
 
         $parsed = [];
         $errors = [];
@@ -205,19 +219,38 @@ class PartController extends Controller
             }
 
             $rowErrors = [];
-            foreach (['name', 'brand', 'type', 'price', 'cost_price', 'stock_qty'] as $required) {
-                if ($values[$required] === '') {
-                    $rowErrors[] = "{$required} is required";
-                }
+            if ($values['name'] === '') {
+                $rowErrors[] = 'name is required';
             }
-            if ($values['price'] !== '' && ! is_numeric($values['price'])) {
+
+            $price = $this->parseImportNumber($values['price']);
+            $cost = $this->parseImportNumber($values['cost_price']);
+            $qtyRaw = $this->parseImportNumber($values['stock_qty']);
+            if ($values['price'] !== '' && $price === null) {
                 $rowErrors[] = 'price must be a number';
             }
-            if ($values['cost_price'] !== '' && ! is_numeric($values['cost_price'])) {
+            if ($values['cost_price'] !== '' && $cost === null) {
                 $rowErrors[] = 'cost_price must be a number';
             }
-            if ($values['stock_qty'] !== '' && (! is_numeric($values['stock_qty']) || (float) $values['stock_qty'] < 0 || (int) $values['stock_qty'] != (float) $values['stock_qty'])) {
-                $rowErrors[] = 'stock_qty must be a whole number';
+            if ($values['stock_qty'] !== '' && $qtyRaw === null) {
+                $rowErrors[] = 'stock_qty must be a number';
+            }
+            if ($qtyRaw !== null && $qtyRaw < 0) {
+                $rowErrors[] = 'stock_qty cannot be negative';
+            }
+            if ($price !== null && $price < 0) {
+                $rowErrors[] = 'price cannot be negative';
+            }
+            if ($cost !== null && $cost < 0) {
+                $rowErrors[] = 'cost_price cannot be negative';
+            }
+            $unitParsed = StockUnit::tryFromImport($values['unit'] ?? '');
+            if (($values['unit'] ?? '') !== '' && $unitParsed === null) {
+                $rowErrors[] = 'unit must be ITEM, L, or ML';
+            }
+            $unit = StockUnit::normalize($values['unit'] ?? '', $businessType);
+            if ($qtyRaw !== null && ! StockUnit::allowsDecimal($unit, $businessType) && ! StockUnit::isWhole($qtyRaw)) {
+                $rowErrors[] = 'stock_qty must be a whole number when unit is ITEM';
             }
             if ($values['year'] !== '' && (! ctype_digit($values['year']) || (int) $values['year'] < 1900 || (int) $values['year'] > now()->year + 1)) {
                 $rowErrors[] = 'year is invalid';
@@ -244,7 +277,10 @@ class PartController extends Controller
             $barcode = $values['barcode'] !== '' ? $values['barcode'] : null;
             $description = $values['description'] !== '' ? $values['description'] : null;
             $name = $values['name'];
-            $qty = (int) $values['stock_qty'];
+            $qty = round($qtyRaw ?? 0, 3);
+            if (! StockUnit::allowsDecimal($unit, $businessType)) {
+                $qty = (int) round($qty);
+            }
 
             // Same barcode/sku + same name in this file → fold into the earlier row (restock).
             // Same barcode/sku + different name → keep as a new item; clear conflicting codes.
@@ -253,7 +289,7 @@ class PartController extends Controller
                 if (isset($seenBarcode[$barcodeKey])) {
                     $prior = $parsed[$seenBarcode[$barcodeKey]];
                     if (PartBarcode::namesMatch($prior['name'], $name)) {
-                        $parsed[$seenBarcode[$barcodeKey]]['stock_qty'] += $qty;
+                        $parsed[$seenBarcode[$barcodeKey]]['stock_qty'] += $this->qtyInUnit($qty, $unit, $prior['stock_unit']);
                         continue;
                     }
                     $description = PartBarcode::noteSupplierBarcode($description, $barcode);
@@ -265,7 +301,7 @@ class PartController extends Controller
                 if (isset($seenSku[$skuKey])) {
                     $prior = $parsed[$seenSku[$skuKey]];
                     if (PartBarcode::namesMatch($prior['name'], $name)) {
-                        $parsed[$seenSku[$skuKey]]['stock_qty'] += $qty;
+                        $parsed[$seenSku[$skuKey]]['stock_qty'] += $this->qtyInUnit($qty, $unit, $prior['stock_unit']);
                         continue;
                     }
                     $sku = null;
@@ -317,9 +353,10 @@ class PartController extends Controller
                 'type' => $values['type'],
                 'model' => $values['model'] !== '' ? $values['model'] : null,
                 'year' => $values['year'] !== '' ? (int) $values['year'] : null,
-                'price' => round((float) $values['price'], 2),
-                'cost_price' => round((float) $values['cost_price'], 2),
+                'price' => $price !== null ? round($price, 2) : null,
+                'cost_price' => $cost !== null ? round($cost, 2) : null,
                 'stock_qty' => $qty,
+                'stock_unit' => $unit,
                 'description' => $description,
                 'payment_status' => $rowPayment,
                 'due_date' => $rowPayment === 'credit' ? $rowDue : null,
@@ -339,7 +376,7 @@ class PartController extends Controller
             throw ValidationException::withMessages(['file' => ['No part rows found. Keep the header row and add at least one data row.']]);
         }
 
-        $summary = DB::transaction(function () use ($parsed, $request, $importSupplierId) {
+        $summary = DB::transaction(function () use ($parsed, $request, $importSupplierId, $businessType) {
             $created = 0;
             $updated = 0;
             $expenses = 0;
@@ -351,10 +388,13 @@ class PartController extends Controller
                     : null;
 
                 $qty = $row['stock_qty'];
-                $unitCost = $row['cost_price'];
+                $unitCost = $row['cost_price'] ?? 0.0;
+                $incomingUnit = $row['stock_unit'] ?? StockUnit::QTY;
 
                 if ($existing) {
                     $shopQty = BranchInventory::partQty($existing->id);
+                    $partUnit = StockUnit::normalize($existing->stock_unit, $businessType);
+                    $qty = $this->qtyInUnit($qty, $incomingUnit, $partUnit);
                     $blendedCost = InventoryCosting::weightedAverageCost(
                         $shopQty,
                         $existing->cost_price,
@@ -367,12 +407,12 @@ class PartController extends Controller
                         'name' => $row['name'],
                         'sku' => $row['sku'] ?? $existing->sku,
                         'barcode' => $row['barcode'] ?? $existing->barcode,
-                        'brand' => $row['brand'],
-                        'type' => $row['type'],
-                        'model' => $row['model'],
-                        'year' => $row['year'],
-                        'price' => $row['price'],
-                        'cost_price' => $blendedCost,
+                        'brand' => $row['brand'] !== '' ? $row['brand'] : $existing->brand,
+                        'type' => $row['type'] !== '' ? $row['type'] : $existing->type,
+                        'model' => $row['model'] ?? $existing->model,
+                        'year' => $row['year'] ?? $existing->year,
+                        'price' => $row['price'] ?? $existing->price,
+                        'cost_price' => $row['cost_price'] !== null ? $blendedCost : $existing->cost_price,
                         'description' => $row['description'] ?? $existing->description,
                     ]);
                     $part = PartBarcode::ensure($existing->refresh());
@@ -382,13 +422,14 @@ class PartController extends Controller
                         'name' => $row['name'],
                         'sku' => $row['sku'],
                         'barcode' => $row['barcode'],
-                        'brand' => $row['brand'],
-                        'type' => $row['type'],
+                        'brand' => $row['brand'] !== '' ? $row['brand'] : 'Generic',
+                        'type' => $row['type'] !== '' ? $row['type'] : 'General',
                         'model' => $row['model'],
                         'year' => $row['year'],
-                        'price' => $row['price'],
+                        'price' => $row['price'] ?? 0,
                         'cost_price' => $unitCost,
                         'stock_qty' => $qty,
+                        'stock_unit' => $incomingUnit,
                         'description' => $row['description'],
                     ]);
                     $created++;
@@ -442,7 +483,7 @@ class PartController extends Controller
             $this->recordPurchaseExpense(
                 $request,
                 $part,
-                (int) ($data['stock_qty'] ?? 0),
+                (float) ($data['stock_qty'] ?? 0),
                 (float) ($data['cost_price'] ?? 0),
                 null,
                 $request->input('payment_status', 'paid'),
@@ -511,7 +552,7 @@ class PartController extends Controller
         }
 
         $data = $request->validate([
-            'quantity' => ['nullable', 'integer', 'gt:0', 'required_without:serials'],
+            'quantity' => ['nullable', 'numeric', 'gt:0', 'required_without:serials'],
             'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'unit_cost' => ['nullable', 'numeric', 'min:0'],
             'expense_date' => ['nullable', 'date'],
@@ -533,19 +574,16 @@ class PartController extends Controller
             }
             $data['quantity'] = count($serials);
         }
-        if ((int) ($data['quantity'] ?? 0) < 1) {
+        if ((float) ($data['quantity'] ?? 0) <= 0) {
             throw ValidationException::withMessages(['quantity' => ['Enter how many units to add.']]);
         }
 
         [$part, $expense] = DB::transaction(function () use ($data, $part, $request, $serials) {
-            $qty = (int) $data['quantity'];
+            $qty = (float) $data['quantity'];
             $businessType = $request->user()?->tenant?->business_type;
-            $incomingUnit = StockUnit::normalize($data['stock_unit'] ?? $part->stock_unit, $businessType);
             $partUnit = StockUnit::normalize($part->stock_unit, $businessType);
-            if (StockUnit::isVolume($incomingUnit) && StockUnit::isVolume($partUnit)) {
-                $qty = StockUnit::convertQuantity($qty, $incomingUnit, $partUnit);
-            } elseif ($incomingUnit !== $partUnit) {
-                $part->update(['stock_unit' => $incomingUnit]);
+            if (! StockUnit::allowsDecimal($partUnit, $businessType) && ! StockUnit::isWhole($qty)) {
+                throw ValidationException::withMessages(['quantity' => ['ITEM stock must be a whole number.']]);
             }
             $unitCost = (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
             $shopQty = BranchInventory::partQty($part->id);
@@ -592,7 +630,7 @@ class PartController extends Controller
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
             'price' => [$part ? 'sometimes' : 'required', 'numeric', 'min:0'],
             'cost_price' => ['nullable', 'numeric', 'min:0'],
-            'stock_qty' => [$part ? 'sometimes' : 'required', 'integer', 'min:0'],
+            'stock_qty' => [$part ? 'sometimes' : 'required', 'numeric', 'min:0'],
             'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'serialized' => ['sometimes', 'boolean'],
             'description' => ['nullable', 'string'],
@@ -609,13 +647,10 @@ class PartController extends Controller
             unset($data['stock_unit']);
         } else {
             $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
-        }
-
-        $businessType = $request->user()?->tenant?->business_type;
-        if ($part) {
-            unset($data['stock_unit']);
-        } else {
-            $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
+            $qty = (float) ($data['stock_qty'] ?? 0);
+            if (! StockUnit::allowsDecimal($data['stock_unit'], $businessType) && ! StockUnit::isWhole($qty)) {
+                throw ValidationException::withMessages(['stock_qty' => ['ITEM stock must be a whole number.']]);
+            }
         }
 
         foreach (['sku', 'barcode'] as $field) {
@@ -792,7 +827,7 @@ class PartController extends Controller
     private function recordPurchaseExpense(
         Request $request,
         Part $part,
-        int $quantity,
+        float $quantity,
         float $unitCost,
         ?string $expenseDate = null,
         string $paymentStatus = 'paid',
@@ -859,7 +894,7 @@ class PartController extends Controller
      */
     private function importHeaders(): array
     {
-        return ['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'description', 'payment_status', 'due_date'];
+        return ['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'unit', 'description', 'payment_status', 'due_date'];
     }
 
     /**
@@ -867,7 +902,31 @@ class PartController extends Controller
      */
     private function requiredImportHeaders(): array
     {
-        return ['name', 'brand', 'type', 'price', 'cost_price', 'stock_qty'];
+        return ['name'];
+    }
+
+    private function parseImportNumber(string $value): ?float
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        $compact = str_replace(["\u{00a0}", ' ', ','], '', $value);
+        if (preg_match('/-?\d+(?:\.\d+)?/', $compact, $matches) !== 1) {
+            return null;
+        }
+
+        return (float) $matches[0];
+    }
+
+    private function qtyInUnit(float $qty, string $from, string $to): float
+    {
+        if (StockUnit::isVolume($from) && StockUnit::isVolume($to)) {
+            return StockUnit::convertQuantity($qty, $from, $to);
+        }
+
+        return round($qty, 3);
     }
 
     private function normalizePaymentStatus(?string $value): string

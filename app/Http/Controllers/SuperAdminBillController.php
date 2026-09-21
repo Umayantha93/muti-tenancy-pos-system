@@ -115,7 +115,7 @@ class SuperAdminBillController extends Controller
             $bill->load('items');
             foreach ($bill->items as $item) {
                 if ($item->part_id) {
-                    $item->part?->returnStock((int) $item->quantity, $bill->branch_id);
+                    $item->part?->returnStock((float) $item->quantity, $bill->branch_id);
                 }
                 if ($item->purchase_expense_id) {
                     Expense::whereKey($item->purchase_expense_id)->delete();
@@ -199,10 +199,6 @@ class SuperAdminBillController extends Controller
             $quantity = 1;
         }
 
-        if ($kind === 'stock' && $quantity !== (float) (int) $quantity) {
-            throw ValidationException::withMessages(['quantity' => ['Stock lines must use a whole quantity.']]);
-        }
-
         DB::transaction(function () use ($data, $bill, $calculator, $quantity, $request) {
             $part = ! empty($data['part_id'])
                 ? Part::where('tenant_id', $bill->tenant_id)->lockForUpdate()->findOrFail($data['part_id'])
@@ -252,7 +248,7 @@ class SuperAdminBillController extends Controller
             ]);
             $item->tenant_id = $bill->tenant_id;
             $item->save();
-            $part?->takeStock((int) $quantity, $bill->branch_id);
+            $part?->takeStock((float) $quantity, $bill->branch_id);
             $calculator->recalculate($bill);
 
             return $item;
@@ -277,10 +273,7 @@ class SuperAdminBillController extends Controller
         DB::transaction(function () use ($data, $bill, $item, $calculator) {
             if (array_key_exists('quantity', $data) && $item->part_id) {
                 $newQty = (float) $data['quantity'];
-                if ($newQty !== (float) (int) $newQty) {
-                    throw ValidationException::withMessages(['quantity' => ['Stock lines must use a whole quantity.']]);
-                }
-                $delta = (int) $newQty - (int) $item->quantity;
+                $delta = round($newQty - (float) $item->quantity, 3);
                 if ($delta > 0) {
                     $part = Part::where('tenant_id', $bill->tenant_id)->lockForUpdate()->findOrFail($item->part_id);
                     if (BranchInventory::partQty($part->id, $bill->branch_id) < $delta) {
@@ -318,7 +311,7 @@ class SuperAdminBillController extends Controller
 
         DB::transaction(function () use ($bill, $item, $calculator) {
             if ($item->part_id) {
-                $item->part?->returnStock((int) $item->quantity, $bill->branch_id);
+                $item->part?->returnStock((float) $item->quantity, $bill->branch_id);
             }
             if ($item->purchase_expense_id) {
                 Expense::whereKey($item->purchase_expense_id)->delete();

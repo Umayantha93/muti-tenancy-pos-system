@@ -32,14 +32,14 @@ class Part extends Model
             if (BranchInventory::$mutating) {
                 return;
             }
-            BranchInventory::seedPart($part, (int) $part->stock_qty);
+            BranchInventory::seedPart($part, (float) $part->stock_qty);
         });
 
         static::saved(function (Part $part): void {
             if (BranchInventory::$mutating || $part->wasRecentlyCreated || ! $part->wasChanged('stock_qty')) {
                 return;
             }
-            BranchInventory::setPartQty($part, (int) $part->stock_qty);
+            BranchInventory::setPartQty($part, (float) $part->stock_qty);
         });
     }
 
@@ -63,6 +63,17 @@ class Part extends Model
         ];
     }
 
+    protected function stockQty(): Attribute
+    {
+        return Attribute::make(
+            get: function (mixed $value): int|float {
+                $n = round((float) $value, 3);
+
+                return fmod($n, 1.0) == 0.0 ? (int) $n : $n;
+            },
+        );
+    }
+
     protected function imageUrls(): Attribute
     {
         return Attribute::get(fn () => collect($this->images ?? [])
@@ -71,12 +82,12 @@ class Part extends Model
             ->all());
     }
 
-    public function takeStock(int $quantity, ?int $branchId = null): void
+    public function takeStock(float|int $quantity, ?int $branchId = null): void
     {
         BranchInventory::takePart($this, $quantity, $branchId);
     }
 
-    public function returnStock(int $quantity, ?int $branchId = null): void
+    public function returnStock(float|int $quantity, ?int $branchId = null): void
     {
         BranchInventory::returnPart($this, $quantity, $branchId);
     }
