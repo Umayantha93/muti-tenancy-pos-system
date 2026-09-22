@@ -182,6 +182,49 @@ class PartBarcodeImportTest extends TestCase
         $this->assertSame('qty', $filter->stock_unit);
     }
 
+    public function test_parts_index_paginates_and_filters_search(): void
+    {
+        $user = $this->owner();
+        Sanctum::actingAs($user);
+        $tag = 'SRCH'.fake()->unique()->numerify('######');
+
+        foreach (range(1, 12) as $i) {
+            $this->postJson('/api/parts', [
+                'name' => $tag.' Item '.$i,
+                'brand' => 'Generic',
+                'type' => 'General',
+                'price' => 100,
+                'cost_price' => 50,
+                'stock_qty' => 1,
+            ])->assertCreated();
+        }
+
+        $this->postJson('/api/parts', [
+            'name' => $tag.' WURTH HYBRID BLADE',
+            'brand' => 'WURTH',
+            'type' => 'Wiper',
+            'model' => '450MM',
+            'price' => 2500,
+            'cost_price' => 1800,
+            'stock_qty' => 4,
+        ])->assertCreated();
+
+        $page = $this->getJson('/api/parts?search='.urlencode($tag).'&per_page=5')->assertOk();
+        $this->assertSame(13, $page->json('total'));
+        $this->assertSame(3, $page->json('last_page'));
+        $this->assertCount(5, $page->json('data'));
+
+        $pageTwo = $this->getJson('/api/parts?search='.urlencode($tag).'&per_page=5&page=2')->assertOk();
+        $this->assertNotEquals(
+            collect($page->json('data'))->pluck('id')->all(),
+            collect($pageTwo->json('data'))->pluck('id')->all(),
+        );
+
+        $found = $this->getJson('/api/parts?search='.urlencode($tag.' WURTH').'&per_page=10')->assertOk();
+        $this->assertSame(1, $found->json('total'));
+        $this->assertStringContainsString('WURTH', $found->json('data.0.name'));
+    }
+
     /**
      * @param  list<list<string>>  $rows
      */
