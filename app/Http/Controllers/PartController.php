@@ -36,18 +36,24 @@ class PartController extends Controller
         $sort = in_array($request->string('sort')->toString(), $allowedSorts, true) ? $request->string('sort') : 'name';
         $direction = $request->string('direction')->lower()->toString() === 'desc' ? 'desc' : 'asc';
 
+        $term = trim((string) $request->input('search', ''));
+        $like = '%'.addcslashes($term, '%_\\').'%';
+        $perPage = min(max($request->integer('per_page', 20), 1), 100);
+
         $parts = Part::query()
             ->when($request->filled('barcode'), fn ($query) => $query->where('barcode', $request->string('barcode')))
-            ->when($request->filled('search'), fn ($query) => $query->where(fn ($nested) => $nested
-                ->where('name', 'like', '%'.$request->string('search').'%')
-                ->orWhere('sku', 'like', '%'.$request->string('search').'%')
-                ->orWhere('barcode', 'like', '%'.$request->string('search').'%')
-                ->orWhere('brand', 'like', '%'.$request->string('search').'%')
+            ->when($term !== '', fn ($query) => $query->where(fn ($nested) => $nested
+                ->where('name', 'like', $like)
+                ->orWhere('sku', 'like', $like)
+                ->orWhere('barcode', 'like', $like)
+                ->orWhere('brand', 'like', $like)
+                ->orWhere('type', 'like', $like)
+                ->orWhere('model', 'like', $like)
                 ->when(
                     $request->user()?->canAccessFeature('serial_inventory'),
                     fn ($searchQuery) => $searchQuery->orWhereHas(
                         'serials',
-                        fn ($serials) => $serials->where('serial', 'like', '%'.PartSerial::normalize((string) $request->string('search')).'%')
+                        fn ($serials) => $serials->where('serial', 'like', '%'.PartSerial::normalize($term).'%')
                     )
                 )))
             ->when($request->filled('brand'), fn ($query) => $query->where('brand', $request->string('brand')))
@@ -55,7 +61,7 @@ class PartController extends Controller
             ->when($request->filled('model'), fn ($query) => $query->where('model', 'like', '%'.$request->string('model').'%'))
             ->when($request->filled('year'), fn ($query) => $query->where('year', $request->integer('year')))
             ->orderBy($sort, $direction)
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($perPage);
 
         $parts->getCollection()->transform(fn (Part $part) => BranchInventory::overlayPart($part));
 
