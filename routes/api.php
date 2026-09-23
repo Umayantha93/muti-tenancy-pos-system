@@ -36,6 +36,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RetailSaleController;
 use App\Http\Controllers\ServiceAddonController;
+use App\Http\Controllers\DiscountTypeController;
 use App\Http\Controllers\ServiceOpsReportController;
 use App\Http\Controllers\ServiceReminderController;
 use App\Http\Controllers\StockTransferController;
@@ -81,6 +82,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::post('/tenants/{tenant}/activate', [SuperAdminTenantController::class, 'activate']);
         Route::post('/tenants/{tenant}/deactivate', [SuperAdminTenantController::class, 'deactivate']);
         Route::post('/tenants/{tenant}/demo', [SuperAdminTenantController::class, 'grantDemo']);
+        Route::post('/tenants/{tenant}/reset-bill-numbers', [SuperAdminTenantController::class, 'resetBillNumbers']);
         Route::get('/tenants/{tenant}/features', [SuperAdminTenantController::class, 'features']);
         Route::put('/tenants/{tenant}/features', [SuperAdminTenantController::class, 'updateFeatures']);
         Route::get('/tenants/{tenant}/users', [SuperAdminTenantController::class, 'users']);
@@ -150,6 +152,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/bills/{bill}/refunds', [BillRefundController::class, 'index']);
             Route::post('/bills/{bill}/refunds', [BillRefundController::class, 'store']);
             Route::get('/service-addons', [ServiceAddonController::class, 'index']);
+            Route::get('/discount-types', [DiscountTypeController::class, 'index']);
             Route::get('/labor-catalog', [LaborCatalogController::class, 'index']);
         });
 
@@ -292,6 +295,9 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/service-addons', [ServiceAddonController::class, 'store'])->middleware('feature:billing');
             Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update'])->middleware('feature:billing');
             Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy'])->middleware('feature:billing');
+            Route::post('/discount-types', [DiscountTypeController::class, 'store'])->middleware('feature:billing');
+            Route::put('/discount-types/{discount_type}', [DiscountTypeController::class, 'update'])->middleware('feature:billing');
+            Route::delete('/discount-types/{discount_type}', [DiscountTypeController::class, 'destroy'])->middleware('feature:billing');
             Route::post('/labor-categories', [LaborCatalogController::class, 'storeCategory'])->middleware('feature:billing');
             Route::put('/labor-categories/{labor_category}', [LaborCatalogController::class, 'updateCategory'])->middleware('feature:billing');
             Route::delete('/labor-categories/{labor_category}', [LaborCatalogController::class, 'destroyCategory'])->middleware('feature:billing');

@@ -135,9 +135,11 @@ class JobBookingController extends Controller
             $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE));
             $jobKind = BusinessTypes::defaultJobKind($request->user(), $type);
             $prefix = BusinessTypes::billPrefix($type);
+            $billNumber = $request->user()->tenant?->claimNextBillNumber()
+                ?? ($prefix.'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)));
 
             $bill = Bill::create([
-                'bill_number' => $prefix.'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'bill_number' => $billNumber,
                 'vehicle_id' => $vehicle->id,
                 'customer_id' => $customer->id,
                 'admission_date' => today(),
