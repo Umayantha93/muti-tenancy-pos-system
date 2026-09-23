@@ -46,21 +46,52 @@ class InstantBillTest extends TestCase
             'description' => 'Filter fitment',
             'quantity' => 1,
             'unit_price' => 1500,
-        ])->assertStatus(422);
+        ])->assertCreated();
 
         $this->postJson('/api/bills/'.$bill['id'].'/items', [
             'type' => 'discount',
             'description' => 'Walk-in discount',
             'quantity' => 1,
             'unit_price' => 200,
-        ])->assertStatus(422);
+        ])->assertCreated();
 
         $fresh = $this->getJson('/api/bills/'.$bill['id'])->assertOk()->json();
-        $this->assertCount(1, $fresh['items']);
+        $this->assertCount(3, $fresh['items']);
         $this->assertNull($fresh['vehicle']);
         $this->assertSame(4, $part->fresh()->stock_qty);
-        $this->assertEquals(3200, (float) $fresh['subtotal']);
+        $this->assertEquals(4500, (float) $fresh['subtotal']);
+        $this->assertEquals(200, (float) $fresh['total_deductions']);
         $this->assertSame(0, Expense::query()->count());
+    }
+
+    public function test_garage_instant_checkout_accepts_custom_lines(): void
+    {
+        [, $owner] = $this->garageTenant();
+        Sanctum::actingAs($owner);
+        BranchContext::clear();
+
+        $part = Part::create([
+            'name' => 'Brake pad', 'brand' => 'Bosch', 'type' => 'brake',
+            'price' => 4500, 'cost_price' => 2800, 'stock_qty' => 8,
+        ]);
+
+        $bill = $this->postJson('/api/bills/instant', [
+            'customer_name' => 'Counter',
+            'items' => [
+                ['part_id' => $part->id, 'quantity' => 1],
+                ['type' => 'labor', 'description' => 'Used grease', 'unit_price' => 300, 'quantity' => 2],
+            ],
+            'payment_method' => 'cash',
+            'payment_amount' => 5100,
+        ])->assertCreated()->json();
+
+        $this->assertCount(2, $bill['items']);
+        $this->assertEquals(5100, (float) $bill['subtotal']);
+        $this->assertEquals(0, (float) $bill['balance_due']);
+        $this->assertSame(7, $part->fresh()->stock_qty);
+        $custom = collect($bill['items'])->firstWhere('type', 'labor');
+        $this->assertSame('Used grease', $custom['description']);
+        $this->assertEquals(600, (float) $custom['line_total']);
     }
 
     public function test_garage_instant_checkout_sells_inventory_in_one_step(): void
