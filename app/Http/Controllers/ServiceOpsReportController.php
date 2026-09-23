@@ -34,15 +34,23 @@ class ServiceOpsReportController extends Controller
             ->pluck('id');
 
         $lines = BillItem::query()
-            ->with(['serviceAddon' => fn ($query) => $query->withoutGlobalScopes()])
+            ->with(['serviceAddon' => fn ($query) => $query->withoutGlobalScopes()->with('vehicleClass:id,name')])
             ->whereIn('bill_id', $billIds)
             ->where('type', 'service_addon')
             ->whereNotNull('service_addon_id')
             ->get();
 
-        $catalog = ServiceAddon::query()->with('inclusions')->orderBy('sort_order')->orderBy('name')->get();
+        $catalog = ServiceAddon::query()
+            ->with(['inclusions', 'vehicleClass:id,name'])
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get();
         $byId = $catalog->keyBy('id');
-        $byName = $catalog->mapWithKeys(fn (ServiceAddon $addon) => [mb_strtolower($addon->name) => $addon->id]);
+        $byName = $catalog->mapWithKeys(function (ServiceAddon $addon) {
+            $classKey = $addon->service_vehicle_class_id ? ':'.$addon->service_vehicle_class_id : '';
+
+            return [mb_strtolower($addon->name).$classKey => $addon->id];
+        });
 
         $sold = [];
         $inside = [];
@@ -67,8 +75,9 @@ class ServiceOpsReportController extends Controller
             if ($names->isEmpty()) {
                 continue;
             }
+            $classKey = $addon?->service_vehicle_class_id ? ':'.$addon->service_vehicle_class_id : '';
             foreach ($names as $name) {
-                $includedId = $byName[mb_strtolower(trim((string) $name))] ?? null;
+                $includedId = $byName[mb_strtolower(trim((string) $name)).$classKey] ?? null;
                 if (! $includedId || $includedId === $addonId) {
                     continue;
                 }
@@ -83,10 +92,16 @@ class ServiceOpsReportController extends Controller
             $revenue = round($sold[$id]['revenue'] ?? 0, 2);
             $insideQty = round($inside[$id] ?? 0, 2);
             $isFull = (bool) ($addon?->is_full_service);
+            $className = $addon?->vehicleClass?->name;
+            $label = $addon?->name ?? 'Service';
+            if ($className) {
+                $label .= ' · '.$className;
+            }
 
             return [
                 'service_addon_id' => $id,
-                'name' => $addon?->name ?? 'Service',
+                'name' => $label,
+                'vehicle_class' => $className,
                 'is_full_service' => $isFull,
                 'sold_qty' => $qty,
                 'inside_full_service' => $isFull ? null : $insideQty,

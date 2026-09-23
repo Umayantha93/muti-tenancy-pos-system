@@ -34,6 +34,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'warranty_until',
     'status',
     'job_kind',
+    'service_vehicle_class_id',
     'floor_status',
     'hide_amounts',
     'owe_in_due_date',
@@ -150,6 +151,11 @@ class Bill extends Model
     public function vehicle(): BelongsTo
     {
         return $this->belongsTo(Vehicle::class);
+    }
+
+    public function serviceVehicleClass(): BelongsTo
+    {
+        return $this->belongsTo(ServiceVehicleClass::class, 'service_vehicle_class_id');
     }
 
     public function source(): MorphTo

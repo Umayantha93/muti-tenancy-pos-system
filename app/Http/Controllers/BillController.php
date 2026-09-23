@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class BillController extends Controller
 {
@@ -188,10 +189,27 @@ class BillController extends Controller
             'payment_method' => ['nullable', 'string', 'max:50'],
             'payment_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['nullable', 'array'],
-            'items.*.part_id' => ['required', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.part_id' => ['nullable', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'items.*.quantity' => ['required', 'numeric', 'gt:0'],
+            'items.*.type' => ['nullable', Rule::in(['part', 'labor'])],
+            'items.*.description' => ['nullable', 'string', 'max:255'],
+            'items.*.unit_price' => ['nullable', 'numeric', 'min:0'],
             ...($isGarage ? [] : $this->employeeIdsRules($request)),
         ]);
+
+        foreach ($data['items'] ?? [] as $index => $line) {
+            $lineType = $line['type'] ?? (! empty($line['part_id']) ? 'part' : 'labor');
+            if ($lineType === 'part' && empty($line['part_id'])) {
+                throw ValidationException::withMessages([
+                    "items.$index.part_id" => ['Pick a stocked inventory item.'],
+                ]);
+            }
+            if ($lineType === 'labor' && (blank($line['description'] ?? null) || ! isset($line['unit_price']))) {
+                throw ValidationException::withMessages([
+                    "items.$index.description" => ['Enter a description and amount for the custom item.'],
+                ]);
+            }
+        }
 
         $bill = DB::transaction(function () use ($data, $request, $calculator, $isGarage) {
             $customer = Customer::resolveFromIntake(
@@ -218,19 +236,34 @@ class BillController extends Controller
             }
 
             foreach ($data['items'] ?? [] as $line) {
-                $part = Part::lockForUpdate()->findOrFail($line['part_id']);
-                $qty = (int) $line['quantity'];
-                $part->takeStock($qty);
-                $unitPrice = (float) $part->price;
+                $lineType = $line['type'] ?? (! empty($line['part_id']) ? 'part' : 'labor');
+                $qty = (float) $line['quantity'];
+
+                if ($lineType === 'part') {
+                    $part = Part::lockForUpdate()->findOrFail($line['part_id']);
+                    $part->takeStock($qty);
+                    $unitPrice = (float) $part->price;
+                    BillItem::create([
+                        'bill_id' => $bill->id,
+                        'type' => 'part',
+                        'part_id' => $part->id,
+                        'description' => $part->name,
+                        'quantity' => $qty,
+                        'unit_price' => $unitPrice,
+                        'line_total' => round($unitPrice * $qty, 2),
+                        'purchase_unit_cost' => $part->cost_price,
+                    ]);
+                    continue;
+                }
+
+                $unitPrice = (float) $line['unit_price'];
                 BillItem::create([
                     'bill_id' => $bill->id,
-                    'type' => 'part',
-                    'part_id' => $part->id,
-                    'description' => $part->name,
+                    'type' => 'labor',
+                    'description' => trim((string) $line['description']),
                     'quantity' => $qty,
                     'unit_price' => $unitPrice,
                     'line_total' => round($unitPrice * $qty, 2),
-                    'purchase_unit_cost' => $part->cost_price,
                 ]);
             }
 
@@ -336,6 +369,7 @@ class BillController extends Controller
         return $this->moneyJson($bill->load([
             'customer',
             'vehicle',
+            'serviceVehicleClass:id,name',
             'items.part',
             'payments.receiver',
             'refunds.items.billItem',
@@ -358,6 +392,11 @@ class BillController extends Controller
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_due_on' => ['nullable', 'date'],
             'hide_amounts' => ['sometimes', 'boolean'],
+            'service_vehicle_class_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('service_vehicle_classes', 'id')->where('tenant_id', $request->user()->tenant_id),
+            ],
             ...$this->employeeIdsRules($request),
         ]);
 
