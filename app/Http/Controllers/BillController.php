@@ -201,7 +201,8 @@ class BillController extends Controller
             );
 
             $bill = Bill::create([
-                'bill_number' => 'INST-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'bill_number' => $request->user()->tenant?->claimNextBillNumber()
+                    ?? ('INST-'.now()->format('Ymd').'-'.strtoupper(str()->random(6))),
                 'vehicle_id' => null,
                 'customer_id' => $customer->id,
                 'admission_date' => $data['admission_date'] ?? today(),
@@ -518,8 +519,14 @@ class BillController extends Controller
             ? 'REP'
             : BusinessTypes::billPrefix($type);
 
+        $tenant = $request->user()->tenant;
+        $billNumber = $tenant?->claimNextBillNumber();
+        if (! $billNumber) {
+            $billNumber = $prefix.'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6));
+        }
+
         $bill = Bill::create([
-            'bill_number' => $prefix.'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+            'bill_number' => $billNumber,
             'vehicle_id' => $vehicleId,
             'customer_id' => $customerId,
             'admission_date' => $data['admission_date'] ?? today(),

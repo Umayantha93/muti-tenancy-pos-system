@@ -416,6 +416,25 @@ class SuperAdminTenantController extends Controller
         return $this->setupFeePayments($tenant);
     }
 
+    public function resetBillNumbers(Request $request, Tenant $tenant): JsonResponse
+    {
+        $data = $request->validate([
+            'bill_sequence' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        $tenant->update([
+            'bill_number_locked_at' => null,
+            'bill_sequence' => (int) ($data['bill_sequence'] ?? 0),
+        ]);
+
+        $this->audit($request, 'tenant.bill_numbers_reset', $tenant, [
+            'bill_prefix' => $tenant->bill_prefix,
+            'bill_sequence' => $tenant->bill_sequence,
+        ]);
+
+        return response()->json($tenant->refresh()->loadSum('setupFeePayments', 'amount')->withSetupFeeTotals()->makeVisible(['dual_financial_view_enabled']));
+    }
+
     public function updateDualFinancialView(Request $request, Tenant $tenant): JsonResponse
     {
         $data = $request->validate([
