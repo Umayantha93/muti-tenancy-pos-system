@@ -6,10 +6,12 @@ use App\Models\Concerns\BelongsToTenant;
 use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Validation\ValidationException;
 
 #[Fillable([
+    'service_vehicle_class_id',
     'name',
     'price',
     'sort_order',
@@ -45,15 +47,35 @@ class ServiceAddon extends Model
             return;
         }
 
-        $catalog = $businessType === BusinessTypes::PAINT
-            ? static::paintCatalog()
-            : static::defaultCatalog();
+        if ($businessType === BusinessTypes::PAINT) {
+            foreach (static::paintCatalog() as $row) {
+                $addon = new static;
+                $addon->forceFill([
+                    'tenant_id' => $tenantId,
+                    'service_vehicle_class_id' => null,
+                    'name' => $row['name'],
+                    'price' => $row['price'],
+                    'sort_order' => $row['sort_order'],
+                    'is_full_service' => $row['is_full_service'] ?? false,
+                    'active' => true,
+                ])->save();
+            }
+
+            return;
+        }
+
+        ServiceVehicleClass::ensureDefaultsFor($tenantId, $businessType ?? BusinessTypes::GARAGE);
+        $car = ServiceVehicleClass::withoutGlobalScopes()
+            ->where('tenant_id', $tenantId)
+            ->where('name', 'Car')
+            ->first();
 
         $created = [];
-        foreach ($catalog as $row) {
+        foreach (static::defaultCatalog() as $row) {
             $addon = new static;
             $addon->forceFill([
                 'tenant_id' => $tenantId,
+                'service_vehicle_class_id' => $car?->id,
                 'name' => $row['name'],
                 'price' => $row['price'],
                 'sort_order' => $row['sort_order'],
@@ -61,10 +83,6 @@ class ServiceAddon extends Model
                 'active' => true,
             ])->save();
             $created[$row['name']] = $addon;
-        }
-
-        if ($businessType === BusinessTypes::PAINT) {
-            return;
         }
 
         $full = $created['Full service'] ?? null;
@@ -137,6 +155,11 @@ class ServiceAddon extends Model
             'is_full_service' => 'boolean',
             'active' => 'boolean',
         ];
+    }
+
+    public function vehicleClass(): BelongsTo
+    {
+        return $this->belongsTo(ServiceVehicleClass::class, 'service_vehicle_class_id');
     }
 
     public function inclusions(): BelongsToMany
