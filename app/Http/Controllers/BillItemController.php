@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bill;
 use App\Models\BillItem;
+use App\Models\DiscountType;
 use App\Models\Expense;
 use App\Models\LaborItem;
 use App\Models\Part;
@@ -40,7 +41,9 @@ class BillItemController extends Controller
             'unit_price' => ['nullable', 'numeric', 'min:0'],
             'purchase_unit_cost' => ['nullable', 'numeric', 'min:0'],
             'service_addon_id' => ['nullable', Rule::exists('service_addons', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'discount_type_id' => ['nullable', Rule::exists('discount_types', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
             'warranty_starts_on' => ['nullable', 'date'],
             'warranty_until' => ['nullable', 'date'],
@@ -69,6 +72,13 @@ class BillItemController extends Controller
 
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id);
         $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
+        if (($data['type'] ?? '') === 'discount' || ! empty($data['discount_type_id'])) {
+            $chargeSubtotal = (float) $bill->items()
+                ->get()
+                ->filter(fn (BillItem $item) => in_array(BusinessTypes::billItemKind($item->type), ['charge', 'stock'], true))
+                ->sum(fn (BillItem $item) => (float) $item->line_total);
+            $data = DiscountType::applyToItemPayload($data, (int) $request->user()->tenant_id, $chargeSubtotal);
+        }
         $this->assertLineReady($data, $typeMeta);
 
         $item = DB::transaction(function () use ($data, $bill, $calculator, $request) {
@@ -309,6 +319,15 @@ class BillItemController extends Controller
             ? 0.0
             : (float) ($data['unit_price'] ?? $part?->price ?? 0);
 
+        $discountPercent = null;
+        if ($kind === 'stock' && isset($data['discount_percent']) && $data['discount_percent'] !== null && $data['discount_percent'] !== '') {
+            $discountPercent = max(0, min(100, (float) $data['discount_percent']));
+        }
+        $lineTotal = round($unitPrice * $quantity, 2);
+        if ($discountPercent !== null && $discountPercent > 0) {
+            $lineTotal = round($lineTotal * (1 - ($discountPercent / 100)), 2);
+        }
+
         $purchaseUnitCost = $part
             ? (float) $part->cost_price
             : (isset($data['purchase_unit_cost']) && $data['purchase_unit_cost'] !== null
@@ -339,9 +358,10 @@ class BillItemController extends Controller
             'included_services' => $data['included_services'] ?? null,
             'quantity' => $quantity,
             'unit_price' => $unitPrice,
+            'discount_percent' => $discountPercent,
             'purchase_unit_cost' => $purchaseUnitCost,
             'purchase_expense_id' => $expense?->id,
-            'line_total' => round($unitPrice * $quantity, 2),
+            'line_total' => $lineTotal,
             ...($request->user()->canAccessFeature('warranties')
                 ? WarrantyPeriod::resolve(
                     $data['warranty_starts_on'] ?? null,

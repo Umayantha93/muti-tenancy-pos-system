@@ -34,12 +34,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'plan_amount',
     'setup_fee_amount',
     'logo',
+    'bill_prefix',
+    'bill_sequence',
+    'bill_number_locked_at',
 ])]
 class Tenant extends Model
 {
     use SoftDeletes;
 
-    protected $appends = ['logo_url', 'payment_due_soon', 'demo_days_left', 'is_demo'];
+    protected $appends = ['logo_url', 'payment_due_soon', 'demo_days_left', 'is_demo', 'bill_number_locked', 'next_bill_number'];
 
     protected $hidden = ['dual_financial_view_enabled'];
 
@@ -56,6 +59,8 @@ class Tenant extends Model
             'vat_rate' => 'decimal:2',
             'sscl_rate' => 'decimal:2',
             'demo_ends_at' => 'datetime',
+            'bill_number_locked_at' => 'datetime',
+            'bill_sequence' => 'integer',
         ];
     }
 
@@ -142,6 +147,66 @@ class Tenant extends Model
     protected function logoUrl(): Attribute
     {
         return Attribute::get(fn () => $this->logo ? 'storage/'.$this->logo : null);
+    }
+
+    protected function billNumberLocked(): Attribute
+    {
+        return Attribute::get(fn () => $this->bill_number_locked_at !== null);
+    }
+
+    protected function nextBillNumber(): Attribute
+    {
+        return Attribute::get(function () {
+            $prefix = $this->normalizedBillPrefix();
+            if ($prefix === null) {
+                return null;
+            }
+
+            return $this->formatBillNumber($prefix, ((int) $this->bill_sequence) + 1);
+        });
+    }
+
+    public function usesLockedBillNumbers(): bool
+    {
+        return $this->bill_number_locked_at !== null && $this->normalizedBillPrefix() !== null;
+    }
+
+    public function normalizedBillPrefix(): ?string
+    {
+        $prefix = strtoupper(preg_replace('/[^A-Z0-9]/i', '', (string) $this->bill_prefix) ?? '');
+
+        return $prefix !== '' ? substr($prefix, 0, 12) : null;
+    }
+
+    public function formatBillNumber(string $prefix, int $sequence): string
+    {
+        return $prefix.'-'.str_pad((string) max(1, $sequence), 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Atomically claim the next short bill number for this tenant.
+     */
+    public function claimNextBillNumber(): ?string
+    {
+        if (! $this->usesLockedBillNumbers()) {
+            return null;
+        }
+
+        return \Illuminate\Support\Facades\DB::transaction(function () {
+            $tenant = static::query()->whereKey($this->id)->lockForUpdate()->first();
+            if (! $tenant || ! $tenant->usesLockedBillNumbers()) {
+                return null;
+            }
+            $prefix = $tenant->normalizedBillPrefix();
+            if ($prefix === null) {
+                return null;
+            }
+            $next = ((int) $tenant->bill_sequence) + 1;
+            $tenant->update(['bill_sequence' => $next]);
+            $this->bill_sequence = $next;
+
+            return $tenant->formatBillNumber($prefix, $next);
+        });
     }
 
     protected function paymentDueSoon(): Attribute
