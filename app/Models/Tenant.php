@@ -180,7 +180,9 @@ class Tenant extends Model
 
     public function formatBillNumber(string $prefix, int $sequence): string
     {
-        return $prefix.'-'.str_pad((string) max(1, $sequence), 4, '0', STR_PAD_LEFT);
+        $shop = str_pad((string) max(1, (int) $this->id), 2, '0', STR_PAD_LEFT);
+
+        return $prefix.'-'.$shop.'-'.str_pad((string) max(1, $sequence), 4, '0', STR_PAD_LEFT);
     }
 
     /**

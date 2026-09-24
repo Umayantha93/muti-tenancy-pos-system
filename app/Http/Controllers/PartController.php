@@ -556,11 +556,20 @@ class PartController extends Controller
         if ($request->input('supplier_id') === '' || $request->input('supplier_id') === '0') {
             $request->merge(['supplier_id' => null]);
         }
+        if ($request->boolean('is_free')) {
+            $request->merge([
+                'unit_cost' => 0,
+                'payment_status' => 'paid',
+                'due_date' => null,
+            ]);
+        }
 
         $data = $request->validate([
             'quantity' => ['nullable', 'numeric', 'gt:0', 'required_without:serials'],
             'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'unit_cost' => ['nullable', 'numeric', 'min:0'],
+            'price' => ['nullable', 'numeric', 'min:0'],
+            'is_free' => ['sometimes', 'boolean'],
             'expense_date' => ['nullable', 'date'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
             'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
@@ -568,6 +577,100 @@ class PartController extends Controller
             'serials' => ['nullable', 'array'],
             'serials.*' => ['string', 'max:40'],
         ]);
+
+        [$part, $expense] = DB::transaction(function () use ($data, $part, $request) {
+            return $this->applyRestock($request, $part, $data);
+        });
+
+        return response()->json(['part' => BranchInventory::overlayPart($part), 'expense' => $expense]);
+    }
+
+    public function restockBulk(Request $request): JsonResponse
+    {
+        $request->merge([
+            'items' => collect($request->input('items', []))->map(function ($row) {
+                if (! is_array($row)) {
+                    return $row;
+                }
+                if (($row['due_date'] ?? null) === '') {
+                    $row['due_date'] = null;
+                }
+                if (($row['supplier_id'] ?? null) === '' || ($row['supplier_id'] ?? null) === '0') {
+                    $row['supplier_id'] = null;
+                }
+                $isFree = filter_var($row['is_free'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                if ($isFree) {
+                    $row['is_free'] = true;
+                    $row['unit_cost'] = 0;
+                    $row['payment_status'] = 'paid';
+                    $row['due_date'] = null;
+                }
+
+                return $row;
+            })->all(),
+        ]);
+
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.part_id' => ['required', 'integer', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'items.*.quantity' => ['nullable', 'numeric', 'gt:0'],
+            'items.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
+            'items.*.price' => ['nullable', 'numeric', 'min:0'],
+            'items.*.is_free' => ['sometimes', 'boolean'],
+            'items.*.expense_date' => ['nullable', 'date'],
+            'items.*.payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
+            'items.*.due_date' => ['nullable', 'date', 'after_or_equal:today'],
+            'items.*.supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'items.*.serials' => ['nullable', 'array'],
+            'items.*.serials.*' => ['string', 'max:40'],
+        ]);
+
+        $results = DB::transaction(function () use ($data, $request) {
+            $rows = [];
+            foreach ($data['items'] as $index => $line) {
+                try {
+                    $isFree = (bool) ($line['is_free'] ?? false);
+                    if (! $isFree && ($line['payment_status'] ?? 'paid') === 'credit' && empty($line['due_date'])) {
+                        throw ValidationException::withMessages([
+                            'due_date' => ['A due date is required for credit purchases.'],
+                        ]);
+                    }
+                    $part = Part::query()->findOrFail($line['part_id']);
+                    [$part, $expense] = $this->applyRestock($request, $part, $line);
+                    $rows[] = [
+                        'part' => BranchInventory::overlayPart($part),
+                        'expense' => $expense,
+                    ];
+                } catch (ValidationException $exception) {
+                    $prefixed = [];
+                    foreach ($exception->errors() as $field => $messages) {
+                        $prefixed["items.$index.$field"] = $messages;
+                    }
+                    throw ValidationException::withMessages($prefixed);
+                }
+            }
+
+            return $rows;
+        });
+
+        return response()->json([
+            'restocked' => count($results),
+            'items' => $results,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{0: Part, 1: ?Expense}
+     */
+    private function applyRestock(Request $request, Part $part, array $data): array
+    {
+        $isFree = (bool) ($data['is_free'] ?? false);
+        if ($isFree) {
+            $data['unit_cost'] = 0;
+            $data['payment_status'] = 'paid';
+            $data['due_date'] = null;
+        }
 
         $serials = PartSerials::enabled()
             ? array_values(array_filter($data['serials'] ?? [], fn ($code) => trim((string) $code) !== ''))
@@ -584,42 +687,42 @@ class PartController extends Controller
             throw ValidationException::withMessages(['quantity' => ['Enter how many units to add.']]);
         }
 
-        [$part, $expense] = DB::transaction(function () use ($data, $part, $request, $serials) {
-            $qty = (float) $data['quantity'];
-            $businessType = $request->user()?->tenant?->business_type;
-            $partUnit = StockUnit::normalize($part->stock_unit, $businessType);
-            if (! StockUnit::allowsDecimal($partUnit, $businessType) && ! StockUnit::isWhole($qty)) {
-                throw ValidationException::withMessages(['quantity' => ['ITEM stock must be a whole number.']]);
-            }
-            $unitCost = (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
-            $shopQty = BranchInventory::partQty($part->id);
-            $blendedCost = InventoryCosting::weightedAverageCost(
-                $shopQty,
-                $part->cost_price,
-                $qty,
-                $unitCost,
-            );
-            BranchInventory::addPart($part, $qty);
-            $part->refresh();
-            $part->update(['cost_price' => $blendedCost]);
-            if ($serials !== []) {
-                PartSerials::receive($part, $serials);
-            }
-            $expense = $this->recordPurchaseExpense(
-                $request,
-                $part->refresh(),
-                $qty,
-                $unitCost,
-                $data['expense_date'] ?? null,
-                $data['payment_status'] ?? 'paid',
-                $data['due_date'] ?? null,
-                $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
-            );
+        $qty = (float) $data['quantity'];
+        $businessType = $request->user()?->tenant?->business_type;
+        $partUnit = StockUnit::normalize($part->stock_unit, $businessType);
+        if (! StockUnit::allowsDecimal($partUnit, $businessType) && ! StockUnit::isWhole($qty)) {
+            throw ValidationException::withMessages(['quantity' => ['ITEM stock must be a whole number.']]);
+        }
+        $unitCost = $isFree ? 0.0 : (float) ($data['unit_cost'] ?? $part->cost_price ?? 0);
+        $shopQty = BranchInventory::partQty($part->id);
+        $blendedCost = InventoryCosting::weightedAverageCost(
+            $shopQty,
+            $part->cost_price,
+            $qty,
+            $unitCost,
+        );
+        BranchInventory::addPart($part, $qty);
+        $part->refresh();
+        $updates = ['cost_price' => $blendedCost];
+        if (array_key_exists('price', $data) && $data['price'] !== null && $data['price'] !== '') {
+            $updates['price'] = round((float) $data['price'], 2);
+        }
+        $part->update($updates);
+        if ($serials !== []) {
+            PartSerials::receive($part, $serials);
+        }
+        $expense = $this->recordPurchaseExpense(
+            $request,
+            $part->refresh(),
+            $qty,
+            $unitCost,
+            $data['expense_date'] ?? null,
+            $data['payment_status'] ?? 'paid',
+            $data['due_date'] ?? null,
+            $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
+        );
 
-            return [$part->refresh(), $expense];
-        });
-
-        return response()->json(['part' => BranchInventory::overlayPart($part), 'expense' => $expense]);
+        return [$part->refresh(), $expense];
     }
 
     private function validated(Request $request, ?Part $part = null): array
