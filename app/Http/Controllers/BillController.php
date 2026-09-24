@@ -71,6 +71,7 @@ class BillController extends Controller
             'customer_name' => ['nullable', 'string', 'max:255'],
             'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'customer_address' => ['nullable', 'string', 'max:255'],
+            ...$this->driverRules(),
             'number_plate' => ['required', 'string', 'max:30'],
             'chassis_number' => ['nullable', 'string', 'max:100'],
             'make' => ['nullable', 'string', 'max:100'],
@@ -149,6 +150,7 @@ class BillController extends Controller
     {
         $data = $request->validate([
             'vehicle_id' => ['required', Rule::exists('vehicles', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            ...$this->driverRules(),
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
@@ -387,6 +389,7 @@ class BillController extends Controller
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
+            ...$this->driverRules(),
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
@@ -411,7 +414,7 @@ class BillController extends Controller
             }
         }
 
-        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts'])->isEmpty();
+        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts', 'driver_name', 'driver_phone'])->isEmpty();
         if ($bill->isClosed()) {
             abort(422, 'Closed bills cannot be edited.');
         }
@@ -568,6 +571,8 @@ class BillController extends Controller
             'bill_number' => $billNumber,
             'vehicle_id' => $vehicleId,
             'customer_id' => $customerId,
+            'driver_name' => $data['driver_name'] ?? null,
+            'driver_phone' => $data['driver_phone'] ?? null,
             'admission_date' => $data['admission_date'] ?? today(),
             'odometer' => $data['odometer'] ?? null,
             'mileage' => $data['mileage'] ?? null,
@@ -585,6 +590,17 @@ class BillController extends Controller
         $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
 
         return $bill->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    private function driverRules(): array
+    {
+        return [
+            'driver_name' => ['nullable', 'string', 'max:255'],
+            'driver_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
+        ];
     }
 
     /**
