@@ -582,6 +582,8 @@ return [
         'pick_vehicle_type' => 'Choose a vehicle type to see services.',
         'custom_item' => 'Custom',
         'custom_item_placeholder' => 'e.g. Used grease',
+        'custom_service_hint' => 'One-off charge — not from the service list. Enter a name and amount.',
+        'custom_service_required' => 'Enter a description and amount for the custom service.',
         'bought_outside' => 'Bought outside',
         'customer_supplied' => 'Customer supplied',
         'search_scan' => 'Search / scan barcode',
