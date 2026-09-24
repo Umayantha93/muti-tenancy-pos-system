@@ -40,6 +40,7 @@ use App\Http\Controllers\DiscountTypeController;
 use App\Http\Controllers\ServiceVehicleClassController;
 use App\Http\Controllers\ServiceOpsReportController;
 use App\Http\Controllers\ServiceReminderController;
+use App\Http\Controllers\StockReceiptController;
 use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
@@ -200,6 +201,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::middleware('feature:parts_inventory')->group(function () {
             Route::get('/parts', [PartController::class, 'index']);
             Route::post('/parts/restock/bulk', [PartController::class, 'restockBulk']);
+            Route::get('/stock-receipts', [StockReceiptController::class, 'index']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
             Route::post('/parts/{part}/ensure-barcode', [PartController::class, 'ensureBarcode']);

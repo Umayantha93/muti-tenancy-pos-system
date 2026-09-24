@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['supplier_id', 'expense_id', 'receipt_number', 'received_at', 'payment_status', 'due_date', 'branch_id'])]
+#[Fillable(['supplier_id', 'expense_id', 'receipt_number', 'invoice_number', 'received_at', 'payment_status', 'due_date', 'branch_id'])]
 class StockReceipt extends Model
 {
     use BelongsToTenant, StampsBranch;

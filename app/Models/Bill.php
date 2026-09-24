@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'share_token',
     'vehicle_id',
     'customer_id',
+    'driver_name',
+    'driver_phone',
     'admission_date',
     'odometer',
     'mileage',
