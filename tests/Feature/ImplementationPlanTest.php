@@ -213,13 +213,16 @@ class ImplementationPlanTest extends TestCase
         ]);
 
         $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'INV-7781',
+            'payment_status' => 'paid',
             'items' => [
-                ['part_id' => $filter->id, 'quantity' => 3, 'unit_cost' => 1200, 'price' => 3500, 'payment_status' => 'paid'],
-                ['part_id' => $pad->id, 'quantity' => 4, 'unit_cost' => 4500, 'price' => 9000, 'payment_status' => 'paid'],
+                ['part_id' => $filter->id, 'quantity' => 3, 'unit_cost' => 1200, 'price' => 3500],
+                ['part_id' => $pad->id, 'quantity' => 4, 'unit_cost' => 4500, 'price' => 9000],
             ],
         ])
             ->assertOk()
-            ->assertJsonPath('restocked', 2);
+            ->assertJsonPath('restocked', 2)
+            ->assertJsonPath('receipt.invoice_number', 'INV-7781');
 
         $this->assertSame(8, $filter->fresh()->stock_qty);
         $this->assertEquals(1075.0, (float) $filter->fresh()->cost_price);
@@ -227,7 +230,46 @@ class ImplementationPlanTest extends TestCase
         $this->assertSame(6, $pad->fresh()->stock_qty);
         $this->assertEquals(4333.33, (float) $pad->fresh()->cost_price);
         $this->assertEquals(9000.0, (float) $pad->fresh()->price);
-        $this->assertSame(2, Expense::query()->count());
+        $this->assertSame(1, Expense::query()->count());
+        $this->assertEquals(21600.0, (float) Expense::query()->first()->amount);
+        $this->assertSame(1, StockReceipt::query()->count());
+        $this->assertSame(2, StockReceipt::query()->first()->items()->count());
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'items' => [['part_id' => $filter->id, 'quantity' => 1, 'unit_cost' => 1200]],
+        ])->assertOk();
+
+        $this->getJson('/api/stock-receipts')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.invoice_number', 'INV-7781')
+            ->assertJsonCount(2, 'data.0.items');
+    }
+
+    public function test_bulk_restock_on_credit_requires_one_due_date_for_the_sheet(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Wiper Blade', 'brand' => 'Bosch', 'type' => 'wiper',
+            'price' => 2500, 'cost_price' => 1200, 'stock_qty' => 3,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'credit',
+            'items' => [['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 1200]],
+        ])->assertStatus(422)->assertJsonValidationErrors('due_date');
+        $this->assertSame(3, $part->fresh()->stock_qty);
+
+        $due = now()->addDays(14)->toDateString();
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'credit',
+            'due_date' => $due,
+            'items' => [['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 1200]],
+        ])->assertOk();
+
+        $expense = Expense::query()->firstOrFail();
+        $this->assertSame(Expense::STATUS_CREDIT, $expense->payment_status);
+        $this->assertSame($due, $expense->due_date?->toDateString());
     }
 
     public function test_bulk_restock_rolls_back_when_a_row_is_invalid(): void
@@ -240,8 +282,8 @@ class ImplementationPlanTest extends TestCase
 
         $this->postJson('/api/parts/restock/bulk', [
             'items' => [
-                ['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 400, 'payment_status' => 'paid'],
-                ['part_id' => $part->id, 'quantity' => 0, 'unit_cost' => 400, 'payment_status' => 'paid'],
+                ['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 400],
+                ['part_id' => $part->id, 'quantity' => 0, 'unit_cost' => 400],
             ],
         ])->assertStatus(422);
 
@@ -262,14 +304,15 @@ class ImplementationPlanTest extends TestCase
         ]);
 
         $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
             'items' => [
-                ['part_id' => $paid->id, 'quantity' => 5, 'unit_cost' => 1100, 'payment_status' => 'paid'],
+                ['part_id' => $paid->id, 'quantity' => 5, 'unit_cost' => 1100],
                 [
                     'part_id' => $gift->id,
                     'quantity' => 3,
                     'is_free' => true,
+                    'unit_cost' => 999,
                     'price' => 600,
-                    'payment_status' => 'credit',
                 ],
             ],
         ])
@@ -278,6 +321,7 @@ class ImplementationPlanTest extends TestCase
 
         $this->assertSame(15, $paid->fresh()->stock_qty);
         $this->assertSame(1, Expense::query()->count());
+        $this->assertEquals(5500.0, (float) Expense::query()->first()->amount);
         $this->assertSame(7, $gift->fresh()->stock_qty);
         // (4×200 + 3×0) / 7 ≈ 114.29
         $this->assertEquals(114.29, (float) $gift->fresh()->cost_price);

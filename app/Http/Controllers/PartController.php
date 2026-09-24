@@ -587,60 +587,56 @@ class PartController extends Controller
 
     public function restockBulk(Request $request): JsonResponse
     {
+        foreach (['due_date', 'invoice_number', 'received_at'] as $field) {
+            if (trim((string) $request->input($field, '')) === '') {
+                $request->merge([$field => null]);
+            }
+        }
+        if ($request->input('supplier_id') === '' || $request->input('supplier_id') === '0') {
+            $request->merge(['supplier_id' => null]);
+        }
         $request->merge([
             'items' => collect($request->input('items', []))->map(function ($row) {
                 if (! is_array($row)) {
                     return $row;
                 }
-                if (($row['due_date'] ?? null) === '') {
-                    $row['due_date'] = null;
-                }
-                if (($row['supplier_id'] ?? null) === '' || ($row['supplier_id'] ?? null) === '0') {
-                    $row['supplier_id'] = null;
-                }
-                $isFree = filter_var($row['is_free'] ?? false, FILTER_VALIDATE_BOOLEAN);
-                if ($isFree) {
+                if (filter_var($row['is_free'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
                     $row['is_free'] = true;
                     $row['unit_cost'] = 0;
-                    $row['payment_status'] = 'paid';
-                    $row['due_date'] = null;
                 }
 
                 return $row;
             })->all(),
         ]);
 
+        $tenantId = $request->user()->tenant_id;
         $data = $request->validate([
-            'items' => ['required', 'array', 'min:1', 'max:100'],
-            'items.*.part_id' => ['required', 'integer', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'invoice_number' => ['nullable', 'string', 'max:80'],
+            'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where('tenant_id', $tenantId)],
+            'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
+            'due_date' => ['nullable', 'date', 'after_or_equal:today'],
+            'received_at' => ['nullable', 'date'],
+            'items' => ['required', 'array', 'min:1', 'max:200'],
+            'items.*.part_id' => ['required', 'integer', Rule::exists('parts', 'id')->where('tenant_id', $tenantId)],
             'items.*.quantity' => ['nullable', 'numeric', 'gt:0'],
             'items.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
             'items.*.price' => ['nullable', 'numeric', 'min:0'],
             'items.*.is_free' => ['sometimes', 'boolean'],
-            'items.*.expense_date' => ['nullable', 'date'],
-            'items.*.payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
-            'items.*.due_date' => ['nullable', 'date', 'after_or_equal:today'],
-            'items.*.supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'items.*.serials' => ['nullable', 'array'],
             'items.*.serials.*' => ['string', 'max:40'],
         ]);
 
-        $results = DB::transaction(function () use ($data, $request) {
+        $paymentStatus = $data['payment_status'] ?? 'paid';
+        $invoiceNumber = isset($data['invoice_number']) ? trim($data['invoice_number']) : null;
+        $receivedAt = $data['received_at'] ?? now()->toDateString();
+
+        [$rows, $receipt, $expense] = DB::transaction(function () use ($data, $request, $paymentStatus, $invoiceNumber, $receivedAt) {
             $rows = [];
+            $lines = [];
             foreach ($data['items'] as $index => $line) {
                 try {
-                    $isFree = (bool) ($line['is_free'] ?? false);
-                    if (! $isFree && ($line['payment_status'] ?? 'paid') === 'credit' && empty($line['due_date'])) {
-                        throw ValidationException::withMessages([
-                            'due_date' => ['A due date is required for credit purchases.'],
-                        ]);
-                    }
                     $part = Part::query()->findOrFail($line['part_id']);
-                    [$part, $expense] = $this->applyRestock($request, $part, $line);
-                    $rows[] = [
-                        'part' => BranchInventory::overlayPart($part),
-                        'expense' => $expense,
-                    ];
+                    [$part, $qty, $unitCost] = $this->receiveStock($request, $part, $line);
                 } catch (ValidationException $exception) {
                     $prefixed = [];
                     foreach ($exception->errors() as $field => $messages) {
@@ -648,14 +644,36 @@ class PartController extends Controller
                     }
                     throw ValidationException::withMessages($prefixed);
                 }
+                $rows[] = BranchInventory::overlayPart($part);
+                $lines[] = ['part' => $part, 'quantity' => $qty, 'unit_cost' => $unitCost];
             }
 
-            return $rows;
+            $payable = round(array_sum(array_map(fn ($line) => $line['quantity'] * $line['unit_cost'], $lines)), 2);
+            if ($payable > 0 && $paymentStatus === 'credit' && empty($data['due_date'])) {
+                throw ValidationException::withMessages([
+                    'due_date' => ['A due date is required for credit purchases.'],
+                ]);
+            }
+
+            [$receipt, $expense] = $this->recordBulkPurchase(
+                $request,
+                $lines,
+                $payable,
+                $invoiceNumber,
+                $receivedAt,
+                $paymentStatus,
+                $data['due_date'] ?? null,
+                $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
+            );
+
+            return [$rows, $receipt, $expense];
         });
 
         return response()->json([
-            'restocked' => count($results),
-            'items' => $results,
+            'restocked' => count($rows),
+            'items' => $rows,
+            'receipt' => $receipt,
+            'expense' => $expense,
         ]);
     }
 
@@ -667,10 +685,33 @@ class PartController extends Controller
     {
         $isFree = (bool) ($data['is_free'] ?? false);
         if ($isFree) {
-            $data['unit_cost'] = 0;
             $data['payment_status'] = 'paid';
             $data['due_date'] = null;
         }
+        [$part, $qty, $unitCost] = $this->receiveStock($request, $part, $data);
+        $expense = $this->recordPurchaseExpense(
+            $request,
+            $part,
+            $qty,
+            $unitCost,
+            $data['expense_date'] ?? null,
+            $data['payment_status'] ?? 'paid',
+            $data['due_date'] ?? null,
+            $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
+        );
+
+        return [$part->refresh(), $expense];
+    }
+
+    /**
+     * Add stock, blend weighted-average cost, and apply the optional new selling price.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{0: Part, 1: float, 2: float}
+     */
+    private function receiveStock(Request $request, Part $part, array $data): array
+    {
+        $isFree = (bool) ($data['is_free'] ?? false);
 
         $serials = PartSerials::enabled()
             ? array_values(array_filter($data['serials'] ?? [], fn ($code) => trim((string) $code) !== ''))
@@ -711,18 +752,8 @@ class PartController extends Controller
         if ($serials !== []) {
             PartSerials::receive($part, $serials);
         }
-        $expense = $this->recordPurchaseExpense(
-            $request,
-            $part->refresh(),
-            $qty,
-            $unitCost,
-            $data['expense_date'] ?? null,
-            $data['payment_status'] ?? 'paid',
-            $data['due_date'] ?? null,
-            $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
-        );
 
-        return [$part->refresh(), $expense];
+        return [$part->refresh(), $qty, $unitCost];
     }
 
     private function validated(Request $request, ?Part $part = null): array
@@ -965,11 +996,10 @@ class PartController extends Controller
         ]);
 
         if ($supplierId) {
-            $count = StockReceipt::query()->count() + 1;
             $receipt = StockReceipt::create([
                 'supplier_id' => $supplierId,
                 'expense_id' => $expense->id,
-                'receipt_number' => 'GRN-'.str_pad((string) $count, 4, '0', STR_PAD_LEFT),
+                'receipt_number' => $this->nextReceiptNumber(),
                 'received_at' => $date,
                 'payment_status' => $paid ? 'paid' : 'credit',
                 'due_date' => $paid ? null : $dueDate,
@@ -985,6 +1015,73 @@ class PartController extends Controller
         }
 
         return $expense;
+    }
+
+    /**
+     * @param  list<array{part: Part, quantity: float, unit_cost: float}>  $lines
+     * @return array{0: ?StockReceipt, 1: ?Expense}
+     */
+    private function recordBulkPurchase(
+        Request $request,
+        array $lines,
+        float $payable,
+        ?string $invoiceNumber,
+        string $receivedAt,
+        string $paymentStatus,
+        ?string $dueDate,
+        ?int $supplierId,
+    ): array {
+        $paid = $paymentStatus !== Expense::STATUS_CREDIT || $payable <= 0;
+        $count = count($lines);
+        $label = $invoiceNumber
+            ? "invoice {$invoiceNumber}"
+            : ($count === 1 ? "{$lines[0]['part']->name} × {$lines[0]['quantity']}" : "{$count} items");
+
+        $expense = null;
+        if ($payable > 0) {
+            $expense = Expense::create([
+                'category' => 'inventory',
+                'description' => ($paid ? 'Stock purchase: ' : 'Stock purchase on credit: ').$label,
+                'amount' => $payable,
+                'expense_date' => $receivedAt,
+                'payment_status' => $paid ? Expense::STATUS_PAID : Expense::STATUS_CREDIT,
+                'due_date' => $paid ? null : $dueDate,
+                'settled_at' => $paid ? $receivedAt : null,
+                'created_by' => $request->user()->id,
+                'supplier_id' => $supplierId,
+            ]);
+        }
+
+        if (! $supplierId && $invoiceNumber === null) {
+            return [null, $expense];
+        }
+
+        $receipt = StockReceipt::create([
+            'supplier_id' => $supplierId,
+            'expense_id' => $expense?->id,
+            'receipt_number' => $this->nextReceiptNumber(),
+            'invoice_number' => $invoiceNumber,
+            'received_at' => $receivedAt,
+            'payment_status' => $paid ? 'paid' : 'credit',
+            'due_date' => $paid ? null : $dueDate,
+        ]);
+        foreach ($lines as $line) {
+            StockReceiptItem::create([
+                'stock_receipt_id' => $receipt->id,
+                'item_type' => 'part',
+                'part_id' => $line['part']->id,
+                'quantity' => $line['quantity'],
+                'unit_cost' => $line['unit_cost'],
+            ]);
+        }
+        $expense?->update(['stock_receipt_id' => $receipt->id]);
+
+        return [$receipt->load('items'), $expense];
+    }
+
+    private function nextReceiptNumber(): string
+    {
+        return 'GRN-'.str_pad((string) (StockReceipt::query()->count() + 1), 4, '0', STR_PAD_LEFT);
     }
 
     private function resolveSupplierId(Request $request, mixed $supplierId): ?int
