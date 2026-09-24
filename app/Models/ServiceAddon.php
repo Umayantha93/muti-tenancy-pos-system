@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 #[Fillable([
@@ -96,6 +97,108 @@ class ServiceAddon extends Model
             ->filter()
             ->all();
         $full->inclusions()->sync($ids);
+    }
+
+    /**
+     * Pick the vehicle class with the most active addons (tie → lowest sort_order, then id).
+     */
+    public static function richestSourceClassId(?int $exceptClassId = null): ?int
+    {
+        $query = static::query()
+            ->where('active', true)
+            ->whereNotNull('service_vehicle_class_id')
+            ->selectRaw('service_vehicle_class_id, count(*) as addon_count')
+            ->groupBy('service_vehicle_class_id')
+            ->orderByDesc('addon_count');
+
+        if ($exceptClassId !== null) {
+            $query->where('service_vehicle_class_id', '!=', $exceptClassId);
+        }
+
+        $top = $query->get();
+        if ($top->isEmpty()) {
+            return null;
+        }
+
+        $maxCount = (int) $top->first()->addon_count;
+        $tiedIds = $top->filter(fn ($row) => (int) $row->addon_count === $maxCount)
+            ->pluck('service_vehicle_class_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $winner = ServiceVehicleClass::query()
+            ->whereIn('id', $tiedIds)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->value('id');
+
+        return $winner !== null ? (int) $winner : null;
+    }
+
+    /**
+     * Clone active addons from one vehicle class onto another with price 0.
+     * Preserves full-service inclusion links via the new id map.
+     *
+     * @return int Number of addons created
+     */
+    public static function copyCatalogToClass(int $fromClassId, int $toClassId): int
+    {
+        if ($fromClassId === $toClassId) {
+            return 0;
+        }
+
+        if (static::query()->where('service_vehicle_class_id', $toClassId)->exists()) {
+            return 0;
+        }
+
+        $source = static::query()
+            ->where('service_vehicle_class_id', $fromClassId)
+            ->where('active', true)
+            ->with('inclusions')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        if ($source->isEmpty()) {
+            return 0;
+        }
+
+        return (int) DB::transaction(function () use ($source, $toClassId) {
+            $idMap = [];
+
+            foreach ($source->where('is_full_service', false) as $addon) {
+                $clone = static::create([
+                    'service_vehicle_class_id' => $toClassId,
+                    'name' => $addon->name,
+                    'price' => 0,
+                    'sort_order' => $addon->sort_order,
+                    'is_full_service' => false,
+                    'active' => true,
+                ]);
+                $idMap[$addon->id] = $clone->id;
+            }
+
+            foreach ($source->where('is_full_service', true) as $addon) {
+                $clone = static::create([
+                    'service_vehicle_class_id' => $toClassId,
+                    'name' => $addon->name,
+                    'price' => 0,
+                    'sort_order' => $addon->sort_order,
+                    'is_full_service' => true,
+                    'active' => true,
+                ]);
+                $idMap[$addon->id] = $clone->id;
+
+                $inclusionIds = $addon->inclusions
+                    ->map(fn (self $included) => $idMap[$included->id] ?? null)
+                    ->filter()
+                    ->values()
+                    ->all();
+                $clone->inclusions()->sync($inclusionIds);
+            }
+
+            return count($idMap);
+        });
     }
 
     /**

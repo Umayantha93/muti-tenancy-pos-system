@@ -126,6 +126,41 @@ class ServiceVehicleClassTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_new_vehicle_type_copies_services_with_zero_prices(): void
+    {
+        Sanctum::actingAs($this->garageUser('business_owner'));
+        $classes = $this->getJson('/api/service-vehicle-classes')->assertOk()->json();
+        $car = collect($classes)->firstWhere('name', 'Car');
+        $carAddons = $this->getJson('/api/service-addons?service_vehicle_class_id='.$car['id'])->assertOk()->json();
+        $carNames = collect($carAddons)->pluck('name')->sort()->values()->all();
+        $carFull = collect($carAddons)->firstWhere('is_full_service', true);
+        $this->assertNotNull($carFull);
+        $carInclusionNames = collect($carFull['inclusions'])->pluck('name')->sort()->values()->all();
+
+        $created = $this->postJson('/api/service-vehicle-classes', [
+            'name' => 'SUV',
+        ])->assertCreated()->json();
+
+        $this->assertSame(count($carAddons), (int) $created['services_copied']);
+
+        $suvAddons = $this->getJson('/api/service-addons?service_vehicle_class_id='.$created['id'])->assertOk()->json();
+        $this->assertCount(count($carAddons), $suvAddons);
+        $this->assertSame($carNames, collect($suvAddons)->pluck('name')->sort()->values()->all());
+        $this->assertTrue(collect($suvAddons)->every(fn ($row) => (float) $row['price'] === 0.0));
+
+        $suvFull = collect($suvAddons)->firstWhere('is_full_service', true);
+        $this->assertNotNull($suvFull);
+        $this->assertSame(
+            $carInclusionNames,
+            collect($suvFull['inclusions'])->pluck('name')->sort()->values()->all()
+        );
+        $this->assertTrue(
+            collect($suvFull['inclusions'])->every(
+                fn ($row) => collect($suvAddons)->contains('id', $row['id'])
+            )
+        );
+    }
+
     private ?User $staffUser = null;
 
     private function garageUser(string $role): User

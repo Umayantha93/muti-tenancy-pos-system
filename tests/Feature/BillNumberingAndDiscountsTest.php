@@ -61,8 +61,8 @@ class BillNumberingAndDiscountsTest extends TestCase
             'admission_date' => now()->toDateString(),
         ])->assertCreated()->json('bill_number');
 
-        $this->assertSame('B06-0001', $first);
-        $this->assertSame('B06-0002', $second);
+        $this->assertSame('B06-'.str_pad((string) $tenant->id, 2, '0', STR_PAD_LEFT).'-0001', $first);
+        $this->assertSame('B06-'.str_pad((string) $tenant->id, 2, '0', STR_PAD_LEFT).'-0002', $second);
 
         $admin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
         Sanctum::actingAs($admin);

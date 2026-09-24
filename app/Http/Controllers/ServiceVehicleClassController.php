@@ -37,7 +37,16 @@ class ServiceVehicleClassController extends Controller
             'active' => $data['active'] ?? true,
         ]);
 
-        return response()->json($row, 201);
+        $sourceId = ServiceAddon::richestSourceClassId((int) $row->id);
+        $copied = 0;
+        if ($sourceId !== null) {
+            $copied = ServiceAddon::copyCatalogToClass($sourceId, (int) $row->id);
+        }
+
+        return response()->json([
+            ...$row->toArray(),
+            'services_copied' => $copied,
+        ], 201);
     }
 
     public function update(Request $request, ServiceVehicleClass $service_vehicle_class): JsonResponse
