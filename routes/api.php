@@ -199,6 +199,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
 
         Route::middleware('feature:parts_inventory')->group(function () {
             Route::get('/parts', [PartController::class, 'index']);
+            Route::post('/parts/restock/bulk', [PartController::class, 'restockBulk']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
             Route::post('/parts/{part}/ensure-barcode', [PartController::class, 'ensureBarcode']);

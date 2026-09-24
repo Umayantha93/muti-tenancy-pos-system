@@ -200,6 +200,90 @@ class ImplementationPlanTest extends TestCase
         $this->assertSame($supplier->id, StockReceipt::query()->first()->supplier_id);
     }
 
+    public function test_bulk_restock_updates_multiple_parts_in_one_request(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $filter = Part::create([
+            'name' => 'Cabin Filter', 'brand' => 'Bosch', 'type' => 'filter',
+            'price' => 3000, 'cost_price' => 1000, 'stock_qty' => 5,
+        ]);
+        $pad = Part::create([
+            'name' => 'Brake Pad', 'brand' => 'Brembo', 'type' => 'brake',
+            'price' => 8000, 'cost_price' => 4000, 'stock_qty' => 2,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'items' => [
+                ['part_id' => $filter->id, 'quantity' => 3, 'unit_cost' => 1200, 'price' => 3500, 'payment_status' => 'paid'],
+                ['part_id' => $pad->id, 'quantity' => 4, 'unit_cost' => 4500, 'price' => 9000, 'payment_status' => 'paid'],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('restocked', 2);
+
+        $this->assertSame(8, $filter->fresh()->stock_qty);
+        $this->assertEquals(1075.0, (float) $filter->fresh()->cost_price);
+        $this->assertEquals(3500.0, (float) $filter->fresh()->price);
+        $this->assertSame(6, $pad->fresh()->stock_qty);
+        $this->assertEquals(4333.33, (float) $pad->fresh()->cost_price);
+        $this->assertEquals(9000.0, (float) $pad->fresh()->price);
+        $this->assertSame(2, Expense::query()->count());
+    }
+
+    public function test_bulk_restock_rolls_back_when_a_row_is_invalid(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Spark Plug', 'brand' => 'NGK', 'type' => 'ignition',
+            'price' => 900, 'cost_price' => 400, 'stock_qty' => 10,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'items' => [
+                ['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 400, 'payment_status' => 'paid'],
+                ['part_id' => $part->id, 'quantity' => 0, 'unit_cost' => 400, 'payment_status' => 'paid'],
+            ],
+        ])->assertStatus(422);
+
+        $this->assertSame(10, $part->fresh()->stock_qty);
+        $this->assertSame(0, Expense::query()->count());
+    }
+
+    public function test_bulk_restock_free_gift_has_no_expense_and_dilutes_cost(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $paid = Part::create([
+            'name' => 'Oil Filter', 'brand' => 'Mann', 'type' => 'filter',
+            'price' => 2000, 'cost_price' => 1000, 'stock_qty' => 10,
+        ]);
+        $gift = Part::create([
+            'name' => 'Air Freshener', 'brand' => 'Promo', 'type' => 'accessory',
+            'price' => 500, 'cost_price' => 200, 'stock_qty' => 4,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'items' => [
+                ['part_id' => $paid->id, 'quantity' => 5, 'unit_cost' => 1100, 'payment_status' => 'paid'],
+                [
+                    'part_id' => $gift->id,
+                    'quantity' => 3,
+                    'is_free' => true,
+                    'price' => 600,
+                    'payment_status' => 'credit',
+                ],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('restocked', 2);
+
+        $this->assertSame(15, $paid->fresh()->stock_qty);
+        $this->assertSame(1, Expense::query()->count());
+        $this->assertSame(7, $gift->fresh()->stock_qty);
+        // (4×200 + 3×0) / 7 ≈ 114.29
+        $this->assertEquals(114.29, (float) $gift->fresh()->cost_price);
+        $this->assertEquals(600.0, (float) $gift->fresh()->price);
+    }
+
     public function test_reports_endpoint_returns_payload_when_feature_enabled(): void
     {
         Sanctum::actingAs($this->garageUser());
