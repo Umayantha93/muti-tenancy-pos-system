@@ -2,22 +2,20 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ServiceAddon;
 use App\Models\ServiceVehicleClass;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * Vehicle categories the owner types in (Car, SUV, Tata bus…). Staff pick one on each service job card.
+ */
 class ServiceVehicleClassController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
-        $tenant = $request->user()->tenant;
-        if ($tenant && $tenant->business_type === BusinessTypes::GARAGE) {
-            ServiceVehicleClass::ensureDefaultsFor((int) $tenant->id, BusinessTypes::GARAGE);
-        }
-
         $rows = ServiceVehicleClass::query()
             ->orderBy('sort_order')
             ->orderBy('id')
@@ -37,22 +35,13 @@ class ServiceVehicleClassController extends Controller
             'active' => $data['active'] ?? true,
         ]);
 
-        $sourceId = ServiceAddon::richestSourceClassId((int) $row->id);
-        $copied = 0;
-        if ($sourceId !== null) {
-            $copied = ServiceAddon::copyCatalogToClass($sourceId, (int) $row->id);
-        }
-
-        return response()->json([
-            ...$row->toArray(),
-            'services_copied' => $copied,
-        ], 201);
+        return response()->json($row, 201);
     }
 
     public function update(Request $request, ServiceVehicleClass $service_vehicle_class): JsonResponse
     {
         $this->assertGarage($request);
-        $data = $this->validated($request, creating: false);
+        $data = $this->validated($request, creating: false, id: $service_vehicle_class->id);
         $service_vehicle_class->update($data);
 
         return response()->json($service_vehicle_class->fresh());
@@ -61,11 +50,6 @@ class ServiceVehicleClassController extends Controller
     public function destroy(Request $request, ServiceVehicleClass $service_vehicle_class): JsonResponse
     {
         $this->assertGarage($request);
-        if (ServiceAddon::query()->where('service_vehicle_class_id', $service_vehicle_class->id)->exists()) {
-            throw ValidationException::withMessages([
-                'service_vehicle_class' => ['Remove or move services for this vehicle type before deleting it.'],
-            ]);
-        }
         $service_vehicle_class->delete();
 
         return response()->json(null, 204);
@@ -74,10 +58,15 @@ class ServiceVehicleClassController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function validated(Request $request, bool $creating): array
+    private function validated(Request $request, bool $creating, ?int $id = null): array
     {
         return $request->validate([
-            'name' => [$creating ? 'required' : 'sometimes', 'string', 'max:255'],
+            'name' => [
+                $creating ? 'required' : 'sometimes',
+                'string',
+                'max:255',
+                Rule::unique('service_vehicle_classes', 'name')->where('tenant_id', $request->user()->tenant_id)->ignore($id),
+            ],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'active' => ['sometimes', 'boolean'],
         ]);
@@ -87,7 +76,7 @@ class ServiceVehicleClassController extends Controller
     {
         if ($request->user()->tenant?->business_type !== BusinessTypes::GARAGE) {
             throw ValidationException::withMessages([
-                'business_type' => ['Vehicle types are only available for garages.'],
+                'business_type' => ['Vehicle categories are only available for garages.'],
             ]);
         }
     }

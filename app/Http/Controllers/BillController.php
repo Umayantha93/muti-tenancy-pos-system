@@ -261,7 +261,7 @@ class BillController extends Controller
                 $unitPrice = (float) $line['unit_price'];
                 BillItem::create([
                     'bill_id' => $bill->id,
-                    'type' => 'labor',
+                    'type' => $isGarage ? 'service_addon' : 'labor',
                     'description' => trim((string) $line['description']),
                     'quantity' => $qty,
                     'unit_price' => $unitPrice,

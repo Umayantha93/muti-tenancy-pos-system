@@ -43,33 +43,27 @@ class ServiceJobCardTest extends TestCase
             ->assertJsonPath('next_service_mileage', 50200);
     }
 
-    public function test_owner_can_manage_service_addons_and_full_service_inclusions(): void
+    public function test_owner_types_in_service_names_and_full_service_inclusions(): void
     {
         Sanctum::actingAs($this->garageUser('business_owner'));
 
-        $addons = $this->getJson('/api/service-addons')->assertOk()->json();
-        $this->assertNotEmpty($addons);
-        $full = collect($addons)->firstWhere('is_full_service', true);
-        $this->assertNotNull($full);
-        $this->assertSame('Full service', $full['name']);
+        $this->getJson('/api/service-addons')->assertOk()->assertJsonCount(0);
 
-        $created = $this->postJson('/api/service-addons', [
-            'name' => 'Headlight polish',
-            'price' => 1200,
-        ])->assertCreated()->json();
+        $wash = $this->postJson('/api/service-addons', ['name' => 'Body wash'])->assertCreated()->json();
+        $created = $this->postJson('/api/service-addons', ['name' => 'Headlight polish'])->assertCreated()->json();
+        $this->postJson('/api/service-addons', ['name' => 'body wash'])->assertStatus(422);
 
-        $this->putJson("/api/service-addons/{$created['id']}", [
-            'price' => 1500,
-        ])->assertOk()->assertJsonPath('price', '1500.00');
+        $this->putJson("/api/service-addons/{$created['id']}", ['name' => 'Headlight restore'])
+            ->assertOk()
+            ->assertJsonPath('name', 'Headlight restore');
 
-        $bodyWash = collect($addons)->firstWhere('name', 'Body wash');
-        $this->putJson("/api/service-addons/{$full['id']}", [
-            'price' => 9000,
+        $full = $this->postJson('/api/service-addons', [
+            'name' => 'Full service',
             'is_full_service' => true,
-            'included_addon_ids' => [$bodyWash['id'], $created['id']],
-        ])->assertOk()
-            ->assertJsonPath('price', '9000.00')
-            ->assertJsonCount(2, 'inclusions');
+            'included_addon_ids' => [$wash['id'], $created['id']],
+        ])->assertCreated()->json();
+        $this->assertTrue($full['is_full_service']);
+        $this->assertCount(2, $full['inclusions']);
 
         $this->deleteJson("/api/service-addons/{$created['id']}")->assertNoContent();
         $this->assertNull(ServiceAddon::find($created['id']));
@@ -86,19 +80,36 @@ class ServiceJobCardTest extends TestCase
         ])->assertForbidden();
     }
 
-    public function test_service_job_card_adds_addon_lines_with_quantity_and_full_service_inclusions(): void
+    public function test_service_job_card_adds_addon_lines_with_typed_price_and_full_service_inclusions(): void
     {
-        Sanctum::actingAs($this->garageUser('staff'));
+        $staff = $this->garageUser('staff');
+        Sanctum::actingAs($staff);
+        $washAddon = $this->addon($staff->tenant_id, 'Body wash');
+        $this->addon($staff->tenant_id, 'Oil and filter change');
+        $fullAddon = $this->addon($staff->tenant_id, 'Full service', [$washAddon->id]);
 
         $billId = $this->openJob('service')->json('id');
-        $addons = $this->getJson('/api/service-addons')->assertOk()->json();
-        $wash = collect($addons)->firstWhere('name', 'Body wash');
-        $full = collect($addons)->firstWhere('is_full_service', true);
+        $wash = ['id' => $washAddon->id];
+        $full = ['id' => $fullAddon->id];
+
+        $unpriced = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'service_addon',
+            'service_addon_id' => $wash['id'],
+            'quantity' => 1,
+        ])->assertCreated()
+            ->assertJsonPath('item.unit_price', '0.00')
+            ->json('item.id');
+        $this->putJson("/api/bills/{$billId}/items/{$unpriced}", ['unit_price' => 950])
+            ->assertOk()
+            ->assertJsonPath('item.unit_price', '950.00')
+            ->assertJsonPath('item.line_total', '950.00');
+        $this->deleteJson("/api/bills/{$billId}/items/{$unpriced}")->assertOk();
 
         $this->postJson("/api/bills/{$billId}/items", [
             'type' => 'service_addon',
             'service_addon_id' => $wash['id'],
             'quantity' => 2,
+            'unit_price' => 800,
         ])->assertCreated()
             ->assertJsonPath('item.type', 'service_addon')
             ->assertJsonPath('item.description', 'Body wash')
@@ -110,6 +121,7 @@ class ServiceJobCardTest extends TestCase
             'type' => 'service_addon',
             'service_addon_id' => $full['id'],
             'quantity' => 1,
+            'unit_price' => 8500,
         ])->assertCreated()
             ->assertJsonPath('item.description', 'Full service')
             ->assertJsonPath('item.unit_price', '8500.00');
@@ -141,7 +153,9 @@ class ServiceJobCardTest extends TestCase
 
     public function test_bill_profits_split_gross_profit_by_service_and_repair(): void
     {
-        Sanctum::actingAs($this->garageUser('staff'));
+        $staff = $this->garageUser('staff');
+        Sanctum::actingAs($staff);
+        $wash = $this->addon($staff->tenant_id, 'Body wash');
 
         $repairId = $this->openJob('repair')->json('id');
         $this->postJson("/api/bills/{$repairId}/items", [
@@ -149,12 +163,11 @@ class ServiceJobCardTest extends TestCase
         ])->assertCreated();
 
         $serviceId = $this->openJob('service')->json('id');
-        $addons = $this->getJson('/api/service-addons')->json();
-        $wash = collect($addons)->firstWhere('name', 'Body wash');
         $this->postJson("/api/bills/{$serviceId}/items", [
             'type' => 'service_addon',
-            'service_addon_id' => $wash['id'],
+            'service_addon_id' => $wash->id,
             'quantity' => 1,
+            'unit_price' => 800,
         ])->assertCreated();
 
         $report = $this->getJson('/api/bill-profits?per_page=50')->assertOk()->json();
@@ -201,6 +214,27 @@ class ServiceJobCardTest extends TestCase
         }
 
         return $user;
+    }
+
+    /**
+     * @param  list<int>|null  $includes  Pass ids to make this a Full service package.
+     */
+    private function addon(int $tenantId, string $name, ?array $includes = null): ServiceAddon
+    {
+        $addon = new ServiceAddon;
+        $addon->forceFill([
+            'tenant_id' => $tenantId,
+            'name' => $name,
+            'price' => 0,
+            'sort_order' => 10,
+            'is_full_service' => $includes !== null,
+            'active' => true,
+        ])->save();
+        if ($includes) {
+            $addon->inclusions()->sync($includes);
+        }
+
+        return $addon;
     }
 
     private function openJob(string $jobKind = 'repair')

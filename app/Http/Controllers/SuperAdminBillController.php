@@ -156,7 +156,7 @@ class SuperAdminBillController extends Controller
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $tenant->id)],
         ]);
 
-        $data = ServiceAddon::applyToItemPayload($data, (int) $tenant->id);
+        $data = ServiceAddon::applyToItemPayload($data, (int) $tenant->id, $bill->service_vehicle_class_id);
         $data = LaborItem::applyToItemPayload($data, (int) $tenant->id);
 
         $kind = BusinessTypes::billItemKind($data['type']);

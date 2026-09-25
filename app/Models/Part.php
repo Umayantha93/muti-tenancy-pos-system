@@ -36,7 +36,7 @@ class Part extends Model
         });
 
         static::saved(function (Part $part): void {
-            if (BranchInventory::$mutating || $part->wasRecentlyCreated || ! $part->wasChanged('stock_qty')) {
+            if (BranchInventory::$mutating || ! $part->wasChanged('stock_qty')) {
                 return;
             }
             BranchInventory::setPartQty($part, (float) $part->stock_qty);
@@ -58,6 +58,7 @@ class Part extends Model
         return [
             'images' => 'array',
             'price' => 'decimal:2',
+            'pending_price' => 'decimal:2',
             'cost_price' => 'decimal:2',
             'serialized' => 'boolean',
         ];
@@ -80,6 +81,25 @@ class Part extends Model
             ->map(fn (string $path) => 'storage/'.$path)
             ->values()
             ->all());
+    }
+
+    /**
+     * A scheduled price waits until only the stock received with it is left
+     * (total stock across shops falls to pending_price_at_qty or below).
+     */
+    public function applyPendingPriceIfDue(): void
+    {
+        if ($this->pending_price === null || $this->pending_price_at_qty === null) {
+            return;
+        }
+        if ((float) $this->getRawOriginal('stock_qty') > (float) $this->pending_price_at_qty + 0.0001) {
+            return;
+        }
+        $this->forceFill([
+            'price' => $this->pending_price,
+            'pending_price' => null,
+            'pending_price_at_qty' => null,
+        ])->saveQuietly();
     }
 
     public function takeStock(float|int $quantity, ?int $branchId = null): void

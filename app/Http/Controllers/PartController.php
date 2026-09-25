@@ -510,7 +510,12 @@ class PartController extends Controller
 
     public function update(Request $request, Part $part): JsonResponse
     {
-        $part->update($this->validated($request, $part));
+        $data = $this->validated($request, $part);
+        $priceChanged = array_key_exists('price', $data) && abs((float) $data['price'] - (float) $part->price) > 0.001;
+        $part->update($data);
+        if ($priceChanged && $part->pending_price !== null) {
+            $part->forceFill(['pending_price' => null, 'pending_price_at_qty' => null])->save();
+        }
         $this->storeImages($request, $part);
         PartBarcode::ensure($part->refresh());
 
@@ -569,6 +574,7 @@ class PartController extends Controller
             'stock_unit' => ['nullable', 'string', Rule::in(StockUnit::allowed())],
             'unit_cost' => ['nullable', 'numeric', 'min:0'],
             'price' => ['nullable', 'numeric', 'min:0'],
+            'price_after_old_stock' => ['sometimes', 'boolean'],
             'is_free' => ['sometimes', 'boolean'],
             'expense_date' => ['nullable', 'date'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
@@ -621,6 +627,7 @@ class PartController extends Controller
             'items.*.quantity' => ['nullable', 'numeric', 'gt:0'],
             'items.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
             'items.*.price' => ['nullable', 'numeric', 'min:0'],
+            'items.*.price_after_old_stock' => ['sometimes', 'boolean'],
             'items.*.is_free' => ['sometimes', 'boolean'],
             'items.*.serials' => ['nullable', 'array'],
             'items.*.serials.*' => ['string', 'max:40'],
@@ -742,13 +749,25 @@ class PartController extends Controller
             $qty,
             $unitCost,
         );
+        $oldStock = (float) $part->getRawOriginal('stock_qty');
         BranchInventory::addPart($part, $qty);
         $part->refresh();
         $updates = ['cost_price' => $blendedCost];
-        if (array_key_exists('price', $data) && $data['price'] !== null && $data['price'] !== '') {
-            $updates['price'] = round((float) $data['price'], 2);
+        $newPrice = array_key_exists('price', $data) && $data['price'] !== null && $data['price'] !== ''
+            ? round((float) $data['price'], 2)
+            : null;
+        $afterOldStock = filter_var($data['price_after_old_stock'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if ($newPrice !== null && $afterOldStock && $oldStock > 0 && abs($newPrice - (float) $part->price) > 0.001) {
+            $updates['pending_price'] = $newPrice;
+            $updates['pending_price_at_qty'] = $qty;
+        } elseif ($newPrice !== null) {
+            $updates['price'] = $newPrice;
+            $updates['pending_price'] = null;
+            $updates['pending_price_at_qty'] = null;
+        } elseif ($part->pending_price !== null) {
+            $updates['pending_price_at_qty'] = (float) $part->pending_price_at_qty + $qty;
         }
-        $part->update($updates);
+        $part->forceFill($updates)->save();
         if ($serials !== []) {
             PartSerials::receive($part, $serials);
         }
