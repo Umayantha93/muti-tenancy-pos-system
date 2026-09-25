@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\ServiceAddon;
+use App\Services\StationConsumables;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Carbon\Carbon;
@@ -52,6 +53,7 @@ class ServiceOpsReportController extends Controller
             return [mb_strtolower($addon->name).$classKey => $addon->id];
         });
 
+        $consumableCosts = app(StationConsumables::class)->costByLine($from, $to);
         $sold = [];
         $inside = [];
         $jobs = [];
@@ -62,9 +64,10 @@ class ServiceOpsReportController extends Controller
             $total = (float) $line->line_total;
             $jobs[$line->bill_id] = true;
 
-            $sold[$addonId] = $sold[$addonId] ?? ['qty' => 0.0, 'revenue' => 0.0];
+            $sold[$addonId] = $sold[$addonId] ?? ['qty' => 0.0, 'revenue' => 0.0, 'cost' => 0.0];
             $sold[$addonId]['qty'] += $qty;
             $sold[$addonId]['revenue'] += $total;
+            $sold[$addonId]['cost'] += $consumableCosts[$line->id] ?? 0.0;
 
             $addon = $line->serviceAddon ?? $byId->get($addonId);
             $isFull = (bool) ($addon?->is_full_service);
@@ -90,6 +93,7 @@ class ServiceOpsReportController extends Controller
             $addon = $byId->get($id) ?? $lines->firstWhere('service_addon_id', $id)?->serviceAddon;
             $qty = round($sold[$id]['qty'] ?? 0, 2);
             $revenue = round($sold[$id]['revenue'] ?? 0, 2);
+            $cost = round($sold[$id]['cost'] ?? 0, 2);
             $insideQty = round($inside[$id] ?? 0, 2);
             $isFull = (bool) ($addon?->is_full_service);
             $className = $addon?->vehicleClass?->name;
@@ -106,7 +110,8 @@ class ServiceOpsReportController extends Controller
                 'sold_qty' => $qty,
                 'inside_full_service' => $isFull ? null : $insideQty,
                 'revenue' => $revenue,
-                'profit' => $revenue,
+                'consumable_cost' => $cost,
+                'profit' => round($revenue - $cost, 2),
             ];
         })->sortBy([
             fn ($row) => $row['is_full_service'] ? 0 : 1,
@@ -116,13 +121,15 @@ class ServiceOpsReportController extends Controller
         $jobCount = count($jobs);
         $addonQty = round($rows->sum('sold_qty'), 2);
         $revenue = round($rows->sum('revenue'), 2);
+        $consumableCost = round($rows->sum('consumable_cost'), 2);
 
         return $this->moneyJson([
             'from' => $from->toDateString(),
             'to' => $to->toDateString(),
             'jobs' => $jobCount,
             'addon_revenue' => $revenue,
-            'addon_profit' => $revenue,
+            'addon_consumable_cost' => $consumableCost,
+            'addon_profit' => round($revenue - $consumableCost, 2),
             'average_addons_per_job' => $jobCount > 0 ? round($addonQty / $jobCount, 2) : 0,
             'rows' => $rows,
         ]);

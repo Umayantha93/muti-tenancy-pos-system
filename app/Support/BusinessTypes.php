@@ -51,7 +51,7 @@ class BusinessTypes
         return [
             self::GARAGE => array_merge($garageFamily, [
                 'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos',
-                'service_reminders', 'service_ops_report',
+                'service_reminders', 'service_ops_report', 'station_consumables',
             ]),
             self::TYRE => $garageFamily,
             self::DEVICE_REPAIR => array_merge($garageFamily, ['serial_inventory']),
@@ -81,7 +81,7 @@ class BusinessTypes
             self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::GARAGE => [
                 'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos',
-                'job_board', 'job_bookings', 'service_reminders',
+                'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
             ],
             self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up', ...$whatsapp],
@@ -395,6 +395,7 @@ class BusinessTypes
             'service_reminders' => ['bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
+            'station_consumables' => ['parts_inventory'],
             'bill_whatsapp' => ['billing'],
             default => [],
         };
@@ -439,6 +440,9 @@ class BusinessTypes
         }
         if (! isset($set['parts_inventory']) && ! isset($set['product_catalog'])) {
             unset($set['serial_inventory']);
+        }
+        if (! isset($set['parts_inventory'])) {
+            unset($set['station_consumables']);
         }
         if (! isset($set['billing'])) {
             unset($set['bill_whatsapp']);
