@@ -89,8 +89,9 @@ class InstantBillTest extends TestCase
         $this->assertEquals(5100, (float) $bill['subtotal']);
         $this->assertEquals(0, (float) $bill['balance_due']);
         $this->assertSame(7, $part->fresh()->stock_qty);
-        $custom = collect($bill['items'])->firstWhere('type', 'labor');
+        $custom = collect($bill['items'])->firstWhere('type', 'service_addon');
         $this->assertSame('Used grease', $custom['description']);
+        $this->assertEquals(2, (float) $custom['quantity']);
         $this->assertEquals(600, (float) $custom['line_total']);
     }
 

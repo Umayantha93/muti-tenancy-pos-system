@@ -6,8 +6,10 @@ use App\Models\Concerns\BelongsToTenant;
 use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * A vehicle category typed in by the garage owner (Car, SUV, Tata bus…).
+ */
 #[Fillable([
     'name',
     'sort_order',
@@ -18,17 +20,8 @@ class ServiceVehicleClass extends Model
     use BelongsToTenant;
 
     /**
-     * @return list<array{name: string, sort_order: int}>
+     * Only used by the 2026_09_23 migration that introduced vehicle types.
      */
-    public static function defaultCatalog(): array
-    {
-        return [
-            ['name' => 'Car', 'sort_order' => 10],
-            ['name' => 'Van', 'sort_order' => 20],
-            ['name' => 'Bus', 'sort_order' => 30],
-        ];
-    }
-
     public static function ensureDefaultsFor(int $tenantId, ?string $businessType = null): void
     {
         if ($businessType !== null && $businessType !== BusinessTypes::GARAGE) {
@@ -44,20 +37,15 @@ class ServiceVehicleClass extends Model
             return;
         }
 
-        foreach (static::defaultCatalog() as $row) {
+        foreach ([['Car', 10], ['Van', 20], ['Bus', 30]] as [$name, $sort]) {
             $class = new static;
             $class->forceFill([
                 'tenant_id' => $tenantId,
-                'name' => $row['name'],
-                'sort_order' => $row['sort_order'],
+                'name' => $name,
+                'sort_order' => $sort,
                 'active' => true,
             ])->save();
         }
-    }
-
-    public function addons(): HasMany
-    {
-        return $this->hasMany(ServiceAddon::class)->orderBy('sort_order')->orderBy('id');
     }
 
     protected function casts(): array

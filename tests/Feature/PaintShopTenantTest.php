@@ -70,11 +70,10 @@ class PaintShopTenantTest extends TestCase
         $this->assertFalse(
             LaborCategory::withoutGlobalScopes()->where('tenant_id', $garageId)->where('name', 'Prep')->exists()
         );
-        $this->assertTrue(
-            ServiceAddon::withoutGlobalScopes()->where('tenant_id', $garageId)->where('name', 'Oil and filter change')->exists()
-        );
-        $this->assertFalse(
-            ServiceAddon::withoutGlobalScopes()->where('tenant_id', $garageId)->where('name', 'Bumper respray')->exists()
+        $this->assertSame(
+            0,
+            ServiceAddon::withoutGlobalScopes()->where('tenant_id', $garageId)->count(),
+            'Garages type in their own service list.'
         );
         $this->assertFalse(
             Part::withoutGlobalScopes()->where('tenant_id', $garageId)->where('name', '2K primer grey')->exists()

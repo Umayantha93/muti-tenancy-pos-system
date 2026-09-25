@@ -2,9 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\Bill;
 use App\Models\Feature;
 use App\Models\ServiceAddon;
-use App\Models\ServiceVehicleClass;
 use App\Models\Tenant;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
@@ -12,90 +12,42 @@ use Tests\TestCase;
 
 class ServiceVehicleClassTest extends TestCase
 {
-    public function test_seed_creates_car_van_bus_and_attaches_defaults_to_car(): void
+    public function test_owner_types_in_vehicle_categories(): void
     {
         Sanctum::actingAs($this->garageUser('business_owner'));
 
-        $classes = $this->getJson('/api/service-vehicle-classes')->assertOk()->json();
-        $names = collect($classes)->pluck('name')->all();
-        $this->assertContains('Car', $names);
-        $this->assertContains('Van', $names);
-        $this->assertContains('Bus', $names);
+        $this->getJson('/api/service-vehicle-classes')->assertOk()->assertJsonCount(0);
 
-        $car = collect($classes)->firstWhere('name', 'Car');
-        $addons = $this->getJson('/api/service-addons?service_vehicle_class_id='.$car['id'])->assertOk()->json();
-        $this->assertNotEmpty($addons);
-        $this->assertTrue(collect($addons)->every(fn ($row) => (int) $row['service_vehicle_class_id'] === (int) $car['id']));
-        $this->assertNotNull(collect($addons)->firstWhere('is_full_service', true));
+        $tata = $this->postJson('/api/service-vehicle-classes', ['name' => 'Tata bus'])->assertCreated()->json();
+        $this->postJson('/api/service-vehicle-classes', ['name' => 'SUV'])->assertCreated();
+        $this->postJson('/api/service-vehicle-classes', ['name' => 'tata bus'])->assertStatus(422);
+
+        $this->putJson("/api/service-vehicle-classes/{$tata['id']}", ['name' => 'Tata / Leyland bus'])
+            ->assertOk()
+            ->assertJsonPath('name', 'Tata / Leyland bus');
+
+        $names = collect($this->getJson('/api/service-vehicle-classes')->json())->pluck('name')->all();
+        $this->assertSame(['Tata / Leyland bus', 'SUV'], $names);
+
+        $this->deleteJson("/api/service-vehicle-classes/{$tata['id']}")->assertNoContent();
+        $this->getJson('/api/service-vehicle-classes')->assertJsonCount(1);
     }
 
-    public function test_each_vehicle_type_can_have_its_own_full_service(): void
-    {
-        Sanctum::actingAs($this->garageUser('business_owner'));
-        $classes = $this->getJson('/api/service-vehicle-classes')->assertOk()->json();
-        $car = collect($classes)->firstWhere('name', 'Car');
-        $van = collect($classes)->firstWhere('name', 'Van');
-
-        $wash = $this->postJson('/api/service-addons', [
-            'name' => 'Body wash',
-            'price' => 1500,
-            'service_vehicle_class_id' => $van['id'],
-        ])->assertCreated()->json();
-
-        $vanFull = $this->postJson('/api/service-addons', [
-            'name' => 'Full service',
-            'price' => 12000,
-            'is_full_service' => true,
-            'service_vehicle_class_id' => $van['id'],
-            'included_addon_ids' => [$wash['id']],
-        ])->assertCreated()->json();
-
-        $this->assertTrue($vanFull['is_full_service']);
-        $carAddons = $this->getJson('/api/service-addons?service_vehicle_class_id='.$car['id'])->assertOk()->json();
-        $carFull = collect($carAddons)->firstWhere('is_full_service', true);
-        $this->assertNotNull($carFull);
-        $this->assertNotSame($carFull['id'], $vanFull['id']);
-    }
-
-    public function test_full_service_rejects_inclusions_from_another_vehicle_type(): void
-    {
-        Sanctum::actingAs($this->garageUser('business_owner'));
-        $classes = $this->getJson('/api/service-vehicle-classes')->assertOk()->json();
-        $car = collect($classes)->firstWhere('name', 'Car');
-        $van = collect($classes)->firstWhere('name', 'Van');
-        $carWash = collect($this->getJson('/api/service-addons?service_vehicle_class_id='.$car['id'])->json())
-            ->firstWhere('name', 'Body wash');
-
-        $this->postJson('/api/service-addons', [
-            'name' => 'Full service',
-            'price' => 9000,
-            'is_full_service' => true,
-            'service_vehicle_class_id' => $van['id'],
-            'included_addon_ids' => [$carWash['id']],
-        ])->assertStatus(422)->assertJsonValidationErrors(['included_addon_ids']);
-    }
-
-    public function test_service_job_can_set_vehicle_class_and_add_class_full_service(): void
+    public function test_staff_can_list_categories_but_not_change_them(): void
     {
         Sanctum::actingAs($this->garageUser('staff'));
-        $classes = $this->getJson('/api/service-vehicle-classes')->assertOk()->json();
-        $van = collect($classes)->firstWhere('name', 'Van');
 
-        Sanctum::actingAs($this->ownerFromStaff());
-        $wash = $this->postJson('/api/service-addons', [
-            'name' => 'Under wash',
-            'price' => 2000,
-            'service_vehicle_class_id' => $van['id'],
-        ])->assertCreated()->json();
-        $full = $this->postJson('/api/service-addons', [
-            'name' => 'Full service',
-            'price' => 15000,
-            'is_full_service' => true,
-            'service_vehicle_class_id' => $van['id'],
-            'included_addon_ids' => [$wash['id']],
-        ])->assertCreated()->json();
+        $this->getJson('/api/service-vehicle-classes')->assertOk();
+        $this->postJson('/api/service-vehicle-classes', ['name' => 'Van'])->assertForbidden();
+    }
 
-        Sanctum::actingAs($this->staffUser);
+    public function test_service_job_stores_category_and_uses_the_typed_price(): void
+    {
+        $owner = $this->garageUser('business_owner');
+        Sanctum::actingAs($owner);
+        $van = $this->postJson('/api/service-vehicle-classes', ['name' => 'Van'])->assertCreated()->json();
+        $wash = $this->postJson('/api/service-addons', ['name' => 'Under wash'])->assertCreated()->json();
+
         $billId = $this->postJson('/api/bills', [
             'customer_name' => 'Nimal',
             'number_plate' => 'CAB-'.fake()->unique()->numerify('####'),
@@ -103,72 +55,68 @@ class ServiceVehicleClassTest extends TestCase
             'admission_date' => now()->toDateString(),
         ])->assertCreated()->json('id');
 
-        $this->putJson("/api/bills/{$billId}", [
-            'service_vehicle_class_id' => $van['id'],
-        ])->assertOk()->assertJsonPath('service_vehicle_class_id', $van['id']);
+        $this->putJson("/api/bills/{$billId}", ['service_vehicle_class_id' => $van['id']])
+            ->assertOk()
+            ->assertJsonPath('service_vehicle_class_id', $van['id']);
 
         $item = $this->postJson("/api/bills/{$billId}/items", [
             'type' => 'service_addon',
-            'service_addon_id' => $full['id'],
+            'service_addon_id' => $wash['id'],
             'quantity' => 1,
+            'unit_price' => 2000,
         ])->assertCreated()->json('item');
 
-        $this->assertSame('Full service', $item['description']);
-        $this->assertEquals(15000, (float) $item['line_total']);
-        $this->assertContains('Under wash', $item['included_services']);
+        $this->assertSame('Under wash', $item['description']);
+        $this->assertEquals(2000, (float) $item['line_total']);
+        $this->assertEquals(0, (float) ServiceAddon::find($wash['id'])->price, 'The service list keeps no price.');
+
+        $this->deleteJson("/api/service-vehicle-classes/{$van['id']}")->assertNoContent();
+        $this->assertNull(Bill::find($billId)->service_vehicle_class_id);
     }
 
-    public function test_cannot_delete_vehicle_type_with_services(): void
+    public function test_vehicle_type_can_hide_a_service_or_prefill_its_price(): void
     {
         Sanctum::actingAs($this->garageUser('business_owner'));
-        $car = collect($this->getJson('/api/service-vehicle-classes')->json())->firstWhere('name', 'Car');
-        $this->deleteJson('/api/service-vehicle-classes/'.$car['id'])
-            ->assertStatus(422);
+        $van = $this->postJson('/api/service-vehicle-classes', ['name' => 'Van'])->assertCreated()->json();
+        $bike = $this->postJson('/api/service-vehicle-classes', ['name' => 'Motorbike'])->assertCreated()->json();
+        $wash = $this->postJson('/api/service-addons', ['name' => 'Body wash'])->assertCreated()->json();
+        $engine = $this->postJson('/api/service-addons', ['name' => 'Engine wash'])->assertCreated()->json();
+
+        $this->putJson("/api/service-addons/{$wash['id']}/vehicle-classes/{$van['id']}", ['offered' => true, 'price' => 1500])
+            ->assertOk()
+            ->assertJsonPath('vehicle_prices.0.price', '1500.00');
+        $this->putJson("/api/service-addons/{$engine['id']}/vehicle-classes/{$bike['id']}", ['offered' => false])->assertOk();
+
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Nimal',
+            'number_plate' => 'CAB-'.fake()->unique()->numerify('####'),
+            'job_kind' => 'service',
+        ])->assertCreated()->json('id');
+        $this->putJson("/api/bills/{$billId}", ['service_vehicle_class_id' => $van['id']])->assertOk();
+
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $wash['id'], 'quantity' => 1])
+            ->assertCreated()
+            ->assertJsonPath('item.unit_price', '1500.00');
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $wash['id'], 'quantity' => 1, 'unit_price' => 1800])
+            ->assertCreated()
+            ->assertJsonPath('item.unit_price', '1800.00');
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $engine['id'], 'quantity' => 1])
+            ->assertCreated()
+            ->assertJsonPath('item.unit_price', '0.00');
+
+        $this->putJson("/api/bills/{$billId}", ['service_vehicle_class_id' => $bike['id']])->assertOk();
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $engine['id'], 'quantity' => 1, 'unit_price' => 500])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['service_addon_id']);
+
+        $this->putJson("/api/service-addons/{$wash['id']}/vehicle-classes/{$van['id']}", ['offered' => true, 'price' => null])
+            ->assertOk()
+            ->assertJsonCount(0, 'vehicle_prices');
     }
-
-    public function test_new_vehicle_type_copies_services_with_zero_prices(): void
-    {
-        Sanctum::actingAs($this->garageUser('business_owner'));
-        $classes = $this->getJson('/api/service-vehicle-classes')->assertOk()->json();
-        $car = collect($classes)->firstWhere('name', 'Car');
-        $carAddons = $this->getJson('/api/service-addons?service_vehicle_class_id='.$car['id'])->assertOk()->json();
-        $carNames = collect($carAddons)->pluck('name')->sort()->values()->all();
-        $carFull = collect($carAddons)->firstWhere('is_full_service', true);
-        $this->assertNotNull($carFull);
-        $carInclusionNames = collect($carFull['inclusions'])->pluck('name')->sort()->values()->all();
-
-        $created = $this->postJson('/api/service-vehicle-classes', [
-            'name' => 'SUV',
-        ])->assertCreated()->json();
-
-        $this->assertSame(count($carAddons), (int) $created['services_copied']);
-
-        $suvAddons = $this->getJson('/api/service-addons?service_vehicle_class_id='.$created['id'])->assertOk()->json();
-        $this->assertCount(count($carAddons), $suvAddons);
-        $this->assertSame($carNames, collect($suvAddons)->pluck('name')->sort()->values()->all());
-        $this->assertTrue(collect($suvAddons)->every(fn ($row) => (float) $row['price'] === 0.0));
-
-        $suvFull = collect($suvAddons)->firstWhere('is_full_service', true);
-        $this->assertNotNull($suvFull);
-        $this->assertSame(
-            $carInclusionNames,
-            collect($suvFull['inclusions'])->pluck('name')->sort()->values()->all()
-        );
-        $this->assertTrue(
-            collect($suvFull['inclusions'])->every(
-                fn ($row) => collect($suvAddons)->contains('id', $row['id'])
-            )
-        );
-    }
-
-    private ?User $staffUser = null;
 
     private function garageUser(string $role): User
     {
-        $keys = [
-            'admit_vehicle', 'admit_repair', 'admit_service', 'customers', 'billing',
-            'parts_inventory', 'employees_management', 'reports', 'service_ops_report',
-        ];
+        $keys = ['admit_vehicle', 'admit_repair', 'admit_service', 'customers', 'billing'];
         $features = collect($keys)->map(
             fn (string $key) => Feature::firstOrCreate(
                 ['key' => $key],
@@ -184,26 +132,11 @@ class ServiceVehicleClassTest extends TestCase
             'status' => 'active',
         ]);
         $tenant->features()->sync($features->mapWithKeys(fn (Feature $feature) => [$feature->id => ['is_enabled' => true]]));
-        ServiceVehicleClass::ensureDefaultsFor((int) $tenant->id, 'garage');
-        ServiceAddon::seedDefaultsFor((int) $tenant->id, 'garage');
         $user = User::factory()->create(['tenant_id' => $tenant->id, 'role' => $role, 'status' => 'active']);
         if ($role === 'staff') {
             $user->permissions()->sync($features->mapWithKeys(fn (Feature $feature) => [$feature->id => ['can_access' => true]]));
-            $this->staffUser = $user;
         }
 
         return $user->load('tenant');
-    }
-
-    private function ownerFromStaff(): User
-    {
-        $tenantId = $this->staffUser?->tenant_id;
-        $owner = User::factory()->create([
-            'tenant_id' => $tenantId,
-            'role' => 'business_owner',
-            'status' => 'active',
-        ]);
-
-        return $owner->load('tenant');
     }
 }

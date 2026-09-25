@@ -64,8 +64,9 @@ class BillItemController extends Controller
             && $bill->job_kind === Bill::JOB_KIND_PARTS_SALE
         ) {
             $type = (string) ($data['type'] ?? '');
+            $customService = $type === 'service_addon' && empty($data['service_addon_id']);
             abort_unless(
-                in_array($type, ['part', 'labor', 'discount'], true),
+                in_array($type, ['part', 'labor', 'discount'], true) || $customService,
                 422,
                 'Instant bills only accept inventory, custom charges, or discounts.'
             );
@@ -74,7 +75,7 @@ class BillItemController extends Controller
             }
         }
 
-        $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id);
+        $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id, $bill->service_vehicle_class_id);
         $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
         if (($data['type'] ?? '') === 'discount' || ! empty($data['discount_type_id'])) {
             $chargeSubtotal = (float) $bill->items()
@@ -190,7 +191,9 @@ class BillItemController extends Controller
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
         ]);
 
-        if ($item->type !== 'labor') {
+        $garageService = $item->type === 'service_addon'
+            && BusinessTypes::normalizeLegacy((string) $bill->tenant?->business_type) === BusinessTypes::GARAGE;
+        if ($item->type !== 'labor' && ! $garageService) {
             abort(422, 'Only labor lines can be updated on this bill.');
         }
 

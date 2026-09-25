@@ -99,11 +99,9 @@ class GarageAdvancedOpsTest extends TestCase
     {
         $user = $this->garageUser(['service_ops_report', 'billing', 'admit_vehicle']);
         Sanctum::actingAs($user);
-        ServiceAddon::seedDefaultsFor((int) $user->tenant_id);
-        $grease = ServiceAddon::query()->where('name', 'Nipple grease')->first();
-        $full = ServiceAddon::query()->where('is_full_service', true)->first();
-        $this->assertNotNull($grease);
-        $this->assertNotNull($full);
+        $grease = ServiceAddon::create(['name' => 'Nipple grease', 'price' => 0, 'sort_order' => 10, 'active' => true]);
+        $full = ServiceAddon::create(['name' => 'Full service', 'price' => 0, 'sort_order' => 20, 'is_full_service' => true, 'active' => true]);
+        $full->inclusions()->sync([$grease->id]);
 
         $billId = $this->postJson('/api/bills', [
             'customer_name' => 'Nimal',
@@ -112,12 +110,12 @@ class GarageAdvancedOpsTest extends TestCase
             'job_kind' => 'service',
         ])->assertCreated()->json('id');
 
-        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $full->id, 'quantity' => 1])->assertCreated();
-        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $grease->id, 'quantity' => 2])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $full->id, 'quantity' => 1, 'unit_price' => 8500])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $grease->id, 'quantity' => 2, 'unit_price' => 500])->assertCreated();
 
         $report = $this->getJson('/api/reports/service-ops')->assertOk()->json();
-        $greaseRow = collect($report['rows'])->firstWhere('service_addon_id', $grease->id);
-        $fullRow = collect($report['rows'])->firstWhere('service_addon_id', $full->id);
+        $greaseRow = collect($report['rows'])->firstWhere('name', 'Nipple grease');
+        $fullRow = collect($report['rows'])->firstWhere('name', 'Full service');
         $this->assertEquals(2, $greaseRow['sold_qty']);
         $this->assertEquals(1, $greaseRow['inside_full_service']);
         $this->assertEquals(1, $fullRow['sold_qty']);

@@ -32,80 +32,71 @@ class ServiceOpsReportController extends Controller
 
         $billIds = BranchQuery::constrain(Bill::query())
             ->whereBetween('admission_date', [$from->toDateString(), $to->toDateString()])
+            ->where('job_kind', '!=', Bill::JOB_KIND_PARTS_SALE)
             ->pluck('id');
 
         $lines = BillItem::query()
-            ->with(['serviceAddon' => fn ($query) => $query->withoutGlobalScopes()->with('vehicleClass:id,name')])
             ->whereIn('bill_id', $billIds)
             ->where('type', 'service_addon')
-            ->whereNotNull('service_addon_id')
             ->get();
 
         $catalog = ServiceAddon::query()
-            ->with(['inclusions', 'vehicleClass:id,name'])
-            ->orderBy('sort_order')
-            ->orderBy('name')
-            ->get();
-        $byId = $catalog->keyBy('id');
-        $byName = $catalog->mapWithKeys(function (ServiceAddon $addon) {
-            $classKey = $addon->service_vehicle_class_id ? ':'.$addon->service_vehicle_class_id : '';
-
-            return [mb_strtolower($addon->name).$classKey => $addon->id];
-        });
+            ->with('inclusions')
+            ->get()
+            ->keyBy(fn (ServiceAddon $addon) => self::key($addon->name));
 
         $consumableCosts = app(StationConsumables::class)->costByLine($from, $to);
         $sold = [];
         $inside = [];
+        $labels = [];
+        $fullKeys = [];
         $jobs = [];
 
         foreach ($lines as $line) {
-            $addonId = (int) $line->service_addon_id;
+            $key = self::key((string) $line->description);
+            if ($key === '') {
+                continue;
+            }
             $qty = (float) $line->quantity;
-            $total = (float) $line->line_total;
             $jobs[$line->bill_id] = true;
+            $labels[$key] ??= trim((string) $line->description);
 
-            $sold[$addonId] = $sold[$addonId] ?? ['qty' => 0.0, 'revenue' => 0.0, 'cost' => 0.0];
-            $sold[$addonId]['qty'] += $qty;
-            $sold[$addonId]['revenue'] += $total;
-            $sold[$addonId]['cost'] += $consumableCosts[$line->id] ?? 0.0;
+            $sold[$key] ??= ['qty' => 0.0, 'revenue' => 0.0, 'cost' => 0.0];
+            $sold[$key]['qty'] += $qty;
+            $sold[$key]['revenue'] += (float) $line->line_total;
+            $sold[$key]['cost'] += $consumableCosts[$line->id] ?? 0.0;
 
-            $addon = $line->serviceAddon ?? $byId->get($addonId);
-            $isFull = (bool) ($addon?->is_full_service);
             $names = collect($line->included_services ?? [])->filter()->values();
-            if ($names->isEmpty() && $isFull) {
-                $names = collect($byId->get($addonId)?->inclusions?->pluck('name') ?? []);
+            if ($names->isEmpty() && $catalog->get($key)?->is_full_service) {
+                $names = $catalog->get($key)->inclusions->pluck('name');
             }
             if ($names->isEmpty()) {
                 continue;
             }
-            $classKey = $addon?->service_vehicle_class_id ? ':'.$addon->service_vehicle_class_id : '';
+            $fullKeys[$key] = true;
             foreach ($names as $name) {
-                $includedId = $byName[mb_strtolower(trim((string) $name)).$classKey] ?? null;
-                if (! $includedId || $includedId === $addonId) {
+                $includedKey = self::key((string) $name);
+                if ($includedKey === '' || $includedKey === $key) {
                     continue;
                 }
-                $inside[$includedId] = ($inside[$includedId] ?? 0) + $qty;
+                $labels[$includedKey] ??= trim((string) $name);
+                $inside[$includedKey] = ($inside[$includedKey] ?? 0) + $qty;
             }
         }
 
-        $ids = collect(array_keys($sold))->merge(array_keys($inside))->unique()->values();
-        $rows = $ids->map(function ($id) use ($byId, $sold, $inside, $lines) {
-            $addon = $byId->get($id) ?? $lines->firstWhere('service_addon_id', $id)?->serviceAddon;
-            $qty = round($sold[$id]['qty'] ?? 0, 2);
-            $revenue = round($sold[$id]['revenue'] ?? 0, 2);
-            $cost = round($sold[$id]['cost'] ?? 0, 2);
-            $insideQty = round($inside[$id] ?? 0, 2);
-            $isFull = (bool) ($addon?->is_full_service);
-            $className = $addon?->vehicleClass?->name;
-            $label = $addon?->name ?? 'Service';
-            if ($className) {
-                $label .= ' · '.$className;
-            }
+        $keys = collect(array_keys($sold))->merge(array_keys($inside))->unique()->values();
+        $rows = $keys->map(function (string $key) use ($catalog, $sold, $inside, $labels, $fullKeys) {
+            $addon = $catalog->get($key);
+            $qty = round($sold[$key]['qty'] ?? 0, 2);
+            $revenue = round($sold[$key]['revenue'] ?? 0, 2);
+            $cost = round($sold[$key]['cost'] ?? 0, 2);
+            $insideQty = round($inside[$key] ?? 0, 2);
+            $isFull = isset($fullKeys[$key]) || (bool) $addon?->is_full_service;
 
             return [
-                'service_addon_id' => $id,
-                'name' => $label,
-                'vehicle_class' => $className,
+                'key' => $key,
+                'service_addon_id' => $addon?->id,
+                'name' => $addon?->name ?? $labels[$key],
                 'is_full_service' => $isFull,
                 'sold_qty' => $qty,
                 'inside_full_service' => $isFull ? null : $insideQty,
@@ -133,5 +124,10 @@ class ServiceOpsReportController extends Controller
             'average_addons_per_job' => $jobCount > 0 ? round($addonQty / $jobCount, 2) : 0,
             'rows' => $rows,
         ]);
+    }
+
+    private static function key(string $name): string
+    {
+        return mb_strtolower(trim((string) preg_replace('/\s+/', ' ', $name)));
     }
 }
