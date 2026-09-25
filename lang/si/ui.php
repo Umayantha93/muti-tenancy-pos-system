@@ -101,6 +101,7 @@ return [
         'Bay calendar' => 'බේ දින දර්ශනය',
         'Job board' => 'රැකියා පුවරුව',
         'Service reminders' => 'සේවා සිහිකැඳවීම්',
+        'Station use' => 'ස්ථාන භාවිතය',
     ],
     'login' => [
         'one_platform' => 'එක් වේදිකාවක්. බොහෝ ව්‍යාපාර.',
