@@ -101,6 +101,7 @@ return [
         'Bay calendar' => 'Bay calendar',
         'Job board' => 'Job board',
         'Service reminders' => 'Service reminders',
+        'Station use' => 'Station use',
     ],
     'login' => [
         'one_platform' => 'One platform. Many businesses.',

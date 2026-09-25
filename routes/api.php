@@ -40,6 +40,7 @@ use App\Http\Controllers\DiscountTypeController;
 use App\Http\Controllers\ServiceVehicleClassController;
 use App\Http\Controllers\ServiceOpsReportController;
 use App\Http\Controllers\ServiceReminderController;
+use App\Http\Controllers\StationConsumableController;
 use App\Http\Controllers\StockReceiptController;
 use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
@@ -339,6 +340,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
         Route::middleware('feature:service_ops_report')->group(function () {
             Route::get('/reports/service-ops', [ServiceOpsReportController::class, 'show']);
+        });
+        Route::middleware(['role:business_owner', 'feature:station_consumables'])->group(function () {
+            Route::get('/station-consumables', [StationConsumableController::class, 'index']);
+            Route::post('/station-consumables', [StationConsumableController::class, 'store']);
+            Route::post('/station-consumables/{stock_issue}/close', [StationConsumableController::class, 'close']);
+            Route::delete('/station-consumables/{stock_issue}', [StationConsumableController::class, 'destroy']);
         });
         Route::middleware('feature:suppliers')->group(function () {
             Route::get('/suppliers', [SupplierController::class, 'index']);
