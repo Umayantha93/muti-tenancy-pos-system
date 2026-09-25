@@ -291,6 +291,68 @@ class ImplementationPlanTest extends TestCase
         $this->assertSame(0, Expense::query()->count());
     }
 
+    public function test_grn_price_can_wait_until_old_stock_is_sold(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Air Freshener', 'brand' => 'Areon', 'type' => 'accessory',
+            'price' => 250, 'cost_price' => 180, 'stock_qty' => 3,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
+            'items' => [[
+                'part_id' => $part->id, 'quantity' => 10, 'unit_cost' => 190,
+                'price' => 260, 'price_after_old_stock' => true,
+            ]],
+        ])->assertOk();
+        $part->refresh();
+        $this->assertEquals(250.0, (float) $part->price);
+        $this->assertEquals(260.0, (float) $part->pending_price);
+        $this->assertEquals(10.0, (float) $part->pending_price_at_qty);
+
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Walk-in', 'number_plate' => 'CAB-7788',
+        ])->assertCreated()->json('id');
+        $sell = fn (int $qty) => $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => $qty,
+        ])->assertCreated();
+
+        $sell(2)->assertJsonPath('item.unit_price', '250.00');
+        $this->assertEquals(250.0, (float) $part->fresh()->price);
+
+        $sell(1)->assertJsonPath('item.unit_price', '250.00');
+        $this->assertEquals(260.0, (float) $part->fresh()->price);
+        $this->assertNull($part->fresh()->pending_price);
+
+        $sell(1)->assertJsonPath('item.unit_price', '260.00');
+    }
+
+    public function test_grn_price_starts_now_when_no_old_stock_or_not_scheduled(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $empty = Part::create([
+            'name' => 'Wiper', 'brand' => 'Bosch', 'type' => 'accessory',
+            'price' => 900, 'cost_price' => 600, 'stock_qty' => 0,
+        ]);
+        $stocked = Part::create([
+            'name' => 'Polish', 'brand' => 'Turtle', 'type' => 'accessory',
+            'price' => 1200, 'cost_price' => 800, 'stock_qty' => 4,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
+            'items' => [
+                ['part_id' => $empty->id, 'quantity' => 5, 'unit_cost' => 650, 'price' => 950, 'price_after_old_stock' => true],
+                ['part_id' => $stocked->id, 'quantity' => 5, 'unit_cost' => 850, 'price' => 1300],
+            ],
+        ])->assertOk();
+
+        $this->assertEquals(950.0, (float) $empty->fresh()->price);
+        $this->assertNull($empty->fresh()->pending_price);
+        $this->assertEquals(1300.0, (float) $stocked->fresh()->price);
+    }
+
     public function test_bulk_restock_free_gift_has_no_expense_and_dilutes_cost(): void
     {
         Sanctum::actingAs($this->garageUser());

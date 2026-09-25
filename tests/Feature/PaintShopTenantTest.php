@@ -255,7 +255,7 @@ class PaintShopTenantTest extends TestCase
             'business_type' => $businessType,
             'owner_name' => 'Shop Owner',
             'owner_phone' => '0771002003',
-            'owner_email' => $ownerEmail,
+            'owner_email' => str_replace('@', '+'.uniqid().'@', $ownerEmail),
             'password' => 'password123',
             'payment_plan' => 'monthly',
             'plan_amount' => 15000,

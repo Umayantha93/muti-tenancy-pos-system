@@ -137,6 +137,7 @@ class GarageAdvancedOpsTest extends TestCase
             'description' => 'Oil filter',
             'quantity' => 1,
             'unit_price' => 6000,
+            'purchase_unit_cost' => 4500,
         ])->assertCreated();
 
         return Bill::withoutGlobalScopes()->with('tenant')->findOrFail($billId);

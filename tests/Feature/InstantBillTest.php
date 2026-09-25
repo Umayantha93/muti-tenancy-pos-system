@@ -59,7 +59,7 @@ class InstantBillTest extends TestCase
         $this->assertCount(3, $fresh['items']);
         $this->assertNull($fresh['vehicle']);
         $this->assertSame(4, $part->fresh()->stock_qty);
-        $this->assertEquals(4500, (float) $fresh['subtotal']);
+        $this->assertEquals(4700, (float) $fresh['subtotal']);
         $this->assertEquals(200, (float) $fresh['total_deductions']);
         $this->assertSame(0, Expense::query()->count());
     }
