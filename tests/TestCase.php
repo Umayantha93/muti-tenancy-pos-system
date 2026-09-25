@@ -2,6 +2,7 @@
 
 namespace Tests;
 
+use App\Support\BranchContext;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use RuntimeException;
 
@@ -18,6 +19,12 @@ abstract class TestCase extends BaseTestCase
         self::forceTestDatabase();
 
         return parent::createApplication();
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        BranchContext::clear();
     }
 
     protected function beforeRefreshingDatabase(): void

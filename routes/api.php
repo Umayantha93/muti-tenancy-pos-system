@@ -301,6 +301,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/service-addons', [ServiceAddonController::class, 'store'])->middleware('feature:billing');
             Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update'])->middleware('feature:billing');
             Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy'])->middleware('feature:billing');
+            Route::put('/service-addons/{addon}/vehicle-classes/{service_vehicle_class}', [ServiceAddonController::class, 'saveVehicleSetting'])->middleware('feature:billing');
             Route::post('/service-vehicle-classes', [ServiceVehicleClassController::class, 'store'])->middleware('feature:billing');
             Route::put('/service-vehicle-classes/{service_vehicle_class}', [ServiceVehicleClassController::class, 'update'])->middleware('feature:billing');
             Route::delete('/service-vehicle-classes/{service_vehicle_class}', [ServiceVehicleClassController::class, 'destroy'])->middleware('feature:billing');

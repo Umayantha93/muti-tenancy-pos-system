@@ -17,8 +17,7 @@ class StationConsumablesTest extends TestCase
     {
         $user = $this->garageUser();
         Sanctum::actingAs($user);
-        ServiceAddon::seedDefaultsFor((int) $user->tenant_id);
-        $engineWash = ServiceAddon::query()->where('name', 'Engine wash')->firstOrFail();
+        $engineWash = ServiceAddon::create(['name' => 'Engine wash', 'price' => 0, 'sort_order' => 10, 'active' => true]);
         $tin = Part::create([
             'name' => 'Hypower 20L', 'brand' => 'Hypower', 'type' => 'chemical',
             'price' => 22000, 'cost_price' => 18000, 'stock_qty' => 3,
@@ -36,7 +35,7 @@ class StationConsumablesTest extends TestCase
             'customer_name' => 'Nimal', 'customer_phone' => '0771234567',
             'number_plate' => 'CAB-9001', 'job_kind' => 'service',
         ])->assertCreated()->json('id');
-        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $engineWash->id, 'quantity' => 2])
+        $this->postJson("/api/bills/{$billId}/items", ['type' => 'service_addon', 'service_addon_id' => $engineWash->id, 'quantity' => 2, 'unit_price' => 1200])
             ->assertCreated();
 
         $this->getJson('/api/station-consumables')
@@ -57,7 +56,7 @@ class StationConsumablesTest extends TestCase
         $this->assertSame(1, StockIssue::query()->whereNotNull('closed_at')->count());
 
         $report = $this->getJson('/api/reports/service-ops')->assertOk()->json();
-        $row = collect($report['rows'])->firstWhere('service_addon_id', $engineWash->id);
+        $row = collect($report['rows'])->firstWhere('name', 'Engine wash');
         $this->assertEquals(18000, $row['consumable_cost']);
         $this->assertEquals(2400 - 18000, $row['profit']);
 

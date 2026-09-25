@@ -59,6 +59,7 @@ class BranchInventory
             $row->decrement('qty', $quantity);
             self::syncPartTotal($part);
             $part->refresh();
+            $part->applyPendingPriceIfDue();
         } finally {
             self::$mutating = false;
         }
@@ -145,6 +146,7 @@ class BranchInventory
         $branchId ??= BranchContext::id() ?? Branch::defaultIdFor($part->tenant_id);
         if (! $branchId) {
             $part->update(['stock_qty' => self::qty($quantity)]);
+            $part->applyPendingPriceIfDue();
 
             return;
         }
@@ -155,6 +157,7 @@ class BranchInventory
             $row->update(['qty' => self::qty($quantity)]);
             self::syncPartTotal($part);
             $part->refresh();
+            $part->applyPendingPriceIfDue();
         } finally {
             self::$mutating = false;
         }

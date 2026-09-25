@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\ServiceAddon;
+use App\Models\ServiceAddonPrice;
+use App\Models\ServiceVehicleClass;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,15 +20,40 @@ class ServiceAddonController extends Controller
             ServiceAddon::seedDefaultsFor((int) $tenant->id, $tenant->business_type);
         }
 
-        $classId = $request->query('service_vehicle_class_id');
         $addons = ServiceAddon::query()
-            ->with(['inclusions', 'vehicleClass:id,name'])
-            ->when($classId !== null && $classId !== '', fn ($query) => $query->where('service_vehicle_class_id', (int) $classId))
+            ->with(['inclusions', 'vehiclePrices:id,service_addon_id,service_vehicle_class_id,price,offered'])
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
 
         return $this->moneyJson($addons);
+    }
+
+    /**
+     * Save how one vehicle type uses one blueprint service. Offered with no price is the default, so it keeps no row.
+     */
+    public function saveVehicleSetting(Request $request, ServiceAddon $addon, ServiceVehicleClass $service_vehicle_class): JsonResponse
+    {
+        $this->assertAddonWorkspace($request);
+        $data = $request->validate([
+            'offered' => ['required', 'boolean'],
+            'price' => ['nullable', 'numeric', 'min:0'],
+        ]);
+        $price = $data['price'] ?? null;
+
+        if ($data['offered'] && $price === null) {
+            ServiceAddonPrice::query()
+                ->where('service_addon_id', $addon->id)
+                ->where('service_vehicle_class_id', $service_vehicle_class->id)
+                ->delete();
+        } else {
+            ServiceAddonPrice::updateOrCreate(
+                ['service_addon_id' => $addon->id, 'service_vehicle_class_id' => $service_vehicle_class->id],
+                ['offered' => $data['offered'], 'price' => $price],
+            );
+        }
+
+        return $this->moneyJson($addon->fresh()->load(['inclusions', 'vehiclePrices:id,service_addon_id,service_vehicle_class_id,price,offered']));
     }
 
     public function store(Request $request): JsonResponse
@@ -36,14 +63,9 @@ class ServiceAddonController extends Controller
         $included = $data['included_addon_ids'] ?? [];
         unset($data['included_addon_ids']);
 
-        if ($request->user()->tenant?->business_type === BusinessTypes::GARAGE && empty($data['service_vehicle_class_id'])) {
-            throw ValidationException::withMessages([
-                'service_vehicle_class_id' => ['Choose a vehicle type for this service.'],
-            ]);
-        }
-
         $addon = ServiceAddon::create([
             ...$data,
+            'price' => $data['price'] ?? 0,
             'sort_order' => $data['sort_order'] ?? ((int) ServiceAddon::query()->max('sort_order') + 10),
             'active' => $data['active'] ?? true,
             'is_full_service' => false,
@@ -51,7 +73,7 @@ class ServiceAddonController extends Controller
 
         $this->syncFullService($addon, (bool) ($data['is_full_service'] ?? false), $included);
 
-        return $this->moneyJson($addon->fresh()->load(['inclusions', 'vehicleClass:id,name']), 201);
+        return $this->moneyJson($addon->fresh()->load('inclusions'), 201);
     }
 
     public function update(Request $request, ServiceAddon $addon): JsonResponse
@@ -69,7 +91,7 @@ class ServiceAddonController extends Controller
         $addon->update($data);
         $this->syncFullService($addon->fresh(), $makeFull, $included);
 
-        return $this->moneyJson($addon->fresh()->load(['inclusions', 'vehicleClass:id,name']));
+        return $this->moneyJson($addon->fresh()->load('inclusions'));
     }
 
     public function destroy(Request $request, ServiceAddon $addon): JsonResponse
@@ -90,16 +112,16 @@ class ServiceAddonController extends Controller
         $isGarage = $request->user()->tenant?->business_type === BusinessTypes::GARAGE;
 
         return $request->validate([
-            'name' => [$creating ? 'required' : 'sometimes', 'string', 'max:255'],
-            'price' => [$creating ? 'required' : 'sometimes', 'numeric', 'min:0'],
+            'name' => [
+                $creating ? 'required' : 'sometimes',
+                'string',
+                'max:255',
+                Rule::unique('service_addons', 'name')->where('tenant_id', $tenantId)->ignore($addonId),
+            ],
+            'price' => [$creating && ! $isGarage ? 'required' : 'sometimes', 'numeric', 'min:0'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'is_full_service' => ['sometimes', 'boolean'],
             'active' => ['sometimes', 'boolean'],
-            'service_vehicle_class_id' => [
-                $creating && $isGarage ? 'required' : 'nullable',
-                'integer',
-                Rule::exists('service_vehicle_classes', 'id')->where('tenant_id', $tenantId),
-            ],
             'included_addon_ids' => ['nullable', 'array'],
             'included_addon_ids.*' => [
                 'integer',
@@ -115,16 +137,9 @@ class ServiceAddonController extends Controller
     private function syncFullService(ServiceAddon $addon, bool $isFull, ?array $includedIds): void
     {
         if ($isFull) {
-            $query = ServiceAddon::query()->where('id', '!=', $addon->id);
-            if ($addon->service_vehicle_class_id) {
-                $query->where('service_vehicle_class_id', $addon->service_vehicle_class_id);
-            } else {
-                $query->whereNull('service_vehicle_class_id');
-            }
-            $query->update(['is_full_service' => false]);
+            ServiceAddon::query()->where('id', '!=', $addon->id)->update(['is_full_service' => false]);
             $addon->update(['is_full_service' => true]);
             if ($includedIds !== null) {
-                $this->assertInclusionsSameClass($addon, $includedIds);
                 $addon->inclusions()->sync(array_values(array_unique(array_map('intval', $includedIds))));
             }
         } else {
@@ -132,33 +147,6 @@ class ServiceAddonController extends Controller
             if ($includedIds !== null) {
                 $addon->inclusions()->sync([]);
             }
-        }
-    }
-
-    /**
-     * @param  list<int>  $includedIds
-     */
-    private function assertInclusionsSameClass(ServiceAddon $addon, array $includedIds): void
-    {
-        if ($includedIds === []) {
-            return;
-        }
-        $classId = $addon->service_vehicle_class_id;
-        $mismatched = ServiceAddon::query()
-            ->whereIn('id', $includedIds)
-            ->when(
-                $classId === null,
-                fn ($query) => $query->whereNotNull('service_vehicle_class_id'),
-                fn ($query) => $query->where(function ($inner) use ($classId) {
-                    $inner->whereNull('service_vehicle_class_id')
-                        ->orWhere('service_vehicle_class_id', '!=', $classId);
-                }),
-            )
-            ->exists();
-        if ($mismatched) {
-            throw ValidationException::withMessages([
-                'included_addon_ids' => ['Full service can only include services from the same vehicle type.'],
-            ]);
         }
     }
 
