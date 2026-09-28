@@ -8,6 +8,7 @@ use App\Models\ExpenseSettlement;
 use App\Models\Supplier;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
+use App\Support\ExpenseJobKind;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -279,9 +280,11 @@ class ExpenseController extends Controller
     private function validated(Request $request, bool $update = false): array
     {
         $tenantId = $request->user()->tenant_id;
+        $jobKindRequired = ! $update && ExpenseJobKind::enabledFor($request->user());
 
         return $request->validate([
             'category' => [$update ? 'sometimes' : 'required', 'string', 'max:100', 'not_in:salary'],
+            'job_kind' => [$jobKindRequired ? 'required' : 'nullable', Rule::in(ExpenseJobKind::all())],
             'description' => [$update ? 'sometimes' : 'required', 'string', 'max:255'],
             'amount' => [$update ? 'sometimes' : 'required', 'numeric', 'gt:0'],
             'expense_date' => [$update ? 'sometimes' : 'required', 'date'],
