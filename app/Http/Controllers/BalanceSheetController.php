@@ -7,11 +7,14 @@ use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\BillRefund;
 use App\Models\Expense;
+use App\Models\ExpenseCheque;
 use App\Models\ExpenseSettlement;
 use App\Models\Payroll;
+use App\Models\User;
 use App\Services\BillProfitAnalyzer;
 use App\Services\MonetaryView;
 use App\Support\BranchQuery;
+use App\Support\ExpenseJobKind;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -26,12 +29,9 @@ class BalanceSheetController extends Controller
         $month = $data['month'] ?? now()->month;
         $year = $data['year'];
         $view = MonetaryView::for();
-        $summary = $this->summary($month, $year, $view, true);
 
         return response()->json([
-            'period' => ['month' => $month, 'year' => $year],
-            ...$summary,
-            'accounts' => $this->accounts($month, $year, $view),
+            ...$this->monthlyReport($month, $year, $request->user()),
             'inventory_payables' => $this->inventoryPayables($view),
             'bill_receivables' => $this->billReceivables($view),
             'yearly_trend' => collect(range(1, 12))->map(fn ($trendMonth) => [
@@ -39,6 +39,110 @@ class BalanceSheetController extends Controller
                 ...$this->summary($trendMonth, $year, $view, false),
             ])->all(),
         ]);
+    }
+
+    /**
+     * Summary + ledger for one month; shared by the Finance page and the report download.
+     *
+     * @return array<string, mixed>
+     */
+    public function monthlyReport(int $month, int $year, ?User $user): array
+    {
+        $view = MonetaryView::for();
+        $report = [
+            'period' => ['month' => $month, 'year' => $year],
+            ...$this->summary($month, $year, $view, true),
+            'accounts' => $this->accounts($month, $year, $view),
+        ];
+        if (ExpenseJobKind::enabledFor($user)) {
+            $report['expense_split'] = $this->expenseSplit($month, $year, $view);
+        }
+
+        return $report;
+    }
+
+    /**
+     * @return array{repair: float, service: float, other: float}
+     */
+    private function expenseSplit(int $month, int $year, MonetaryView $view): array
+    {
+        $split = ['repair' => 0.0, 'service' => 0.0, 'other' => 0.0];
+        $bucket = fn (?string $kind): string => in_array($kind, ExpenseJobKind::all(), true) ? $kind : 'other';
+
+        BranchQuery::constrain(Expense::postedIn($month, $year))
+            ->selectRaw('job_kind, SUM(amount) as total')
+            ->groupBy('job_kind')
+            ->get()
+            ->each(function ($row) use (&$split, $bucket) {
+                $split[$bucket($row->job_kind)] += (float) $row->total;
+            });
+
+        ExpenseSettlement::query()
+            ->with('expense:id,job_kind')
+            ->whereHas('expense', function ($query) {
+                $id = BranchQuery::idForRead();
+                if ($id !== null) {
+                    $query->where('branch_id', $id);
+                }
+            })
+            ->whereYear('settled_on', $year)
+            ->whereMonth('settled_on', $month)
+            ->get()
+            ->each(function (ExpenseSettlement $settlement) use (&$split, $bucket) {
+                $split[$bucket($settlement->expense?->job_kind)] += (float) $settlement->amount;
+            });
+
+        $split['other'] += (float) BranchQuery::constrain(Payroll::query())
+            ->where('year', $year)->where('month', $month)->sum('net_salary');
+
+        return array_map(
+            fn (float $amount) => $view->active() ? $view->scaleExpense($amount) : round($amount, 2),
+            $split
+        );
+    }
+
+    /**
+     * @return array{vehicle: string|null, details: string|null}
+     */
+    private function billContext(?Bill $bill): array
+    {
+        if (! $bill) {
+            return ['vehicle' => null, 'details' => null];
+        }
+        $vehicle = $bill->vehicle;
+        $parts = [];
+        $makeModel = trim(($vehicle?->make ?? '').' '.($vehicle?->model ?? ''));
+        if ($makeModel !== '') {
+            $parts[] = $makeModel;
+        }
+        if ($bill->customer?->name) {
+            $parts[] = 'Customer: '.$bill->customer->name;
+        }
+        $kind = match ($bill->job_kind) {
+            Bill::JOB_KIND_REPAIR => 'Repair job',
+            Bill::JOB_KIND_SERVICE => 'Service job',
+            Bill::JOB_KIND_PARTS_SALE => 'Parts sale',
+            default => null,
+        };
+        if ($kind) {
+            $parts[] = $kind;
+        }
+
+        return [
+            'vehicle' => $vehicle?->number_plate ?: null,
+            'details' => $parts === [] ? null : implode(' · ', $parts),
+        ];
+    }
+
+    private function expenseDetails(?Expense $expense, ?string $extra = null): ?string
+    {
+        $parts = array_filter([
+            ExpenseJobKind::label($expense?->job_kind),
+            $expense?->supplier?->name ? 'Supplier: '.$expense->supplier->name : null,
+            $extra,
+        ]);
+
+        return $parts === [] ? null : implode(' · ', $parts);
     }
 
     private function summary(int $month, int $year, MonetaryView $view, bool $withBreakdown = true): array
@@ -149,10 +253,16 @@ class BalanceSheetController extends Controller
     private function accounts(int $month, int $year, MonetaryView $view): array
     {
         $rows = collect();
+        $billWith = [
+            'bill:id,bill_number,vehicle_id,customer_id,job_kind',
+            'bill.vehicle:id,number_plate,make,model',
+            'bill.customer:id,name',
+            'bill.items',
+        ];
 
         BillPayment::query()
             ->countingTowardPaid()
-            ->with(['bill:id,bill_number', 'bill.items'])
+            ->with($billWith)
             ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
             ->whereYear('paid_at', $year)
             ->whereMonth('paid_at', $month)
@@ -167,7 +277,10 @@ class BalanceSheetController extends Controller
                     'date' => $payment->paid_at?->toDateString(),
                     'sort_at' => $payment->paid_at?->format('Y-m-d H:i:s') ?? '',
                     'description' => 'Payment received'.($payment->method ? ' · '.str_replace('_', ' ', $payment->method) : ''),
-                    'reference' => $payment->reference ?: ($payment->bill?->bill_number),
+                    'reference' => $payment->bill?->bill_number
+                        ? $payment->bill->bill_number.($payment->reference && $payment->reference !== $payment->bill->bill_number ? ' · '.$payment->reference : '')
+                        : $payment->reference,
+                    ...$this->billContext($payment->bill),
                     'category' => 'Sales Revenue',
                     'type' => 'income',
                     'debit' => 0.0,
@@ -176,7 +289,7 @@ class BalanceSheetController extends Controller
             });
 
         BillItem::query()
-            ->with(['bill:id,bill_number', 'bill.items'])
+            ->with($billWith)
             ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
             ->where('type', 'advance')
             ->whereYear('created_at', $year)
@@ -193,6 +306,7 @@ class BalanceSheetController extends Controller
                     'sort_at' => $item->created_at?->format('Y-m-d H:i:s') ?? '',
                     'description' => $item->description ?: 'Customer advance',
                     'reference' => $item->bill?->bill_number,
+                    ...$this->billContext($item->bill),
                     'category' => 'Advances',
                     'type' => 'income',
                     'debit' => 0.0,
@@ -201,7 +315,7 @@ class BalanceSheetController extends Controller
             });
 
         BillRefund::query()
-            ->with(['bill:id,bill_number', 'bill.items'])
+            ->with($billWith)
             ->tap(fn ($query) => BranchQuery::constrainViaBill($query))
             ->whereYear('refunded_at', $year)
             ->whereMonth('refunded_at', $month)
@@ -218,6 +332,7 @@ class BalanceSheetController extends Controller
                     'sort_at' => ($refund->refunded_at?->format('Y-m-d') ?? '').' 12:05:00',
                     'description' => 'Bill refund'.($refund->reason ? ' · '.$refund->reason : ''),
                     'reference' => $refund->bill?->bill_number,
+                    ...$this->billContext($refund->bill),
                     'category' => 'Refunds',
                     'type' => 'refund',
                     'debit' => $amount,
@@ -227,6 +342,7 @@ class BalanceSheetController extends Controller
 
         Expense::query()
             ->postedIn($month, $year)
+            ->with('supplier:id,name')
             ->tap(fn ($query) => BranchQuery::constrain($query))
             ->orderBy('expense_date')
             ->get()
@@ -241,6 +357,8 @@ class BalanceSheetController extends Controller
                     'sort_at' => ($expense->settled_at?->format('Y-m-d H:i:s') ?? (($expense->expense_date?->format('Y-m-d') ?? '').' 12:00:00')),
                     'description' => $expense->description,
                     'reference' => null,
+                    'vehicle' => null,
+                    'details' => $this->expenseDetails($expense),
                     'category' => ucwords(str_replace('_', ' ', $expense->category)),
                     'type' => 'expense',
                     'debit' => $amount,
@@ -249,7 +367,7 @@ class BalanceSheetController extends Controller
             });
 
         ExpenseSettlement::query()
-            ->with('expense:id,description,category,branch_id')
+            ->with(['expense:id,description,category,branch_id,job_kind,supplier_id', 'expense.supplier:id,name'])
             ->whereHas('expense', function ($query) {
                 $id = BranchQuery::idForRead();
                 if ($id !== null) {
@@ -270,6 +388,8 @@ class BalanceSheetController extends Controller
                     'sort_at' => ($settlement->settled_on?->format('Y-m-d') ?? '').' 12:15:00',
                     'description' => ($settlement->expense?->description ?: 'Supplier credit').' · settlement',
                     'reference' => null,
+                    'vehicle' => null,
+                    'details' => $this->expenseDetails($settlement->expense),
                     'category' => ucwords(str_replace('_', ' ', $settlement->expense?->category ?: 'inventory')),
                     'type' => 'expense',
                     'debit' => $amount,
@@ -279,6 +399,7 @@ class BalanceSheetController extends Controller
 
         Expense::query()
             ->credit()
+            ->with('supplier:id,name')
             ->tap(fn ($query) => BranchQuery::constrain($query))
             ->whereYear('expense_date', $year)
             ->whereMonth('expense_date', $month)
@@ -293,7 +414,9 @@ class BalanceSheetController extends Controller
                     'date' => $expense->expense_date?->toDateString() ?? $expense->expense_date,
                     'sort_at' => ($expense->expense_date?->format('Y-m-d') ?? '').' 12:30:00',
                     'description' => $expense->description.' · supplier credit (not in profit until paid)',
-                    'reference' => $expense->due_date?->toDateString(),
+                    'reference' => $expense->due_date ? 'Due '.$expense->due_date->toDateString() : null,
+                    'vehicle' => null,
+                    'details' => $this->expenseDetails($expense),
                     'category' => 'Inventory payable',
                     'type' => 'payable',
                     'debit' => $remaining,
@@ -303,7 +426,7 @@ class BalanceSheetController extends Controller
 
         $analyzer = app(BillProfitAnalyzer::class);
         BranchQuery::constrain(Bill::query())
-            ->with(['items.part'])
+            ->with(['items.part', 'vehicle:id,number_plate,make,model', 'customer:id,name'])
             ->whereNotNull('closed_at')
             ->whereYear('closed_at', $year)
             ->whereMonth('closed_at', $month)
@@ -321,6 +444,7 @@ class BalanceSheetController extends Controller
                         number_format($summary['profit'], 2, '.', '')
                     ),
                     'reference' => $bill->bill_number,
+                    ...$this->billContext($bill),
                     'category' => $summary['billing_type'] === 'credit' ? 'Credit bill' : 'Bill profit',
                     'type' => 'bill',
                     'debit' => 0.0,
@@ -344,6 +468,8 @@ class BalanceSheetController extends Controller
                     'sort_at' => $day.' 23:59:00',
                     'description' => 'Salary · '.($payroll->employee?->name ?? 'Employee'),
                     'reference' => sprintf('PAY-%04d-%02d-%d', $year, $month, $payroll->id),
+                    'vehicle' => null,
+                    'details' => null,
                     'category' => 'Salaries',
                     'type' => 'expense',
                     'debit' => $amount,
@@ -402,10 +528,10 @@ class BalanceSheetController extends Controller
                     ? $view->scaleExpense($expense->availableToPay())
                     : $expense->availableToPay();
                 $pendingCheques = $expense->cheques
-                    ->where('status', \App\Models\ExpenseCheque::STATUS_PENDING)
+                    ->where('status', ExpenseCheque::STATUS_PENDING)
                     ->sortBy('cheque_date')
                     ->values()
-                    ->map(function (\App\Models\ExpenseCheque $row) use ($view) {
+                    ->map(function (ExpenseCheque $row) use ($view) {
                         $amount = $view->active()
                             ? $view->scaleExpense((float) $row->amount)
                             : (float) $row->amount;

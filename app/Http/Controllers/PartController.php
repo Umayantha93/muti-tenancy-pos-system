@@ -14,6 +14,7 @@ use App\Services\BranchInventory;
 use App\Services\PartBarcode;
 use App\Services\PartSerials;
 use App\Support\BusinessTypes;
+use App\Support\ExpenseJobKind;
 use App\Support\InventoryCosting;
 use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
@@ -580,6 +581,7 @@ class PartController extends Controller
             'payment_status' => ['nullable', Rule::in(['paid', 'credit'])],
             'due_date' => ['nullable', 'date', 'after_or_equal:today', 'required_if:payment_status,credit'],
             'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'job_kind' => ['nullable', Rule::in(ExpenseJobKind::all())],
             'serials' => ['nullable', 'array'],
             'serials.*' => ['string', 'max:40'],
         ]);
@@ -705,6 +707,7 @@ class PartController extends Controller
             $data['payment_status'] ?? 'paid',
             $data['due_date'] ?? null,
             $this->resolveSupplierId($request, $data['supplier_id'] ?? null),
+            $data['job_kind'] ?? null,
         );
 
         return [$part->refresh(), $expense];
@@ -992,6 +995,7 @@ class PartController extends Controller
         string $paymentStatus = 'paid',
         ?string $dueDate = null,
         ?int $supplierId = null,
+        ?string $jobKind = null,
     ): ?Expense {
         if ($quantity <= 0 || $unitCost <= 0) {
             return null;
@@ -1002,6 +1006,7 @@ class PartController extends Controller
 
         $expense = Expense::create([
             'category' => 'inventory',
+            'job_kind' => $jobKind,
             'description' => $paid
                 ? "Stock purchase: {$part->name} × {$quantity}"
                 : "Stock purchase on credit: {$part->name} × {$quantity}",

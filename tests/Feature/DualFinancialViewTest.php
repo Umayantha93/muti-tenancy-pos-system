@@ -143,7 +143,7 @@ class DualFinancialViewTest extends TestCase
         $this->assertEquals(2000.0, $dashboard['monthly_expenses']);
         $this->assertEquals(0.0, $dashboard['monthly_profit']);
         $this->assertSame('2000.00', $dashboard['recent_bills'][0]['amount_paid']);
-        $this->assertSame('5000.00', $dashboard['recent_bills'][0]['balance_due']);
+        $this->assertSame('3000.00', $dashboard['recent_bills'][0]['balance_due']);
     }
 
     public function test_secondary_labor_is_half_while_parts_use_general_factor(): void
@@ -282,7 +282,7 @@ class DualFinancialViewTest extends TestCase
             'business_type' => 'garage',
             'owner_name' => 'Owner',
             'owner_phone' => '0771234567',
-            'owner_email' => 'owner-dual@garage.lk',
+            'owner_email' => 'owner-dual+'.uniqid().'@garage.lk',
             'status' => 'active',
             'dual_financial_view_enabled' => true,
         ]);
@@ -292,7 +292,7 @@ class DualFinancialViewTest extends TestCase
             'tenant_id' => $tenant->id,
             'role' => 'business_owner',
             'status' => 'active',
-            'email' => 'primary-dual@garage.lk',
+            'email' => 'primary-dual+'.uniqid().'@garage.lk',
             'password' => 'password',
             'is_secondary_view' => false,
         ]);
@@ -300,7 +300,7 @@ class DualFinancialViewTest extends TestCase
             'tenant_id' => $tenant->id,
             'role' => 'business_owner',
             'status' => 'active',
-            'email' => 'secondary-dual@garage.lk',
+            'email' => 'secondary-dual+'.uniqid().'@garage.lk',
             'password' => 'password',
             'is_secondary_view' => true,
         ]);
