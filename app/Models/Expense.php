@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'category',
+    'job_kind',
     'description',
     'amount',
     'amount_paid',

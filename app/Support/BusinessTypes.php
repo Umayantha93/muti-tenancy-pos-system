@@ -52,6 +52,7 @@ class BusinessTypes
             self::GARAGE => array_merge($garageFamily, [
                 'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos',
                 'service_reminders', 'service_ops_report', 'station_consumables',
+                'expense_job_split', 'finance_report_export',
             ]),
             self::TYRE => $garageFamily,
             self::DEVICE_REPAIR => array_merge($garageFamily, ['serial_inventory']),
@@ -82,6 +83,7 @@ class BusinessTypes
             self::GARAGE => [
                 'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos',
                 'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
+                'expense_job_split', 'finance_report_export',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
             ],
             self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up', ...$whatsapp],
@@ -375,6 +377,8 @@ class BusinessTypes
             'service_reminders' => 'bill_sms',
             'serial_inventory' => 'parts_inventory',
             'bill_whatsapp' => 'billing',
+            'expense_job_split' => 'balance_sheet',
+            'finance_report_export' => 'balance_sheet',
         ];
     }
 
@@ -397,6 +401,7 @@ class BusinessTypes
             'serial_inventory' => ['parts_inventory'],
             'station_consumables' => ['parts_inventory'],
             'bill_whatsapp' => ['billing'],
+            'expense_job_split', 'finance_report_export' => ['balance_sheet'],
             default => [],
         };
     }
@@ -446,6 +451,9 @@ class BusinessTypes
         }
         if (! isset($set['billing'])) {
             unset($set['bill_whatsapp']);
+        }
+        if (! isset($set['balance_sheet'])) {
+            unset($set['expense_job_split'], $set['finance_report_export']);
         }
 
         if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])

@@ -21,6 +21,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
+use App\Http\Controllers\FinanceReportController;
 use App\Http\Controllers\JobPhotoController;
 use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\JobBoardController;
@@ -390,6 +391,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::apiResource('expenses', ExpenseController::class)->except('show');
             Route::post('/expenses/{expense}/settle', [ExpenseController::class, 'settle']);
             Route::get('/balance-sheet', BalanceSheetController::class);
+            Route::get('/balance-sheet/export', FinanceReportController::class)->middleware('feature:finance_report_export');
         });
     });
 });

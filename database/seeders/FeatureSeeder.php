@@ -55,6 +55,8 @@ class FeatureSeeder extends Seeder
             ['key' => 'cash_up', 'name' => 'Day-end cash-up', 'description' => 'Cash, card, bank, and cheque vs drawer count per cashier and shop. Default on for stores; optional for garage.', 'group' => 'Finance', 'sort_order' => 81],
             ['key' => 'reports', 'name' => 'Reports', 'description' => 'Business reporting and trends', 'group' => 'Finance', 'sort_order' => 90],
             ['key' => 'service_ops_report', 'name' => 'Service operations report', 'description' => 'Count billed garage service addons (sold qty vs inside full service) with revenue. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 91],
+            ['key' => 'expense_job_split', 'name' => 'Repair / service expenses', 'description' => 'Every new expense must be tagged Repair or Service, and Finance shows the two totals separately. Garage only. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 92],
+            ['key' => 'finance_report_export', 'name' => 'Finance report download', 'description' => 'Download the monthly Finance report as Excel or PDF — daily table only, or full with every day\'s detail lines. Garage only. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 93],
         ];
     }
 }
