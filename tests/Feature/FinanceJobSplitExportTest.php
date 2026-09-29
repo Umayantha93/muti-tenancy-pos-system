@@ -79,6 +79,12 @@ class FinanceJobSplitExportTest extends TestCase
         $this->get("/api/balance-sheet/export?{$query}&format=pdf&type=full")->assertOk();
     }
 
+    public function test_logged_out_download_gets_401_instead_of_login_redirect_crash(): void
+    {
+        $this->get('/api/balance-sheet/export?month=9&year=2026&format=pdf&type=full')
+            ->assertUnauthorized();
+    }
+
     private function garageUser(array $extra): User
     {
         $keys = [
