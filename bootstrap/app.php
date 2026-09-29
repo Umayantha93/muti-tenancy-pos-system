@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\ServeCommand::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->redirectGuestsTo(fn (Request $request) => $request->is('api/*') ? null : '/');
         $middleware->api(prepend: [
             SetLocale::class,
         ]);
