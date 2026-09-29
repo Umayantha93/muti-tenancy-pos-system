@@ -17,6 +17,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class FinanceReportController extends Controller
 {
+    private const PDF_MEMORY_BYTES = 1024 * 1024 * 1024;
+
     private const DETAIL_HEADERS = ['Date', 'Description', 'Reference / Bill #', 'Vehicle', 'Details', 'Category', 'Debit', 'Credit'];
 
     public function __invoke(Request $request, BalanceSheetController $sheets): Response|StreamedResponse
@@ -191,6 +193,8 @@ class FinanceReportController extends Controller
 
     private function pdf(array $report, array $days, array $meta, string $filename): Response
     {
+        $this->raiseLimitsForPdf();
+
         $options = new Options;
         $options->set('defaultFont', 'DejaVu Sans');
         $dompdf = new Dompdf($options);
@@ -202,6 +206,30 @@ class FinanceReportController extends Controller
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="'.$filename.'"',
         ]);
+    }
+
+    /**
+     * dompdf keeps the whole layout in memory, so a busy month's full report outgrows PHP-FPM's usual 128M.
+     */
+    private function raiseLimitsForPdf(): void
+    {
+        $limit = trim((string) ini_get('memory_limit'));
+        if ($limit !== '-1' && $this->toBytes($limit) < self::PDF_MEMORY_BYTES) {
+            ini_set('memory_limit', (string) self::PDF_MEMORY_BYTES);
+        }
+        set_time_limit(300);
+    }
+
+    private function toBytes(string $value): int
+    {
+        $number = (int) $value;
+
+        return match (strtolower(substr($value, -1))) {
+            'g' => $number * 1024 ** 3,
+            'm' => $number * 1024 ** 2,
+            'k' => $number * 1024,
+            default => $number,
+        };
     }
 
     private function pdfHtml(array $report, array $days, array $meta): string
