@@ -12,6 +12,7 @@ use App\Models\Vehicle;
 use App\Services\BillCalculator;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
+use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -243,18 +244,28 @@ class BillController extends Controller
 
                 if ($lineType === 'part') {
                     $part = Part::lockForUpdate()->findOrFail($line['part_id']);
+                    if ($quantityError = StockUnit::quantityError($part->stock_unit, $qty, $request->user()?->tenant?->business_type)) {
+                        throw ValidationException::withMessages(['quantity' => [$quantityError]]);
+                    }
+                    $explicitPrice = array_key_exists('unit_price', $line) && $line['unit_price'] !== null && $line['unit_price'] !== '';
+                    $layers = $explicitPrice
+                        ? [['quantity' => $qty, 'unit_price' => (float) $line['unit_price']]]
+                        : $part->salePriceLayers($qty);
+                    foreach ($layers as $layer) {
+                        $layerQty = (float) $layer['quantity'];
+                        $unitPrice = round((float) $layer['unit_price'], 2);
+                        BillItem::create([
+                            'bill_id' => $bill->id,
+                            'type' => 'part',
+                            'part_id' => $part->id,
+                            'description' => $part->name,
+                            'quantity' => $layerQty,
+                            'unit_price' => $unitPrice,
+                            'line_total' => round($unitPrice * $layerQty, 2),
+                            'purchase_unit_cost' => $part->cost_price,
+                        ]);
+                    }
                     $part->takeStock($qty);
-                    $unitPrice = (float) $part->price;
-                    BillItem::create([
-                        'bill_id' => $bill->id,
-                        'type' => 'part',
-                        'part_id' => $part->id,
-                        'description' => $part->name,
-                        'quantity' => $qty,
-                        'unit_price' => $unitPrice,
-                        'line_total' => round($unitPrice * $qty, 2),
-                        'purchase_unit_cost' => $part->cost_price,
-                    ]);
                     continue;
                 }
 
@@ -390,6 +401,7 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             ...$this->driverRules(),
+            'number_plate' => ['sometimes', 'required', 'string', 'max:30'],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
@@ -414,7 +426,7 @@ class BillController extends Controller
             }
         }
 
-        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts', 'driver_name', 'driver_phone'])->isEmpty();
+        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts', 'driver_name', 'driver_phone', 'number_plate'])->isEmpty();
         if ($bill->isClosed()) {
             abort(422, 'Closed bills cannot be edited.');
         }
@@ -427,6 +439,10 @@ class BillController extends Controller
         }
         if (($data['status'] ?? null) === 'owe_in') {
             abort(422, 'Use the Owe In action to mark a bill on credit.');
+        }
+        if (array_key_exists('number_plate', $data)) {
+            $this->correctVehicleNumber($bill, (string) $data['number_plate']);
+            unset($data['number_plate']);
         }
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
         if ($employeeIds !== null) {
@@ -595,6 +611,28 @@ class BillController extends Controller
     /**
      * @return array<string, list<string>>
      */
+    private function correctVehicleNumber(Bill $bill, string $numberPlate): void
+    {
+        abort_unless($bill->vehicle, 422, 'This job has no vehicle number to change.');
+        $plate = strtoupper(trim($numberPlate));
+        abort_if($plate === '', 422, 'Enter the vehicle number.');
+        if (strcasecmp((string) $bill->vehicle->number_plate, $plate) === 0) {
+            return;
+        }
+
+        $existing = Vehicle::query()
+            ->where('number_plate', $plate)
+            ->whereKeyNot($bill->vehicle_id)
+            ->first();
+        if ($existing) {
+            $bill->vehicle_id = $existing->id;
+
+            return;
+        }
+
+        $bill->vehicle->update(['number_plate' => $plate]);
+    }
+
     private function driverRules(): array
     {
         return [

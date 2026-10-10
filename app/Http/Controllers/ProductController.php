@@ -105,7 +105,8 @@ class ProductController extends Controller
                 ? (float) $data['unit_cost']
                 : (float) ($product->cost_price ?? 0);
             $shopQty = BranchInventory::productQty($product->id);
-            $blendedCost = InventoryCosting::weightedAverageCost(
+            $blendedCost = InventoryCosting::catalogueCost(
+                $request->user()?->tenant?->inventory_cost_method,
                 $shopQty,
                 $product->cost_price,
                 $qty,

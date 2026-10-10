@@ -13,6 +13,7 @@ use App\Services\BillCalculator;
 use App\Services\BranchInventory;
 use App\Services\PartSerials;
 use App\Support\BusinessTypes;
+use App\Support\StockUnit;
 use App\Support\WarrantyPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -322,17 +323,26 @@ class BillItemController extends Controller
             throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part at this shop.']]);
         }
 
-        $unitPrice = $data['type'] === 'customer_part'
-            ? 0.0
-            : (float) ($data['unit_price'] ?? $part?->price ?? 0);
+        $businessType = $request->user()?->tenant?->business_type;
+        if ($part && ($quantityError = StockUnit::quantityError($part->stock_unit, $quantity, $businessType))) {
+            throw ValidationException::withMessages(['quantity' => [$quantityError]]);
+        }
+
+        $explicitPrice = array_key_exists('unit_price', $data) && $data['unit_price'] !== null && $data['unit_price'] !== '';
+        if ($data['type'] === 'customer_part') {
+            $layers = [['quantity' => $quantity, 'unit_price' => 0.0]];
+        } elseif ($part && ! $explicitPrice && $serials === []) {
+            $layers = $part->salePriceLayers($quantity);
+        } else {
+            $layers = [[
+                'quantity' => $quantity,
+                'unit_price' => (float) ($explicitPrice ? $data['unit_price'] : ($part?->price ?? 0)),
+            ]];
+        }
 
         $discountPercent = null;
         if ($kind === 'stock' && isset($data['discount_percent']) && $data['discount_percent'] !== null && $data['discount_percent'] !== '') {
             $discountPercent = max(0, min(100, (float) $data['discount_percent']));
-        }
-        $lineTotal = round($unitPrice * $quantity, 2);
-        if ($discountPercent !== null && $discountPercent > 0) {
-            $lineTotal = round($lineTotal * (1 - ($discountPercent / 100)), 2);
         }
 
         $purchaseUnitCost = $part
@@ -354,33 +364,49 @@ class BillItemController extends Controller
             ]);
         }
 
-        $item = $bill->items()->create([
-            'part_id' => $part?->id,
-            'service_addon_id' => $data['service_addon_id'] ?? null,
-            'labor_item_id' => $data['labor_item_id'] ?? null,
-            'panel_group_id' => $data['panel_group_id'] ?? null,
-            'panel_name' => $data['panel_name'] ?? null,
-            'type' => $data['type'],
-            'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
-            'included_services' => $data['included_services'] ?? null,
-            'quantity' => $quantity,
-            'unit_price' => $unitPrice,
-            'discount_percent' => $discountPercent,
-            'purchase_unit_cost' => $purchaseUnitCost,
-            'purchase_expense_id' => $expense?->id,
-            'line_total' => $lineTotal,
-            ...($request->user()->canAccessFeature('warranties')
-                ? WarrantyPeriod::resolve(
-                    $data['warranty_starts_on'] ?? null,
-                    $data['warranty_months'] ?? null,
-                    $data['warranty_until'] ?? null,
-                    $bill->admission_date,
-                )
-                : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
-        ]);
+        $warranty = $request->user()->canAccessFeature('warranties')
+            ? WarrantyPeriod::resolve(
+                $data['warranty_starts_on'] ?? null,
+                $data['warranty_months'] ?? null,
+                $data['warranty_until'] ?? null,
+                $bill->admission_date,
+            )
+            : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null];
+
+        $item = null;
+        foreach ($layers as $layer) {
+            $layerQty = (float) $layer['quantity'];
+            $unitPrice = round((float) $layer['unit_price'], 2);
+            $lineTotal = round($unitPrice * $layerQty, 2);
+            if ($discountPercent !== null && $discountPercent > 0) {
+                $lineTotal = round($lineTotal * (1 - ($discountPercent / 100)), 2);
+            }
+            $created = $bill->items()->create([
+                'part_id' => $part?->id,
+                'service_addon_id' => $data['service_addon_id'] ?? null,
+                'labor_item_id' => $data['labor_item_id'] ?? null,
+                'panel_group_id' => $data['panel_group_id'] ?? null,
+                'panel_name' => $data['panel_name'] ?? null,
+                'type' => $data['type'],
+                'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
+                'included_services' => $data['included_services'] ?? null,
+                'quantity' => $layerQty,
+                'unit_price' => $unitPrice,
+                'discount_percent' => $discountPercent,
+                'purchase_unit_cost' => $purchaseUnitCost,
+                'purchase_expense_id' => $expense?->id,
+                'line_total' => $lineTotal,
+                ...$warranty,
+            ]);
+            $item ??= $created;
+        }
         $part?->takeStock((float) $quantity, $bill->branch_id);
-        if ($part && $serials !== []) {
+        if ($part && $serials !== [] && $item) {
             PartSerials::sell($part, $serials, $item);
+        }
+
+        if (! $item) {
+            throw ValidationException::withMessages(['quantity' => ['Enter a quantity to sell.']]);
         }
 
         return $item;

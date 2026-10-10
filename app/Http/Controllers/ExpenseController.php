@@ -30,6 +30,9 @@ class ExpenseController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $this->validated($request);
+        if (! ExpenseJobKind::appliesTo($data['category'])) {
+            $data['job_kind'] = null;
+        }
         $paid = ($data['payment_status'] ?? Expense::STATUS_PAID) !== Expense::STATUS_CREDIT;
         $tenant = $request->user()->tenant;
         if (($data['category'] ?? null) === 'inventory' && $tenant?->business_type === BusinessTypes::GARAGE) {
@@ -49,7 +52,11 @@ class ExpenseController extends Controller
 
     public function update(Request $request, Expense $expense): JsonResponse
     {
-        $expense->update([...$this->validated($request, true), 'updated_by' => $request->user()->id]);
+        $data = $this->validated($request, true);
+        if (! ExpenseJobKind::appliesTo($data['category'] ?? $expense->category)) {
+            $data['job_kind'] = null;
+        }
+        $expense->update([...$data, 'updated_by' => $request->user()->id]);
 
         return response()->json($expense->refresh());
     }
@@ -280,7 +287,9 @@ class ExpenseController extends Controller
     private function validated(Request $request, bool $update = false): array
     {
         $tenantId = $request->user()->tenant_id;
-        $jobKindRequired = ! $update && ExpenseJobKind::enabledFor($request->user());
+        $jobKindRequired = ! $update
+            && ExpenseJobKind::enabledFor($request->user())
+            && ExpenseJobKind::appliesTo($request->string('category')->toString());
 
         return $request->validate([
             'category' => [$update ? 'sometimes' : 'required', 'string', 'max:100', 'not_in:salary'],
