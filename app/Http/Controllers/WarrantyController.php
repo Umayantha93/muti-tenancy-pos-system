@@ -36,7 +36,6 @@ class WarrantyController extends Controller
                 });
             })
             ->latest('warranty_until')
-            ->limit(50)
             ->get()
             ->map(fn (Bill $bill) => [
                 'id' => 'job-'.$bill->id,
@@ -79,9 +78,9 @@ class WarrantyController extends Controller
                 });
             })
             ->latest('warranty_until')
-            ->paginate($data['per_page'] ?? 30);
+            ->get();
 
-        $itemRows = collect($items->items())->map(function (BillItem $item) {
+        $itemRows = $items->map(function (BillItem $item) {
             $row = $item->toArray();
             $row['id'] = 'item-'.$item->id;
             $row['source'] = 'item';
@@ -89,12 +88,17 @@ class WarrantyController extends Controller
             return $row;
         });
 
+        $merged = $jobs->concat($itemRows)->sortByDesc(fn (array $row) => $row['warranty_until'] ?? '')->values();
+        $perPage = min(max((int) ($data['per_page'] ?? 5), 1), 100);
+        $lastPage = max(1, (int) ceil($merged->count() / $perPage));
+        $page = min(max($request->integer('page', 1), 1), $lastPage);
+
         return $this->moneyJson([
-            'data' => $jobs->concat($itemRows)->values(),
-            'current_page' => $items->currentPage(),
-            'last_page' => $items->lastPage(),
-            'per_page' => $items->perPage(),
-            'total' => $items->total() + $jobs->count(),
+            'data' => $merged->slice(($page - 1) * $perPage, $perPage)->values(),
+            'current_page' => $page,
+            'last_page' => $lastPage,
+            'per_page' => $perPage,
+            'total' => $merged->count(),
         ]);
     }
 
