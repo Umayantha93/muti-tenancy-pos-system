@@ -638,7 +638,7 @@ class PartController extends Controller
             'items.*.new_part' => ['nullable', 'array', 'required_without:items.*.part_id'],
             'items.*.new_part.name' => ['required_with:items.*.new_part', 'string', 'max:255'],
             'items.*.new_part.brand' => ['required_with:items.*.new_part', 'string', 'max:100'],
-            'items.*.new_part.type' => ['required_with:items.*.new_part', 'string', 'max:100'],
+            'items.*.new_part.type' => ['nullable', 'string', 'max:100'],
             'items.*.new_part.subcategory' => ['nullable', 'string', 'max:100'],
             'items.*.new_part.sku' => ['nullable', 'string', 'max:100'],
             'items.*.new_part.model' => ['nullable', 'string', 'max:100'],
@@ -733,7 +733,7 @@ class PartController extends Controller
         return Part::create([
             'name' => $new['name'],
             'brand' => $new['brand'],
-            'type' => $new['type'],
+            'type' => trim((string) ($new['type'] ?? '')),
             'subcategory' => trim((string) ($new['subcategory'] ?? '')) !== '' ? $new['subcategory'] : null,
             'sku' => $sku !== '' ? $sku : null,
             'model' => trim((string) ($new['model'] ?? '')) !== '' ? $new['model'] : null,
@@ -856,7 +856,7 @@ class PartController extends Controller
             'sku' => ['nullable', 'string', 'max:100', Rule::unique('parts')->where('tenant_id', $request->user()->tenant_id)->ignore($part)],
             'barcode' => ['nullable', 'string', 'max:100', Rule::unique('parts')->where('tenant_id', $request->user()->tenant_id)->ignore($part)],
             'brand' => [$part ? 'sometimes' : 'required', 'string', 'max:100'],
-            'type' => [$part ? 'sometimes' : 'required', 'string', 'max:100'],
+            'type' => ['nullable', 'string', 'max:100'],
             'subcategory' => ['nullable', 'string', 'max:100'],
             'model' => ['nullable', 'string', 'max:100'],
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
@@ -885,6 +885,9 @@ class PartController extends Controller
             }
         }
 
+        if (array_key_exists('type', $data) || ! $part) {
+            $data['type'] = trim((string) ($data['type'] ?? ''));
+        }
         if (array_key_exists('subcategory', $data) && trim((string) $data['subcategory']) === '') {
             $data['subcategory'] = null;
         }
