@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Expense;
 use App\Models\Feature;
 use App\Models\ServiceAddon;
 use App\Models\Tenant;
@@ -33,6 +34,27 @@ class FinanceJobSplitExportTest extends TestCase
         $row = collect($sheet['accounts'])->firstWhere('description', 'Lift oil');
         $this->assertSame('Repair', $row['details']);
         $this->assertNull($row['vehicle']);
+    }
+
+    public function test_inventory_purchases_are_never_split_into_repair_or_service(): void
+    {
+        Sanctum::actingAs($this->garageUser(['expense_job_split']));
+        $today = now()->toDateString();
+
+        $this->postJson('/api/expenses', [
+            'category' => 'inventory', 'description' => 'Oil drums', 'amount' => 3000, 'expense_date' => $today,
+        ])->assertCreated()->assertJsonPath('job_kind', null);
+        $taggedId = $this->postJson('/api/expenses', [
+            'category' => 'inventory', 'description' => 'Brake pads', 'amount' => 2000, 'expense_date' => $today, 'job_kind' => 'repair',
+        ])->assertCreated()->assertJsonPath('job_kind', null)->json('id');
+        Expense::query()->whereKey($taggedId)->update(['job_kind' => 'service']);
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(5000, $sheet['expense_split']['inventory']);
+        $this->assertEquals(0, $sheet['expense_split']['repair']);
+        $this->assertEquals(0, $sheet['expense_split']['service']);
+        $row = collect($sheet['accounts'])->firstWhere('description', 'Brake pads');
+        $this->assertStringNotContainsString('Service', (string) $row['details']);
     }
 
     public function test_without_the_feature_job_kind_is_optional_and_no_split_or_export(): void
@@ -69,8 +91,36 @@ class FinanceJobSplitExportTest extends TestCase
         $this->assertStringContainsString('Customer: Nimal', $payment['details']);
         $this->assertStringContainsString('Service job', $payment['details']);
 
-        $excel = $this->get("/api/balance-sheet/export?{$query}&format=xlsx&type=full")->assertOk();
+        $excel = $this->get("/api/balance-sheet/export?{$query}&format=xlsx&type=table")->assertOk();
         $this->assertStringContainsString('spreadsheetml', $excel->headers->get('Content-Type'));
+        $monthPath = tempnam(sys_get_temp_dir(), 'fin');
+        file_put_contents($monthPath, $excel->streamedContent());
+        $monthSheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($monthPath)->getActiveSheet()->toArray();
+        @unlink($monthPath);
+        $labels = collect($monthSheet)->map(fn ($row) => (string) ($row[0] ?? ''))->filter()->values();
+        $all = $labels->search('All sales');
+        $bank = $labels->search('Bank sales');
+        $credit = $labels->search('Credit sales');
+        $cash = $labels->search('Cash sales');
+        $this->assertNotFalse($all);
+        $this->assertGreaterThan($all, $bank);
+        $this->assertGreaterThan($bank, $credit);
+        $this->assertGreaterThan($credit, $cash);
+        $this->assertSame('Cash sales', $labels->last());
+
+        $today = now()->toDateString();
+        $dayExport = $this->get("/api/balance-sheet/export?{$query}&date={$today}&format=xlsx&type=full")->assertOk();
+        $path = tempnam(sys_get_temp_dir(), 'fin');
+        file_put_contents($path, $dayExport->streamedContent());
+        $loaded = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
+        @unlink($path);
+        $flat = collect($loaded->getActiveSheet()->toArray())->flatten()->filter()->map(fn ($cell) => (string) $cell);
+        $this->assertTrue($flat->contains('All sales'));
+        $this->assertTrue($flat->contains('Bank sales'));
+        $this->assertTrue($flat->contains('Credit sales'));
+        $this->assertTrue($flat->contains('Cash sales'));
+        $detail = collect($loaded->getSheet(1)->toArray())->map(fn ($row) => (string) ($row[0] ?? ''));
+        $this->assertSame('Cash sales', $detail->filter()->last());
 
         $pdf = $this->get("/api/balance-sheet/export?{$query}&format=pdf&type=table")->assertOk();
         $this->assertSame('application/pdf', $pdf->headers->get('Content-Type'));

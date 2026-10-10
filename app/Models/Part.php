@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'sku', 'barcode', 'brand', 'type', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'stock_unit', 'serialized', 'images', 'description'])]
+#[Fillable(['name', 'sku', 'barcode', 'brand', 'type', 'subcategory', 'model', 'year', 'price', 'cost_price', 'stock_qty', 'stock_unit', 'serialized', 'images', 'description'])]
 class Part extends Model
 {
     use BelongsToTenant;
@@ -81,6 +81,36 @@ class Part extends Model
             ->map(fn (string $path) => 'storage/'.$path)
             ->values()
             ->all());
+    }
+
+    /**
+     * Split a sale across the old labelled price and the price waiting after that stock sells.
+     * Prices are taken before stock is reduced.
+     *
+     * @return list<array{quantity: float, unit_price: float}>
+     */
+    public function salePriceLayers(float|int $quantity): array
+    {
+        $quantity = round(max(0, (float) $quantity), 3);
+        $current = round((float) $this->price, 2);
+        if ($quantity <= 0 || $this->pending_price === null || $this->pending_price_at_qty === null) {
+            return [['quantity' => $quantity, 'unit_price' => $current]];
+        }
+
+        $stock = round((float) $this->getRawOriginal('stock_qty'), 3);
+        $oldLeft = max(0, round($stock - (float) $this->pending_price_at_qty, 3));
+        $next = round((float) $this->pending_price, 2);
+        if ($oldLeft <= 0.0001) {
+            return [['quantity' => $quantity, 'unit_price' => $next]];
+        }
+        if ($quantity <= $oldLeft + 0.0001) {
+            return [['quantity' => $quantity, 'unit_price' => $current]];
+        }
+
+        return [
+            ['quantity' => $oldLeft, 'unit_price' => $current],
+            ['quantity' => round($quantity - $oldLeft, 3), 'unit_price' => $next],
+        ];
     }
 
     /**

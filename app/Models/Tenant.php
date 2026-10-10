@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'status',
     'demo_ends_at',
     'dual_financial_view_enabled',
+    'inventory_cost_method',
     'plan',
     'payment_plan',
     'plan_amount',

@@ -27,6 +27,7 @@ use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\JobBoardController;
 use App\Http\Controllers\JobBookingController;
 use App\Http\Controllers\LaborCatalogController;
+use App\Http\Controllers\PartCategoryController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
 use App\Http\Controllers\PartSerialController;
@@ -202,8 +203,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
 
         Route::middleware('feature:parts_inventory')->group(function () {
             Route::get('/parts', [PartController::class, 'index']);
+            Route::get('/part-categories', [PartCategoryController::class, 'index']);
+            Route::post('/part-categories', [PartCategoryController::class, 'store']);
+            Route::post('/part-categories/{part_category}/subcategories', [PartCategoryController::class, 'storeSubcategory']);
             Route::post('/parts/restock/bulk', [PartController::class, 'restockBulk']);
             Route::get('/stock-receipts', [StockReceiptController::class, 'index']);
+            Route::put('/stock-receipts/{stock_receipt}', [StockReceiptController::class, 'update']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
             Route::post('/parts/{part}/ensure-barcode', [PartController::class, 'ensureBarcode']);
