@@ -188,7 +188,7 @@ class BillController extends Controller
             'notes' => ['nullable', 'string'],
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
-            'admission_date' => ['nullable', 'date'],
+            'admission_date' => ['nullable', 'date', 'before_or_equal:today'],
             'payment_method' => ['nullable', 'string', 'max:50'],
             'payment_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['nullable', 'array'],
@@ -221,12 +221,13 @@ class BillController extends Controller
                 $data['customer_address'] ?? null,
             );
 
+            $admissionDate = $data['admission_date'] ?? today()->toDateString();
             $bill = Bill::create([
                 'bill_number' => $request->user()->tenant?->claimNextBillNumber()
                     ?? ('INST-'.now()->format('Ymd').'-'.strtoupper(str()->random(6))),
                 'vehicle_id' => null,
                 'customer_id' => $customer->id,
-                'admission_date' => $data['admission_date'] ?? today(),
+                'admission_date' => $admissionDate,
                 'notes' => $data['notes'] ?? null,
                 'internal_notes' => $data['internal_notes'] ?? null,
                 'additional_note_color' => $data['additional_note_color'] ?? null,
@@ -290,7 +291,7 @@ class BillController extends Controller
                         'bill_id' => $bill->id,
                         'amount' => $payAmount,
                         'method' => $data['payment_method'] ?? 'cash',
-                        'paid_at' => now(),
+                        'paid_at' => $this->paymentMoment($admissionDate),
                         'received_by' => $request->user()->id,
                     ]);
                     $calculator->recalculate($bill->fresh());
@@ -680,5 +681,15 @@ class BillController extends Controller
     private function isPaidBill(Bill $bill): bool
     {
         return (float) $bill->amount_paid > 0 && (float) $bill->balance_due <= 0;
+    }
+
+    private function paymentMoment(string $date): \Illuminate\Support\Carbon
+    {
+        $day = \Illuminate\Support\Carbon::parse($date);
+        if ($day->isSameDay(now())) {
+            return now();
+        }
+
+        return $day->setTimeFrom(now());
     }
 }
