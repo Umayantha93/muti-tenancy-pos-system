@@ -17,12 +17,14 @@ class BillProfitController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
+            'search' => ['nullable', 'string', 'max:255'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $from = $data['date_from'] ?? now()->subDays(29)->toDateString();
         $to = $data['date_to'] ?? now()->toDateString();
         $jobKind = $data['job_kind'] ?? null;
+        $search = trim((string) ($data['search'] ?? ''));
 
         $base = fn () => BranchQuery::constrain(Bill::query())
             ->whereDate('admission_date', '>=', $from)
@@ -31,6 +33,13 @@ class BillProfitController extends Controller
 
         $bills = $base()
             ->with(['customer', 'vehicle', 'items.part', 'payments', 'refunds.items', 'branch:id,name,code'])
+            ->when($search !== '', function ($query) use ($search) {
+                $like = '%'.addcslashes($search, '%_\\').'%';
+                $query->where(fn ($nested) => $nested
+                    ->where('bill_number', 'like', $like)
+                    ->orWhereHas('customer', fn ($customer) => $customer->where('name', 'like', $like)->orWhere('phone', 'like', $like))
+                    ->orWhereHas('vehicle', fn ($vehicle) => $vehicle->where('number_plate', 'like', $like)));
+            })
             ->latest('admission_date')
             ->orderByDesc('id')
             ->paginate($data['per_page'] ?? 50);

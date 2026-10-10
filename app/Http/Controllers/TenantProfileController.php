@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Support\BusinessTypes;
-use App\Support\InventoryCosting;
 use Illuminate\Validation\Rule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,7 +32,6 @@ class TenantProfileController extends Controller
             'logo' => ['nullable', 'image', 'max:5120'],
             'bill_prefix' => ['nullable', 'string', 'max:12'],
             'lock_bill_numbers' => ['sometimes', 'boolean'],
-            'inventory_cost_method' => ['sometimes', Rule::in([InventoryCosting::AVERAGE, InventoryCosting::LATEST])],
         ]);
 
         if ($request->hasFile('logo')) {
