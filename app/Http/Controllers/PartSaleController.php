@@ -12,6 +12,7 @@ use App\Services\BillCalculator;
 use App\Services\PartSerials;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
+use App\Support\StockUnit;
 use App\Support\WarrantyPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -99,28 +100,39 @@ class PartSaleController extends Controller
                     }
                     $qty = count($serials);
                 }
+                if ($quantityError = StockUnit::quantityError($part->stock_unit, $qty, $type)) {
+                    throw ValidationException::withMessages(['quantity' => [$quantityError]]);
+                }
+                $layers = $serials !== []
+                    ? [['quantity' => $qty, 'unit_price' => (float) $part->price]]
+                    : $part->salePriceLayers($qty);
+                $warranty = $request->user()->canAccessFeature('warranties')
+                    ? WarrantyPeriod::resolve(
+                        $line['warranty_starts_on'] ?? null,
+                        $line['warranty_months'] ?? null,
+                        $line['warranty_until'] ?? null,
+                        $bill->admission_date,
+                    )
+                    : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null];
+                $item = null;
+                foreach ($layers as $layer) {
+                    $layerQty = (float) $layer['quantity'];
+                    $unitPrice = round((float) $layer['unit_price'], 2);
+                    $created = BillItem::create([
+                        'bill_id' => $bill->id,
+                        'type' => 'part',
+                        'part_id' => $part->id,
+                        'description' => $part->name.($serials !== [] ? ' · '.implode(', ', $serials) : ''),
+                        'quantity' => $layerQty,
+                        'unit_price' => $unitPrice,
+                        'line_total' => round($unitPrice * $layerQty, 2),
+                        'purchase_unit_cost' => $part->cost_price,
+                        ...$warranty,
+                    ]);
+                    $item ??= $created;
+                }
                 $part->takeStock($qty);
-                $unitPrice = (float) $part->price;
-                $lineTotal = round($unitPrice * $qty, 2);
-                $item = BillItem::create([
-                    'bill_id' => $bill->id,
-                    'type' => 'part',
-                    'part_id' => $part->id,
-                    'description' => $part->name.($serials !== [] ? ' · '.implode(', ', $serials) : ''),
-                    'quantity' => $qty,
-                    'unit_price' => $unitPrice,
-                    'line_total' => $lineTotal,
-                    'purchase_unit_cost' => $part->cost_price,
-                    ...($request->user()->canAccessFeature('warranties')
-                        ? WarrantyPeriod::resolve(
-                            $line['warranty_starts_on'] ?? null,
-                            $line['warranty_months'] ?? null,
-                            $line['warranty_until'] ?? null,
-                            $bill->admission_date,
-                        )
-                        : ['warranty_months' => null, 'warranty_starts_on' => null, 'warranty_until' => null]),
-                ]);
-                if ($serials !== []) {
+                if ($serials !== [] && $item) {
                     PartSerials::sell($part, $serials, $item);
                 }
             }

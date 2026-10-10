@@ -62,23 +62,27 @@ class BalanceSheetController extends Controller
     }
 
     /**
-     * @return array{repair: float, service: float, other: float}
+     * @return array{repair: float, service: float, inventory: float, other: float}
      */
     private function expenseSplit(int $month, int $year, MonetaryView $view): array
     {
-        $split = ['repair' => 0.0, 'service' => 0.0, 'other' => 0.0];
-        $bucket = fn (?string $kind): string => in_array($kind, ExpenseJobKind::all(), true) ? $kind : 'other';
+        $split = ['repair' => 0.0, 'service' => 0.0, 'inventory' => 0.0, 'other' => 0.0];
+        $bucket = fn (?string $category, ?string $kind): string => match (true) {
+            ! ExpenseJobKind::appliesTo($category) => 'inventory',
+            in_array($kind, ExpenseJobKind::all(), true) => $kind,
+            default => 'other',
+        };
 
         BranchQuery::constrain(Expense::postedIn($month, $year))
-            ->selectRaw('job_kind, SUM(amount) as total')
-            ->groupBy('job_kind')
+            ->selectRaw('category, job_kind, SUM(amount) as total')
+            ->groupBy('category', 'job_kind')
             ->get()
             ->each(function ($row) use (&$split, $bucket) {
-                $split[$bucket($row->job_kind)] += (float) $row->total;
+                $split[$bucket($row->category, $row->job_kind)] += (float) $row->total;
             });
 
         ExpenseSettlement::query()
-            ->with('expense:id,job_kind')
+            ->with('expense:id,category,job_kind')
             ->whereHas('expense', function ($query) {
                 $id = BranchQuery::idForRead();
                 if ($id !== null) {
@@ -89,7 +93,7 @@ class BalanceSheetController extends Controller
             ->whereMonth('settled_on', $month)
             ->get()
             ->each(function (ExpenseSettlement $settlement) use (&$split, $bucket) {
-                $split[$bucket($settlement->expense?->job_kind)] += (float) $settlement->amount;
+                $split[$bucket($settlement->expense?->category ?: ExpenseJobKind::INVENTORY_CATEGORY, $settlement->expense?->job_kind)] += (float) $settlement->amount;
             });
 
         $split['other'] += (float) BranchQuery::constrain(Payroll::query())
@@ -137,7 +141,7 @@ class BalanceSheetController extends Controller
     private function expenseDetails(?Expense $expense, ?string $extra = null): ?string
     {
         $parts = array_filter([
-            ExpenseJobKind::label($expense?->job_kind),
+            ExpenseJobKind::appliesTo($expense?->category) ? ExpenseJobKind::label($expense?->job_kind) : null,
             $expense?->supplier?->name ? 'Supplier: '.$expense->supplier->name : null,
             $extra,
         ]);
@@ -507,7 +511,7 @@ class BalanceSheetController extends Controller
         $items = Expense::query()
             ->credit()
             ->tap(fn ($query) => BranchQuery::constrain($query))
-            ->with(['settlements', 'cheques', 'supplier:id,name,phone'])
+            ->with(['settlements', 'cheques', 'supplier:id,name,phone', 'stockReceipt:id,invoice_number'])
             ->orderBy('due_date')
             ->orderBy('expense_date')
             ->get()
@@ -552,6 +556,7 @@ class BalanceSheetController extends Controller
                     'supplier_id' => $expense->supplier_id,
                     'supplier' => $expense->supplier?->name,
                     'supplier_phone' => $expense->supplier?->phone,
+                    'invoice_number' => $expense->stockReceipt?->invoice_number,
                     'amount' => round($original, 2),
                     'amount_paid' => round($paid, 2),
                     'remaining' => round($remaining, 2),

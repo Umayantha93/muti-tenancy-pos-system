@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\Expense;
 use App\Models\Feature;
 use App\Models\Part;
+use App\Models\PartCategory;
 use App\Models\StockReceipt;
 use App\Models\Supplier;
 use App\Models\Tenant;
@@ -388,6 +389,187 @@ class ImplementationPlanTest extends TestCase
         // (4×200 + 3×0) / 7 ≈ 114.29
         $this->assertEquals(114.29, (float) $gift->fresh()->cost_price);
         $this->assertEquals(600.0, (float) $gift->fresh()->price);
+    }
+
+    public function test_restock_keeps_a_scheduled_price_when_the_sell_price_is_unchanged(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Air Freshener', 'brand' => 'Areon', 'type' => 'accessory',
+            'price' => 250, 'cost_price' => 180, 'stock_qty' => 2,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
+            'items' => [[
+                'part_id' => $part->id, 'quantity' => 10, 'unit_cost' => 190,
+                'price' => 260, 'price_after_old_stock' => true,
+            ]],
+        ])->assertOk();
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
+            'items' => [[
+                'part_id' => $part->id, 'quantity' => 4, 'unit_cost' => 190,
+                'price' => 250,
+            ]],
+        ])->assertOk();
+
+        $part->refresh();
+        $this->assertEquals(250.0, (float) $part->price);
+        $this->assertEquals(260.0, (float) $part->pending_price);
+        $this->assertEquals(14.0, (float) $part->pending_price_at_qty);
+        $this->assertSame(16, $part->stock_qty);
+    }
+
+    public function test_sale_across_old_stock_uses_both_prices_then_switches(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Coolant', 'brand' => 'Toyota', 'type' => 'fluid',
+            'price' => 100, 'cost_price' => 70, 'stock_qty' => 2,
+        ]);
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
+            'items' => [[
+                'part_id' => $part->id, 'quantity' => 8, 'unit_cost' => 80,
+                'price' => 140, 'price_after_old_stock' => true,
+            ]],
+        ])->assertOk();
+
+        $bill = $this->postJson('/api/bills/instant', [
+            'customer_name' => 'Walk-in',
+            'items' => [['part_id' => $part->id, 'quantity' => 4]],
+            'payment_method' => 'cash',
+        ])->assertCreated()->json();
+
+        $lines = collect($bill['items'])->values();
+        $this->assertCount(2, $lines);
+        $this->assertEquals(2, (float) $lines[0]['quantity']);
+        $this->assertEquals(100, (float) $lines[0]['unit_price']);
+        $this->assertEquals(2, (float) $lines[1]['quantity']);
+        $this->assertEquals(140, (float) $lines[1]['unit_price']);
+        $this->assertLessThan($lines[1]['id'], $lines[0]['id']);
+        $part->refresh();
+        $this->assertEquals(140.0, (float) $part->price);
+        $this->assertNull($part->pending_price);
+        $this->assertSame(6, $part->stock_qty);
+    }
+
+    public function test_recent_cost_method_replaces_average_cost(): void
+    {
+        $user = $this->garageUser();
+        $user->tenant->update(['inventory_cost_method' => 'latest']);
+        Sanctum::actingAs($user->fresh());
+        $part = Part::create([
+            'name' => 'Filter', 'brand' => 'Mann', 'type' => 'filter',
+            'price' => 2000, 'cost_price' => 1000, 'stock_qty' => 10,
+        ]);
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'payment_status' => 'paid',
+            'items' => [['part_id' => $part->id, 'quantity' => 5, 'unit_cost' => 1600]],
+        ])->assertOk();
+
+        $this->assertEquals(1600.0, (float) $part->fresh()->cost_price);
+    }
+
+    public function test_bulk_grn_can_create_a_new_item_with_category(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+
+        $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'INV-NEW-1',
+            'payment_status' => 'paid',
+            'items' => [[
+                'quantity' => 3,
+                'unit_cost' => 100,
+                'markup_percent' => 25,
+                'new_part' => [
+                    'name' => 'Washer fluid',
+                    'brand' => 'Generic',
+                    'type' => 'Fluids',
+                    'subcategory' => 'Screen',
+                    'stock_unit' => 'l',
+                ],
+            ]],
+        ])->assertOk()->assertJsonPath('restocked', 1);
+
+        $part = Part::query()->where('name', 'Washer fluid')->first();
+        $this->assertNotNull($part);
+        $this->assertSame('Fluids', $part->type);
+        $this->assertSame('Screen', $part->subcategory);
+        $this->assertSame('l', $part->stock_unit);
+        $this->assertEquals(3.0, (float) $part->stock_qty);
+        $this->assertEquals(100.0, (float) $part->cost_price);
+        $this->assertEquals(125.0, (float) $part->price);
+    }
+
+    public function test_tenant_can_add_categories_and_subcategories(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+
+        $categoryId = $this->postJson('/api/part-categories', ['name' => 'Filters'])
+            ->assertCreated()
+            ->json('id');
+        $this->postJson("/api/part-categories/{$categoryId}/subcategories", ['name' => 'Oil'])
+            ->assertCreated();
+
+        $this->postJson('/api/parts', [
+            'name' => 'Oil filter', 'brand' => 'Bosch', 'type' => 'Fluids', 'subcategory' => 'Coolant',
+            'price' => 100, 'stock_qty' => 1,
+        ])->assertCreated();
+
+        $names = collect($this->getJson('/api/part-categories')->assertOk()->json('data'));
+        $this->assertTrue($names->contains(fn (array $row) => $row['name'] === 'Filters' && collect($row['subcategories'])->contains('name', 'Oil')));
+        $this->assertTrue($names->contains(fn (array $row) => $row['name'] === 'Fluids' && collect($row['subcategories'])->contains('name', 'Coolant')));
+        $this->assertSame(2, PartCategory::query()->count());
+    }
+
+    public function test_grn_invoice_and_payment_can_be_corrected(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Plug', 'brand' => 'NGK', 'type' => 'ignition',
+            'price' => 800, 'cost_price' => 400, 'stock_qty' => 2,
+        ]);
+        $receiptId = $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'INV-1',
+            'payment_status' => 'paid',
+            'items' => [['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 400]],
+        ])->assertOk()->json('receipt.id');
+
+        $this->putJson("/api/stock-receipts/{$receiptId}", [
+            'invoice_number' => 'INV-2',
+            'payment_status' => 'credit',
+            'due_date' => now()->addDays(7)->toDateString(),
+        ])->assertOk()
+            ->assertJsonPath('invoice_number', 'INV-2')
+            ->assertJsonPath('payment_status', 'credit');
+
+        $expense = Expense::query()->first();
+        $this->assertSame('credit', $expense->payment_status);
+        $this->assertEquals(0, (float) $expense->amount_paid);
+        $this->assertStringContainsString('INV-2', (string) $expense->description);
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertSame('INV-2', $sheet['inventory_payables']['items'][0]['invoice_number']);
+    }
+
+    public function test_job_card_vehicle_number_can_be_corrected(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Kamal',
+            'customer_phone' => '0771002000',
+            'number_plate' => 'CAB-1111',
+        ])->assertCreated()->json('id');
+
+        $this->putJson("/api/bills/{$billId}", ['number_plate' => 'cab-2222'])
+            ->assertOk()
+            ->assertJsonPath('vehicle.number_plate', 'CAB-2222');
+
+        $this->assertSame('CAB-2222', Bill::query()->find($billId)->vehicle->number_plate);
     }
 
     public function test_reports_endpoint_returns_payload_when_feature_enabled(): void

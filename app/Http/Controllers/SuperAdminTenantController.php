@@ -225,6 +225,7 @@ class SuperAdminTenantController extends Controller
             'sscl_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'plan' => ['nullable', 'string', Rule::in(BusinessTypes::plans())],
             'payment_plan' => ['sometimes', Rule::in(BusinessTypes::paymentPlans())],
+            'inventory_cost_method' => ['sometimes', Rule::in(['average', 'latest'])],
             'plan_amount' => ['nullable', 'numeric', 'min:0'],
             'setup_fee_amount' => ['nullable', 'numeric', 'min:0'],
             'logo' => ['nullable', 'image', 'max:5120'],

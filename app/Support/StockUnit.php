@@ -10,12 +10,53 @@ class StockUnit
 
     public const L = 'l';
 
+    public const G = 'g';
+
+    public const KG = 'kg';
+
+    public const MG = 'mg';
+
+    public const M = 'm';
+
+    public const CM = 'cm';
+
+    public const PACK = 'pack';
+
+    public const BOX = 'box';
+
+    public const PAIR = 'pair';
+
+    public const DOZEN = 'dozen';
+
+    /**
+     * Units sold and stocked in fractions (0.1, 0.2, …).
+     *
+     * @return list<string>
+     */
+    public static function measured(): array
+    {
+        return [self::ML, self::L, self::G, self::KG, self::MG, self::M, self::CM];
+    }
+
     /**
      * @return list<string>
      */
     public static function allowed(): array
     {
-        return [self::QTY, self::ML, self::L];
+        return [
+            self::QTY,
+            self::ML,
+            self::L,
+            self::G,
+            self::KG,
+            self::MG,
+            self::M,
+            self::CM,
+            self::PACK,
+            self::BOX,
+            self::PAIR,
+            self::DOZEN,
+        ];
     }
 
     public static function defaultForBusiness(?string $type): string
@@ -27,7 +68,7 @@ class StockUnit
     {
         $parsed = self::tryFromImport($unit);
         if ($parsed !== null) {
-            return $businessType === BusinessTypes::PAINT ? self::ML : $parsed;
+            return $parsed;
         }
 
         return self::defaultForBusiness($businessType);
@@ -39,9 +80,18 @@ class StockUnit
         $unit = str_replace(['.', ' '], '', $unit);
 
         return match ($unit) {
-            '', 'item', 'items', 'qty', 'quantity', 'pcs', 'pc', 'piece', 'pieces' => self::QTY,
+            'item', 'items', 'qty', 'quantity', 'pcs', 'pc', 'piece', 'pieces', 'nos', 'no' => self::QTY,
             'l', 'lt', 'ltr', 'litre', 'liter', 'litres', 'liters' => self::L,
             'ml', 'millilitre', 'milliliter', 'millilitres', 'milliliters' => self::ML,
+            'g', 'gm', 'gms', 'gram', 'grams' => self::G,
+            'kg', 'kgs', 'kilo', 'kilos', 'kilogram', 'kilograms' => self::KG,
+            'mg', 'milligram', 'milligrams' => self::MG,
+            'm', 'meter', 'metre', 'meters', 'metres' => self::M,
+            'cm', 'centimeter', 'centimetre', 'centimeters', 'centimetres' => self::CM,
+            'pack', 'packs', 'packet', 'packets', 'pkt' => self::PACK,
+            'box', 'boxes' => self::BOX,
+            'pair', 'pairs' => self::PAIR,
+            'dozen', 'doz', 'dz' => self::DOZEN,
             default => null,
         };
     }
@@ -51,9 +101,23 @@ class StockUnit
         return in_array(self::normalize($unit), [self::ML, self::L], true);
     }
 
+    public static function isWeight(string $unit): bool
+    {
+        return in_array(self::normalize($unit), [self::MG, self::G, self::KG], true);
+    }
+
     public static function allowsDecimal(?string $unit, ?string $businessType = null): bool
     {
-        return self::isVolume(self::normalize($unit, $businessType));
+        return in_array(self::normalize($unit, $businessType), self::measured(), true);
+    }
+
+    public static function quantityError(?string $unit, float|int $quantity, ?string $businessType = null): ?string
+    {
+        if (self::allowsDecimal($unit, $businessType) || self::isWhole($quantity)) {
+            return null;
+        }
+
+        return self::label($unit, $businessType).' stock must be a whole number.';
     }
 
     public static function isWhole(float|int $quantity): bool
@@ -77,6 +141,11 @@ class StockUnit
             return round((float) $quantity / 1000, 3);
         }
 
+        $fromGrams = self::toGrams((float) $quantity, $from);
+        if ($fromGrams !== null && self::isWeight($to)) {
+            return round(self::fromGrams($fromGrams, $to), 3);
+        }
+
         return round((float) $quantity, 3);
     }
 
@@ -85,7 +154,40 @@ class StockUnit
         return match (self::normalize($unit, $businessType)) {
             self::ML => 'ML',
             self::L => 'L',
+            self::G => 'G',
+            self::KG => 'KG',
+            self::MG => 'MG',
+            self::M => 'M',
+            self::CM => 'CM',
+            self::PACK => 'PACK',
+            self::BOX => 'BOX',
+            self::PAIR => 'PAIR',
+            self::DOZEN => 'DOZEN',
             default => 'ITEM',
         };
     }
-}
+
+    public static function importList(): string
+    {
+        return implode(', ', array_map(fn (string $unit) => self::label($unit), self::allowed()));
+    }
+
+    private static function toGrams(float $quantity, string $unit): ?float
+    {
+        return match ($unit) {
+            self::MG => $quantity / 1000,
+            self::G => $quantity,
+            self::KG => $quantity * 1000,
+            default => null,
+        };
+    }
+
+    private static function fromGrams(float $grams, string $unit): float
+    {
+        return match ($unit) {
+            self::MG => $grams * 1000,
+            self::KG => $grams / 1000,
+            default => $grams,
+        };
+    }
+};

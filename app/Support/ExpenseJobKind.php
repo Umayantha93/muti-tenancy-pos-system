@@ -10,6 +10,14 @@ class ExpenseJobKind
 
     public const SERVICE = 'service';
 
+    /** Stock is shared by repair and service jobs, so inventory purchases are never tagged. */
+    public const INVENTORY_CATEGORY = 'inventory';
+
+    public static function appliesTo(?string $category): bool
+    {
+        return $category !== self::INVENTORY_CATEGORY;
+    }
+
     /** @return list<string> */
     public static function all(): array
     {

@@ -123,6 +123,33 @@ class InstantBillTest extends TestCase
         $this->assertSame([], $bill['employees']);
     }
 
+    public function test_instant_bill_sells_litres_in_tenths_and_rejects_partial_items(): void
+    {
+        [, $owner] = $this->garageTenant();
+        Sanctum::actingAs($owner);
+
+        $oil = Part::create([
+            'name' => 'Engine oil', 'brand' => 'Castrol', 'type' => 'fluid', 'subcategory' => 'Oil',
+            'price' => 1800, 'cost_price' => 1200, 'stock_qty' => 5, 'stock_unit' => 'l',
+        ]);
+        $filter = Part::create([
+            'name' => 'Oil filter', 'brand' => 'Mann', 'type' => 'filter',
+            'price' => 2200, 'cost_price' => 1400, 'stock_qty' => 4, 'stock_unit' => 'qty',
+        ]);
+
+        $this->postJson('/api/bills/instant', [
+            'items' => [['part_id' => $oil->id, 'quantity' => 0.2]],
+            'payment_method' => 'cash',
+        ])->assertCreated();
+        $this->assertEquals(4.8, (float) $oil->fresh()->stock_qty);
+
+        $this->postJson('/api/bills/instant', [
+            'items' => [['part_id' => $filter->id, 'quantity' => 1.5]],
+            'payment_method' => 'cash',
+        ])->assertStatus(422);
+        $this->assertSame(4, $filter->fresh()->stock_qty);
+    }
+
     /**
      * @return array{0: Tenant, 1: User}
      */
