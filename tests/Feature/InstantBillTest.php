@@ -150,6 +150,41 @@ class InstantBillTest extends TestCase
         $this->assertSame(4, $filter->fresh()->stock_qty);
     }
 
+    public function test_instant_bill_can_use_an_earlier_date(): void
+    {
+        [, $owner] = $this->garageTenant();
+        Sanctum::actingAs($owner);
+        BranchContext::clear();
+
+        $yesterday = now()->subDay()->toDateString();
+        $bill = $this->postJson('/api/bills/instant', [
+            'customer_name' => 'Late entry',
+            'admission_date' => $yesterday,
+            'payment_method' => 'cash',
+            'payment_amount' => 500,
+            'items' => [[
+                'type' => 'labor',
+                'description' => 'Wash',
+                'quantity' => 1,
+                'unit_price' => 500,
+            ]],
+        ])->assertCreated()->json();
+
+        $this->assertSame($yesterday, substr((string) $bill['admission_date'], 0, 10));
+        $this->assertSame($yesterday, substr((string) $bill['payments'][0]['paid_at'], 0, 10));
+
+        $this->postJson('/api/bills/instant', [
+            'customer_name' => 'Future',
+            'admission_date' => now()->addDay()->toDateString(),
+            'items' => [[
+                'type' => 'labor',
+                'description' => 'Wash',
+                'quantity' => 1,
+                'unit_price' => 100,
+            ]],
+        ])->assertUnprocessable();
+    }
+
     /**
      * @return array{0: Tenant, 1: User}
      */
