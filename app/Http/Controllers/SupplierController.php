@@ -14,7 +14,10 @@ class SupplierController extends Controller
     public function index(Request $request): JsonResponse
     {
         return response()->json(Supplier::query()
-            ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $like = '%'.$request->string('search').'%';
+                $query->where(fn ($nested) => $nested->where('name', 'like', $like)->orWhere('phone', 'like', $like));
+            })
             ->orderByDesc('is_system')
             ->orderBy('name')
             ->paginate($request->integer('per_page', 50)));
