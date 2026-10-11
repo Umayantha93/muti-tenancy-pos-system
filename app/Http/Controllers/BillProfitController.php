@@ -65,6 +65,7 @@ class BillProfitController extends Controller
         });
 
         $allForPeriod = $base()->with(['items.part', 'refunds.items'])->get();
+        $allForPeriod->loadMissing(['items.part', 'refunds.items']);
 
         $totals = $allForPeriod->reduce(function (array $carry, Bill $bill) use ($analyzer) {
             $summary = $analyzer->summarize($bill);

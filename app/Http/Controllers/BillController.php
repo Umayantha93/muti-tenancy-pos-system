@@ -15,6 +15,7 @@ use App\Support\BusinessTypes;
 use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -239,12 +240,23 @@ class BillController extends Controller
                 $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
             }
 
+            $partIds = collect($data['items'] ?? [])
+                ->filter(fn ($line) => ($line['type'] ?? (! empty($line['part_id']) ? 'part' : 'labor')) === 'part')
+                ->pluck('part_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values();
+            $parts = $partIds->isEmpty()
+                ? collect()
+                : Part::query()->whereIn('id', $partIds->all())->lockForUpdate()->get()->keyBy('id');
+
             foreach ($data['items'] ?? [] as $line) {
                 $lineType = $line['type'] ?? (! empty($line['part_id']) ? 'part' : 'labor');
                 $qty = (float) $line['quantity'];
 
                 if ($lineType === 'part') {
-                    $part = Part::lockForUpdate()->findOrFail($line['part_id']);
+                    $part = $parts->get((int) $line['part_id']) ?? Part::query()->whereKey($line['part_id'])->lockForUpdate()->firstOrFail();
                     if ($quantityError = StockUnit::quantityError($part->stock_unit, $qty, $request->user()?->tenant?->business_type)) {
                         throw ValidationException::withMessages(['quantity' => [$quantityError]]);
                     }
@@ -267,6 +279,7 @@ class BillController extends Controller
                         ]);
                     }
                     $part->takeStock($qty);
+
                     continue;
                 }
 
@@ -683,9 +696,9 @@ class BillController extends Controller
         return (float) $bill->amount_paid > 0 && (float) $bill->balance_due <= 0;
     }
 
-    private function paymentMoment(string $date): \Illuminate\Support\Carbon
+    private function paymentMoment(string $date): Carbon
     {
-        $day = \Illuminate\Support\Carbon::parse($date);
+        $day = Carbon::parse($date);
         if ($day->isSameDay(now())) {
             return now();
         }

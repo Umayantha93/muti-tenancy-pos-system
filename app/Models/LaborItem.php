@@ -34,13 +34,13 @@ class LaborItem extends Model
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    public static function applyToItemPayload(array $data, int $tenantId): array
+    public static function applyToItemPayload(array $data, int $tenantId, ?self $item = null): array
     {
         if (empty($data['labor_item_id'])) {
             return $data;
         }
 
-        $item = static::withoutGlobalScopes()
+        $item ??= static::withoutGlobalScopes()
             ->where('tenant_id', $tenantId)
             ->find($data['labor_item_id']);
 

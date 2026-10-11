@@ -88,11 +88,17 @@ class PartSaleController extends Controller
                 'created_by' => $request->user()->id,
             ]);
 
+            $partIds = collect($data['items'])->pluck('part_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            $parts = $partIds->isEmpty()
+                ? collect()
+                : Part::query()->whereIn('id', $partIds->all())->lockForUpdate()->get()->keyBy('id');
+            $requiredSerials = PartSerials::requiredMap($parts);
+
             foreach ($data['items'] as $line) {
-                $part = Part::lockForUpdate()->findOrFail($line['part_id']);
+                $part = $parts->get((int) $line['part_id']) ?? Part::query()->whereKey($line['part_id'])->lockForUpdate()->firstOrFail();
                 $qty = (float) $line['quantity'];
                 $serials = $line['serials'] ?? [];
-                if (PartSerials::requiredFor($part) || $serials !== []) {
+                if (($requiredSerials[$part->id] ?? false) || $serials !== []) {
                     if ($serials === []) {
                         throw ValidationException::withMessages([
                             'serials' => ['This item is sold by IMEI / serial. Scan or enter each unit.'],

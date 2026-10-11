@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\User;
 use App\Support\BusinessTypes;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -88,9 +89,7 @@ class MonetaryView
         return new self($user ?? auth()->user());
     }
 
-    public function __construct(private readonly ?User $user)
-    {
-    }
+    public function __construct(private readonly ?User $user) {}
 
     public function active(): bool
     {
@@ -196,11 +195,18 @@ class MonetaryView
         }
 
         if ($payload instanceof LengthAwarePaginator) {
+            $this->preloadBills($payload->getCollection());
             $payload->setCollection(
                 $payload->getCollection()->map(fn ($item) => $this->transform($item))
             );
 
             return $payload;
+        }
+
+        if ($payload instanceof Collection) {
+            $this->preloadBills($payload);
+
+            return $payload->map(fn ($item) => $this->transform($item))->all();
         }
 
         if ($payload instanceof Model) {
@@ -211,15 +217,21 @@ class MonetaryView
             return $this->transformArray($payload->toArray());
         }
 
-        if ($payload instanceof Collection) {
-            return $payload->map(fn ($item) => $this->transform($item))->all();
-        }
-
         if (is_array($payload)) {
             return $this->transformArray($payload);
         }
 
         return $payload;
+    }
+
+    private function preloadBills(Collection $items): void
+    {
+        $bills = $items->filter(fn ($item) => $item instanceof Bill)->values();
+        if ($bills->isEmpty()) {
+            return;
+        }
+
+        EloquentCollection::make($bills->all())->loadMissing(['items', 'payments']);
     }
 
     /**

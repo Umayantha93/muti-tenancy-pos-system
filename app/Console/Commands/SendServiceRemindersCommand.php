@@ -27,7 +27,7 @@ class SendServiceRemindersCommand extends Command
         $sent = 0;
 
         $bills = Bill::withoutGlobalScopes()
-            ->with(['customer', 'tenant', 'vehicle'])
+            ->with(['customer', 'tenant.features', 'vehicle'])
             ->where('job_kind', Bill::JOB_KIND_SERVICE)
             ->whereNotNull('next_service_due_on')
             ->whereNull('service_reminder_sent_at')
@@ -40,8 +40,12 @@ class SendServiceRemindersCommand extends Command
             if (! $tenant instanceof Tenant) {
                 continue;
             }
-            $hasReminders = $tenant->features()->where('features.key', 'service_reminders')->wherePivot('is_enabled', true)->exists();
-            $hasSms = $tenant->features()->where('features.key', 'bill_sms')->wherePivot('is_enabled', true)->exists();
+            $hasReminders = $tenant->features->contains(
+                fn ($feature) => $feature->key === 'service_reminders' && (bool) $feature->pivot->is_enabled
+            );
+            $hasSms = $tenant->features->contains(
+                fn ($feature) => $feature->key === 'bill_sms' && (bool) $feature->pivot->is_enabled
+            );
             if (! $hasReminders || ! $hasSms) {
                 continue;
             }
