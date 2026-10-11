@@ -23,7 +23,7 @@ class BillProfitAnalyzer
      */
     public function summarize(Bill $bill): array
     {
-        $bill->loadMissing(['items.part', 'customer', 'vehicle', 'payments', 'refunds.items']);
+        $bill->loadMissing(['items.part', 'refunds.items']);
 
         $refundMeta = [];
         foreach ($bill->refunds as $refund) {

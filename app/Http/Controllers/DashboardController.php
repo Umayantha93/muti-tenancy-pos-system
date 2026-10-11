@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BillPayment;
+use App\Models\BranchStock;
 use App\Models\CottageStay;
 use App\Models\Expense;
 use App\Models\JobBooking;
@@ -17,6 +18,7 @@ use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 class DashboardController extends Controller
 {
@@ -29,11 +31,7 @@ class DashboardController extends Controller
         $finance = $user->canAccessFeature('balance_sheet');
         $view = MonetaryView::for($user);
 
-        $monthlyIncome = $finance ? $this->incomeFor(
-            $view,
-            BranchQuery::constrainViaBill(BillPayment::query()->with(['bill.items']))->whereYear('paid_at', now()->year)->whereMonth('paid_at', now()->month)->get(),
-            BranchQuery::constrainViaBill(BillItem::query()->with(['bill.items']))->where('type', 'advance')->whereYear('created_at', now()->year)->whereMonth('created_at', now()->month)->get(),
-        ) : null;
+        $monthlyIncome = $finance ? $this->periodIncome($view, now()->year, now()->month, null) : null;
 
         $monthlyExpensesRaw = $finance
             ? (float) BranchQuery::constrain(Expense::postedIn((int) now()->month, (int) now()->year))->sum('amount')
@@ -48,19 +46,15 @@ class DashboardController extends Controller
         if ($user->canAccessFeature('parts_inventory')) {
             $lowThreshold = $type === BusinessTypes::PAINT ? 250 : 5;
             $lowStock = $branchId
-                ? \App\Models\BranchStock::query()->where('branch_id', $branchId)->whereNotNull('part_id')->where('qty', '<=', $lowThreshold)->count()
+                ? BranchStock::query()->where('branch_id', $branchId)->whereNotNull('part_id')->where('qty', '<=', $lowThreshold)->count()
                 : Part::where('stock_qty', '<=', $lowThreshold)->count();
         } elseif ($user->canAccessFeature('product_catalog')) {
             $lowStock = $branchId
-                ? \App\Models\BranchStock::query()->where('branch_id', $branchId)->whereNotNull('product_id')->where('qty', '<=', 5)->count()
+                ? BranchStock::query()->where('branch_id', $branchId)->whereNotNull('product_id')->where('qty', '<=', 5)->count()
                 : Product::where('stock_qty', '<=', 5)->count();
         }
 
-        $todayIncome = $billing ? $this->incomeFor(
-            $view,
-            BranchQuery::constrainViaBill(BillPayment::query()->with(['bill.items']))->whereDate('paid_at', today())->get(),
-            BranchQuery::constrainViaBill(BillItem::query()->with(['bill.items']))->where('type', 'advance')->whereDate('created_at', today())->get(),
-        ) : null;
+        $todayIncome = $billing ? $this->periodIncome($view, null, null, today()) : null;
 
         $recentBills = $billing
             ? BranchQuery::constrain(Bill::with(['customer', 'vehicle', 'items', 'payments', 'branch:id,name']))->latest()->limit(5)->get()
@@ -99,9 +93,32 @@ class DashboardController extends Controller
         ]);
     }
 
+    private function periodIncome(MonetaryView $view, ?int $year, ?int $month, $day): float
+    {
+        $payments = BranchQuery::constrainViaBill(BillPayment::query());
+        $advances = BranchQuery::constrainViaBill(BillItem::query())->where('type', 'advance');
+        if ($day !== null) {
+            $payments->whereDate('paid_at', $day);
+            $advances->whereDate('created_at', $day);
+        } else {
+            $payments->whereYear('paid_at', $year)->whereMonth('paid_at', $month);
+            $advances->whereYear('created_at', $year)->whereMonth('created_at', $month);
+        }
+
+        if (! $view->active()) {
+            return round((float) $payments->sum('amount') + (float) (clone $advances)->sum('line_total'), 2);
+        }
+
+        return $this->incomeFor(
+            $view,
+            $payments->with(['bill.items'])->get(),
+            $advances->with(['bill.items'])->get(),
+        );
+    }
+
     /**
-     * @param  \Illuminate\Support\Collection<int, BillPayment>  $payments
-     * @param  \Illuminate\Support\Collection<int, BillItem>  $advances
+     * @param  Collection<int, BillPayment>  $payments
+     * @param  Collection<int, BillItem>  $advances
      */
     private function incomeFor(MonetaryView $view, $payments, $advances): float
     {

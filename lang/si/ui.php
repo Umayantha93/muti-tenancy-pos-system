@@ -102,6 +102,10 @@ return [
         'Job board' => 'රැකියා පුවරුව',
         'Service reminders' => 'සේවා සිහිකැඳවීම්',
         'Station use' => 'ස්ථාන භාවිතය',
+        'Service Intake' => 'සේවා භාරගැනීම',
+        'People' => 'පුද්ගලයෝ',
+        'Account' => 'ගිණුම',
+        'Other' => 'වෙනත්',
     ],
     'login' => [
         'one_platform' => 'එක් වේදිකාවක්. බොහෝ ව්‍යාපාර.',

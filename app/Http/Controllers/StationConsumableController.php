@@ -12,6 +12,7 @@ use App\Support\BranchQuery;
 use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -36,13 +37,20 @@ class StationConsumableController extends Controller
             ->latest('closed_at')
             ->paginate(min(max($request->integer('per_page', 20), 1), 100));
 
-        $averages = $this->averageWashesPerUnit($open->pluck('part_id')->filter()->unique()->all());
+        $recentByPart = $this->recentClosedByPart($open->pluck('part_id')->filter()->unique()->all());
+        $recent = collect($recentByPart)->flatten(1);
+        $summaries = $this->consumables->summariesFor(
+            $open->concat($history->getCollection())->concat($recent)
+        );
+        $averages = $this->averageWashesPerUnit($recentByPart, $summaries);
 
-        $history->getCollection()->transform(fn (StockIssue $issue) => $this->present($issue));
+        $history->getCollection()->transform(
+            fn (StockIssue $issue) => $this->present($issue, $summaries[$issue->id] ?? null)
+        );
 
         return $this->moneyJson([
             'open' => $open->map(fn (StockIssue $issue) => [
-                ...$this->present($issue),
+                ...$this->present($issue, $summaries[$issue->id] ?? null),
                 'average_washes_per_unit' => $averages[$issue->part_id] ?? null,
             ])->values(),
             'history' => $history,
@@ -150,9 +158,10 @@ class StationConsumableController extends Controller
     }
 
     /**
+     * @param  array{washes: float, revenue: float, cost: float, cost_per_wash: float, profit: float, days: int}|null  $summary
      * @return array<string, mixed>
      */
-    private function present(StockIssue $issue): array
+    private function present(StockIssue $issue, ?array $summary = null): array
     {
         return [
             'id' => $issue->id,
@@ -173,27 +182,47 @@ class StationConsumableController extends Controller
             'opened_by' => $issue->creator?->name,
             'closed_by' => $issue->closer?->name,
             'can_void' => $issue->isOpen() && $issue->opened_at?->isToday(),
-            ...$this->consumables->summary($issue),
+            ...($summary ?? $this->consumables->summary($issue)),
         ];
     }
 
     /**
      * @param  list<int>  $partIds
+     * @return array<int, Collection<int, StockIssue>>
+     */
+    private function recentClosedByPart(array $partIds): array
+    {
+        if ($partIds === []) {
+            return [];
+        }
+
+        $recent = StockIssue::query()
+            ->whereIn('part_id', $partIds)
+            ->whereNotNull('closed_at')
+            ->orderByDesc('closed_at')
+            ->get()
+            ->groupBy('part_id');
+
+        $limited = [];
+        foreach ($partIds as $partId) {
+            $limited[$partId] = ($recent->get($partId) ?? collect())->take(5)->values();
+        }
+
+        return $limited;
+    }
+
+    /**
+     * @param  array<int, Collection<int, StockIssue>>  $recentByPart
+     * @param  array<int, array{washes: float, revenue: float, cost: float, cost_per_wash: float, profit: float, days: int}>  $summaries
      * @return array<int, float>
      */
-    private function averageWashesPerUnit(array $partIds): array
+    private function averageWashesPerUnit(array $recentByPart, array $summaries): array
     {
         $averages = [];
-        foreach ($partIds as $partId) {
-            $recent = StockIssue::query()
-                ->where('part_id', $partId)
-                ->whereNotNull('closed_at')
-                ->latest('closed_at')
-                ->limit(5)
-                ->get();
+        foreach ($recentByPart as $partId => $recent) {
             $perUnit = $recent
                 ->filter(fn (StockIssue $issue) => $issue->usedQty() > 0)
-                ->map(fn (StockIssue $issue) => $this->consumables->summary($issue)['washes'] / $issue->usedQty())
+                ->map(fn (StockIssue $issue) => ($summaries[$issue->id]['washes'] ?? 0) / $issue->usedQty())
                 ->filter(fn ($value) => $value > 0);
             if ($perUnit->isNotEmpty()) {
                 $averages[$partId] = round($perUnit->avg(), 2);

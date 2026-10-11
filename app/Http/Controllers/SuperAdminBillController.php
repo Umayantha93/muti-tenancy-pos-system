@@ -16,6 +16,7 @@ use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Services\BillCalculator;
 use App\Services\BranchInventory;
+use App\Services\MonetaryView;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,9 +34,14 @@ class SuperAdminBillController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
+        $with = ['customer', 'vehicle', 'employees:id,name,position', 'payments:id,bill_id,amount,method,cheque_status,cheque_date'];
+        if (MonetaryView::for($request->user())->active()) {
+            $with[] = 'items';
+        }
+
         $bills = Bill::query()
             ->where('tenant_id', $tenant->id)
-            ->with(['customer', 'vehicle', 'employees:id,name,position'])
+            ->with($with)
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['search']), function ($query) use ($data) {
                 $search = '%'.$data['search'].'%';
@@ -112,7 +118,7 @@ class SuperAdminBillController extends Controller
         $billNumber = $bill->bill_number;
 
         DB::transaction(function () use ($bill) {
-            $bill->load('items');
+            $bill->load('items.part');
             foreach ($bill->items as $item) {
                 if ($item->part_id) {
                     $item->part?->returnStock((float) $item->quantity, $bill->branch_id);

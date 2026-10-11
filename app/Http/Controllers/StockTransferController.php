@@ -10,6 +10,7 @@ use App\Models\StockTransferItem;
 use App\Services\BranchInventory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -85,11 +86,16 @@ class StockTransferController extends Controller
                     'product_id' => $line['product_id'],
                     'quantity' => $line['quantity'],
                 ]);
+            }
+
+            $parts = $this->lockedParts(array_column($lines, 'part_id'));
+            $products = $this->lockedProducts(array_column($lines, 'product_id'));
+            foreach ($lines as $line) {
                 if ($line['part_id']) {
-                    $part = Part::query()->lockForUpdate()->findOrFail($line['part_id']);
+                    $part = $parts->get($line['part_id']) ?? Part::query()->whereKey($line['part_id'])->lockForUpdate()->firstOrFail();
                     BranchInventory::dispatchPart($part, (int) $data['from_branch_id'], (int) $line['quantity']);
                 } else {
-                    $product = Product::query()->lockForUpdate()->findOrFail($line['product_id']);
+                    $product = $products->get($line['product_id']) ?? Product::query()->whereKey($line['product_id'])->lockForUpdate()->firstOrFail();
                     BranchInventory::dispatchProduct($product, (int) $data['from_branch_id'], (int) $line['quantity']);
                 }
             }
@@ -107,12 +113,14 @@ class StockTransferController extends Controller
 
         DB::transaction(function () use ($request, $stock_transfer) {
             $stock_transfer->load('items');
+            $parts = $this->lockedParts($stock_transfer->items->pluck('part_id')->all());
+            $products = $this->lockedProducts($stock_transfer->items->pluck('product_id')->all());
             foreach ($stock_transfer->items as $item) {
                 if ($item->part_id) {
-                    $part = Part::query()->lockForUpdate()->findOrFail($item->part_id);
+                    $part = $parts->get($item->part_id) ?? Part::query()->whereKey($item->part_id)->lockForUpdate()->firstOrFail();
                     BranchInventory::receivePart($part, (int) $stock_transfer->to_branch_id, (int) $item->quantity);
                 } elseif ($item->product_id) {
-                    $product = Product::query()->lockForUpdate()->findOrFail($item->product_id);
+                    $product = $products->get($item->product_id) ?? Product::query()->whereKey($item->product_id)->lockForUpdate()->firstOrFail();
                     BranchInventory::receiveProduct($product, (int) $stock_transfer->to_branch_id, (int) $item->quantity);
                 }
             }
@@ -133,12 +141,14 @@ class StockTransferController extends Controller
 
         DB::transaction(function () use ($stock_transfer) {
             $stock_transfer->load('items');
+            $parts = $this->lockedParts($stock_transfer->items->pluck('part_id')->all());
+            $products = $this->lockedProducts($stock_transfer->items->pluck('product_id')->all());
             foreach ($stock_transfer->items as $item) {
                 if ($item->part_id) {
-                    $part = Part::query()->lockForUpdate()->findOrFail($item->part_id);
+                    $part = $parts->get($item->part_id) ?? Part::query()->whereKey($item->part_id)->lockForUpdate()->firstOrFail();
                     BranchInventory::returnPart($part, (int) $item->quantity, (int) $stock_transfer->from_branch_id);
                 } elseif ($item->product_id) {
-                    $product = Product::query()->lockForUpdate()->findOrFail($item->product_id);
+                    $product = $products->get($item->product_id) ?? Product::query()->whereKey($item->product_id)->lockForUpdate()->firstOrFail();
                     BranchInventory::returnProduct($product, (int) $item->quantity, (int) $stock_transfer->from_branch_id);
                 }
             }
@@ -181,6 +191,34 @@ class StockTransferController extends Controller
         }
 
         return $lines;
+    }
+
+    /**
+     * @param  list<int|null>  $ids
+     * @return Collection<int, Part>
+     */
+    private function lockedParts(array $ids)
+    {
+        $ids = array_values(array_unique(array_filter($ids)));
+        if ($ids === []) {
+            return collect();
+        }
+
+        return Part::query()->whereIn('id', $ids)->lockForUpdate()->get()->keyBy('id');
+    }
+
+    /**
+     * @param  list<int|null>  $ids
+     * @return Collection<int, Product>
+     */
+    private function lockedProducts(array $ids)
+    {
+        $ids = array_values(array_unique(array_filter($ids)));
+        if ($ids === []) {
+            return collect();
+        }
+
+        return Product::query()->whereIn('id', $ids)->lockForUpdate()->get()->keyBy('id');
     }
 
     private function assertCanReceive(Request $request, StockTransfer $transfer): void

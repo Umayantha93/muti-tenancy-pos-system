@@ -328,22 +328,96 @@ class BranchInventory
 
     public static function overlayPart(Part $part): Part
     {
-        $branchId = BranchContext::id();
-        if ($branchId) {
-            $part->setAttribute('stock_qty', self::partQty($part->id, $branchId));
-        }
+        self::overlayParts([$part]);
 
         return $part;
     }
 
-    public static function overlayProduct(Product $product): Product
+    /**
+     * @param  iterable<Part>  $parts
+     */
+    public static function overlayParts(iterable $parts): void
     {
+        $parts = collect($parts);
         $branchId = BranchContext::id();
-        if ($branchId) {
-            $product->setAttribute('stock_qty', self::productQty($product->id, $branchId));
+        if (! $branchId || $parts->isEmpty()) {
+            return;
         }
 
+        $qtys = BranchStock::query()
+            ->where('branch_id', $branchId)
+            ->whereIn('part_id', $parts->pluck('id')->all())
+            ->pluck('qty', 'part_id');
+
+        foreach ($parts as $part) {
+            $part->setAttribute('stock_qty', self::qty($qtys[$part->id] ?? 0));
+        }
+    }
+
+    public static function overlayProduct(Product $product): Product
+    {
+        self::overlayProducts([$product]);
+
         return $product;
+    }
+
+    /**
+     * @param  iterable<Product>  $products
+     */
+    public static function overlayProducts(iterable $products): void
+    {
+        $products = collect($products);
+        $branchId = BranchContext::id();
+        if (! $branchId || $products->isEmpty()) {
+            return;
+        }
+
+        $qtys = BranchStock::query()
+            ->where('branch_id', $branchId)
+            ->whereIn('product_id', $products->pluck('id')->all())
+            ->pluck('qty', 'product_id');
+
+        foreach ($products as $product) {
+            $product->setAttribute('stock_qty', (int) ($qtys[$product->id] ?? 0));
+        }
+    }
+
+    /**
+     * @param  iterable<int>  $partIds
+     * @return array<int, float>
+     */
+    public static function partQtys(iterable $partIds, ?int $branchId = null): array
+    {
+        $partIds = collect($partIds)->filter()->map(fn ($id) => (int) $id)->unique()->values();
+        if ($partIds->isEmpty()) {
+            return [];
+        }
+
+        $branchId ??= BranchContext::id();
+        if (! $branchId) {
+            $sample = Part::withoutGlobalScopes()->find($partIds->first());
+            $branchId = Branch::defaultIdFor($sample?->tenant_id);
+        }
+
+        if (! $branchId) {
+            return Part::withoutGlobalScopes()
+                ->whereIn('id', $partIds->all())
+                ->pluck('stock_qty', 'id')
+                ->map(fn ($qty) => self::qty($qty))
+                ->all();
+        }
+
+        $stored = BranchStock::query()
+            ->where('branch_id', $branchId)
+            ->whereIn('part_id', $partIds->all())
+            ->pluck('qty', 'part_id');
+
+        $qtys = [];
+        foreach ($partIds as $partId) {
+            $qtys[$partId] = self::qty($stored[$partId] ?? 0);
+        }
+
+        return $qtys;
     }
 
     private static function lockPartRow(Part $part, int $branchId): BranchStock
