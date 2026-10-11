@@ -44,7 +44,7 @@ class ReportController extends Controller
             ->values();
 
         $owing = BranchQuery::constrain(Bill::query())
-            ->with('customer:id,name,phone')
+            ->with(['customer:id,name,phone', 'payments:id,bill_id,method,cheque_status,cheque_date'])
             ->whereIn('status', ['open', 'partially_paid', 'owe_in'])
             ->where('balance_due', '>', 0)
             ->orderByDesc('balance_due')
@@ -97,7 +97,7 @@ class ReportController extends Controller
         if (! empty($data['employee_id'])) {
             $employee = Employee::query()->find($data['employee_id']);
             $jobs = BranchQuery::constrain(Bill::query())
-                ->with(['customer:id,name,phone', 'vehicle:id,number_plate,make,model'])
+                ->with(['customer:id,name,phone', 'vehicle:id,number_plate,make,model', 'payments:id,bill_id,method,cheque_status,cheque_date'])
                 ->whereHas('employees', fn ($query) => $query->where('employees.id', $data['employee_id']))
                 ->whereBetween('admission_date', [$from->toDateString(), $to->toDateString()])
                 ->orderByDesc('admission_date')

@@ -76,9 +76,14 @@ class RetailSaleController extends Controller
                 'created_by' => $request->user()->id,
             ]);
 
+            $productIds = collect($data['items'])->pluck('product_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            $products = $productIds->isEmpty()
+                ? collect()
+                : Product::query()->whereIn('id', $productIds->all())->lockForUpdate()->get()->keyBy('id');
+
             $subtotal = 0;
             foreach ($data['items'] as $line) {
-                $product = Product::findOrFail($line['product_id']);
+                $product = $products->get((int) $line['product_id']) ?? Product::query()->whereKey($line['product_id'])->lockForUpdate()->firstOrFail();
                 $qty = (float) $line['quantity'];
                 $needed = (int) ceil($qty);
                 if (BranchInventory::productQty($product->id) < $needed) {

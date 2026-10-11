@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 class CustomerController extends Controller
 {
@@ -21,22 +22,7 @@ class CustomerController extends Controller
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
-        $lastBills = Bill::query()
-            ->whereIn('customer_id', $customers->getCollection()->pluck('id'))
-            ->orderByDesc('admission_date')
-            ->orderByDesc('id')
-            ->get(['id', 'customer_id', 'bill_number', 'admission_date', 'status', 'balance_due', 'subtotal'])
-            ->unique('customer_id')
-            ->keyBy('customer_id');
-
-        $customers->getCollection()->transform(function (Customer $customer) use ($lastBills) {
-            $customer->setAttribute('outstanding_balance', round((float) ($customer->outstanding_balance ?? 0), 2));
-            $customer->setAttribute('last_bill', $lastBills->get($customer->id));
-            $customer->setAttribute('sms_opt_in', (bool) $customer->sms_opt_in);
-            $this->appendAgeing($customer);
-
-            return $customer;
-        });
+        $this->attachListStats($customers->getCollection());
 
         return $this->moneyJson($customers);
     }
@@ -55,7 +41,7 @@ class CustomerController extends Controller
             ->orderByDesc('outstanding_balance')
             ->paginate($request->integer('per_page', 50));
 
-        $customers->getCollection()->transform(fn (Customer $customer) => $this->decorate($customer));
+        $this->attachListStats($customers->getCollection());
 
         return $this->moneyJson($customers);
     }
@@ -100,7 +86,9 @@ class CustomerController extends Controller
 
     private function decorate(Customer $customer): Customer
     {
-        $outstanding = (float) $customer->bills()->where('balance_due', '>', 0)->sum('balance_due');
+        $outstanding = array_key_exists('outstanding_balance', $customer->getAttributes())
+            ? (float) $customer->outstanding_balance
+            : (float) $customer->bills()->where('balance_due', '>', 0)->sum('balance_due');
         $lastBill = $customer->relationLoaded('bills')
             ? $customer->bills->sortByDesc(fn (Bill $bill) => sprintf('%s-%010d', $bill->admission_date, $bill->id))->first()
             : $customer->bills()->orderByDesc('admission_date')->orderByDesc('id')->first();
@@ -113,13 +101,56 @@ class CustomerController extends Controller
         return $customer;
     }
 
-    private function appendAgeing(Customer $customer): void
+    /**
+     * @param  Collection<int, Customer>  $customers
+     */
+    private function attachListStats($customers): void
     {
-        $oldest = $customer->bills()
+        if ($customers->isEmpty()) {
+            return;
+        }
+
+        $ids = $customers->pluck('id')->all();
+        $lastBills = Bill::query()
+            ->whereIn('customer_id', $ids)
+            ->orderByDesc('admission_date')
+            ->orderByDesc('id')
+            ->get(['id', 'customer_id', 'bill_number', 'admission_date', 'status', 'balance_due', 'subtotal'])
+            ->unique('customer_id')
+            ->keyBy('customer_id');
+        $oldestUnpaid = Bill::query()
+            ->whereIn('customer_id', $ids)
             ->where('balance_due', '>', 0)
             ->orderBy('admission_date')
             ->orderBy('id')
-            ->first();
+            ->get(['id', 'customer_id', 'bill_number', 'admission_date', 'balance_due', 'share_token'])
+            ->unique('customer_id')
+            ->keyBy('customer_id');
+
+        $customers->transform(function (Customer $customer) use ($lastBills, $oldestUnpaid) {
+            $customer->setAttribute('outstanding_balance', round((float) ($customer->outstanding_balance ?? 0), 2));
+            $customer->setAttribute('last_bill', $lastBills->get($customer->id));
+            $customer->setAttribute('sms_opt_in', (bool) $customer->sms_opt_in);
+            $this->appendAgeing($customer, $oldestUnpaid->get($customer->id));
+
+            return $customer;
+        });
+    }
+
+    private function appendAgeing(Customer $customer, Bill|false|null $oldest = false): void
+    {
+        if ($oldest === false) {
+            $oldest = $customer->relationLoaded('bills')
+                ? $customer->bills
+                    ->filter(fn (Bill $bill) => (float) $bill->balance_due > 0)
+                    ->sortBy(fn (Bill $bill) => sprintf('%s-%010d', $bill->admission_date?->toDateString(), $bill->id))
+                    ->first()
+                : $customer->bills()
+                    ->where('balance_due', '>', 0)
+                    ->orderBy('admission_date')
+                    ->orderBy('id')
+                    ->first();
+        }
 
         if (! $oldest) {
             $customer->setAttribute('outstanding_days', 0);

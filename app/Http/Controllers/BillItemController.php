@@ -17,6 +17,7 @@ use App\Support\StockUnit;
 use App\Support\WarrantyPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -135,15 +136,33 @@ class BillItemController extends Controller
 
         $items = DB::transaction(function () use ($labor, $materials, $bill, $calculator, $request, $tenantId, $typeMeta, $panelName, $groupId) {
             $created = [];
+            $laborIds = collect($labor)->pluck('labor_item_id')->filter()->unique()->all();
+            $laborItems = $laborIds === []
+                ? collect()
+                : LaborItem::withoutGlobalScopes()
+                    ->where('tenant_id', $tenantId)
+                    ->whereIn('id', $laborIds)
+                    ->get()
+                    ->keyBy('id');
+            $partIds = collect($materials)->pluck('part_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            $parts = $partIds->isEmpty()
+                ? collect()
+                : Part::query()->whereIn('id', $partIds->all())->lockForUpdate()->get()->keyBy('id');
+            $stock = (object) [
+                'parts' => $parts,
+                'qty' => BranchInventory::partQtys($partIds, $bill->branch_id),
+                'required' => PartSerials::requiredMap($parts),
+            ];
 
             foreach ($labor as $index => $row) {
+                $catalog = ! empty($row['labor_item_id']) ? $laborItems->get((int) $row['labor_item_id']) : null;
                 $payload = LaborItem::applyToItemPayload([
                     'type' => 'labor',
                     'labor_item_id' => $row['labor_item_id'] ?? null,
                     'description' => $row['description'] ?? null,
                     'unit_price' => $row['unit_price'] ?? null,
                     'quantity' => $row['quantity'],
-                ], $tenantId);
+                ], $tenantId, $catalog);
                 $payload['panel_group_id'] = $groupId;
                 $payload['panel_name'] = $panelName;
                 if (empty($payload['labor_item_id'])) {
@@ -154,7 +173,7 @@ class BillItemController extends Controller
                     }
                 }
                 $this->assertLineReady($payload, $typeMeta);
-                $created[] = $this->createLine($bill, $payload, $request);
+                $created[] = $this->createLine($bill, $payload, $request, $stock);
             }
 
             foreach ($materials as $row) {
@@ -166,7 +185,7 @@ class BillItemController extends Controller
                     'panel_name' => $panelName,
                 ];
                 $this->assertLineReady($payload, $typeMeta);
-                $created[] = $this->createLine($bill, $payload, $request);
+                $created[] = $this->createLine($bill, $payload, $request, $stock);
             }
 
             $calculator->recalculate($bill);
@@ -175,7 +194,7 @@ class BillItemController extends Controller
         });
 
         return response()->json([
-            'items' => collect($items)->map->load('part'),
+            'items' => (new \Illuminate\Database\Eloquent\Collection($items))->load('part'),
             'bill' => $bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments']),
         ], 201);
     }
@@ -221,8 +240,8 @@ class BillItemController extends Controller
 
         DB::transaction(function () use ($bill, $item, $calculator) {
             $lines = $item->panel_group_id
-                ? $bill->items()->where('panel_group_id', $item->panel_group_id)->get()
-                : collect([$item]);
+                ? $bill->items()->where('panel_group_id', $item->panel_group_id)->with('part')->get()
+                : collect([$item->loadMissing('part')]);
 
             foreach ($lines as $line) {
                 if ($line->part_id) {
@@ -241,7 +260,7 @@ class BillItemController extends Controller
 
     /**
      * @param  array<string, mixed>  $data
-     * @param  \Illuminate\Support\Collection<string, array<string, mixed>>  $typeMeta
+     * @param  Collection<string, array<string, mixed>>  $typeMeta
      */
     private function assertLineReady(array $data, $typeMeta): void
     {
@@ -284,7 +303,7 @@ class BillItemController extends Controller
     /**
      * @param  array<string, mixed>  $data
      */
-    private function createLine(Bill $bill, array $data, Request $request): BillItem
+    private function createLine(Bill $bill, array $data, Request $request, ?object $stock = null): BillItem
     {
         if ($data['type'] === 'customer_part') {
             $data['unit_price'] = 0;
@@ -308,9 +327,18 @@ class BillItemController extends Controller
             $quantity = 1;
         }
 
-        $part = ! empty($data['part_id']) ? Part::lockForUpdate()->findOrFail($data['part_id']) : null;
+        $part = null;
+        if (! empty($data['part_id'])) {
+            $partId = (int) $data['part_id'];
+            $part = $stock?->parts?->get($partId) ?? Part::lockForUpdate()->findOrFail($partId);
+        }
         $serials = $data['serials'] ?? [];
-        if ($part && (PartSerials::requiredFor($part) || $serials !== [])) {
+        $needsSerial = $part && (
+            ($stock !== null && array_key_exists($part->id, $stock->required))
+                ? (bool) $stock->required[$part->id]
+                : PartSerials::requiredFor($part)
+        );
+        if ($part && ($needsSerial || $serials !== [])) {
             if ($serials === []) {
                 throw ValidationException::withMessages([
                     'serials' => ['This item is sold by IMEI / serial. Scan or enter each unit.'],
@@ -319,8 +347,13 @@ class BillItemController extends Controller
             $quantity = count($serials);
             $data['description'] = trim(($data['description'] ?? $part->name).' · '.implode(', ', $serials));
         }
-        if ($part && BranchInventory::partQty($part->id, $bill->branch_id) < $quantity) {
-            throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part at this shop.']]);
+        if ($part) {
+            $available = $stock !== null && array_key_exists($part->id, $stock->qty)
+                ? (float) $stock->qty[$part->id]
+                : BranchInventory::partQty($part->id, $bill->branch_id);
+            if ($available < $quantity) {
+                throw ValidationException::withMessages(['quantity' => ['Insufficient stock for this part at this shop.']]);
+            }
         }
 
         $businessType = $request->user()?->tenant?->business_type;
@@ -401,6 +434,9 @@ class BillItemController extends Controller
             $item ??= $created;
         }
         $part?->takeStock((float) $quantity, $bill->branch_id);
+        if ($stock !== null && $part) {
+            $stock->qty[$part->id] = (float) ($stock->qty[$part->id] ?? 0) - (float) $quantity;
+        }
         if ($part && $serials !== [] && $item) {
             PartSerials::sell($part, $serials, $item);
         }

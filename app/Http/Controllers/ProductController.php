@@ -26,7 +26,7 @@ class ProductController extends Controller
             ->latest()
             ->paginate($request->integer('per_page', 30));
 
-        $products->getCollection()->transform(fn (Product $product) => BranchInventory::overlayProduct($product));
+        BranchInventory::overlayProducts($products->getCollection());
 
         return $this->moneyJson($products);
     }

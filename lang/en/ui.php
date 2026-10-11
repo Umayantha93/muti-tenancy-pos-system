@@ -102,6 +102,10 @@ return [
         'Job board' => 'Job board',
         'Service reminders' => 'Service reminders',
         'Station use' => 'Station use',
+        'Service Intake' => 'Service Intake',
+        'People' => 'People',
+        'Account' => 'Account',
+        'Other' => 'Other',
     ],
     'login' => [
         'one_platform' => 'One platform. Many businesses.',

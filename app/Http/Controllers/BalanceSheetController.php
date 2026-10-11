@@ -34,10 +34,7 @@ class BalanceSheetController extends Controller
             ...$this->monthlyReport($month, $year, $request->user()),
             'inventory_payables' => $this->inventoryPayables($view),
             'bill_receivables' => $this->billReceivables($view),
-            'yearly_trend' => collect(range(1, 12))->map(fn ($trendMonth) => [
-                'month' => $trendMonth,
-                ...$this->summary($trendMonth, $year, $view, false),
-            ])->all(),
+            'yearly_trend' => $this->yearlyTrend($year, $view),
         ]);
     }
 
@@ -241,6 +238,189 @@ class BalanceSheetController extends Controller
     }
 
     /**
+     * One pass over the year instead of running the monthly summary twelve times.
+     *
+     * @return list<array{month: int, income: float, expenses: float, net_profit: float}>
+     */
+    private function yearlyTrend(int $year, MonetaryView $view): array
+    {
+        $payments = $this->yearlyReceiptTotals($year, $view, 'payment');
+        $advances = $this->yearlyReceiptTotals($year, $view, 'advance');
+        $refunds = $this->yearlyReceiptTotals($year, $view, 'refund');
+        $manual = $this->yearlyManualExpenseTotals($year);
+        $settlements = $this->yearlySettlementTotals($year);
+        $salaries = $this->yearlySalaryTotals($year);
+
+        return collect(range(1, 12))->map(function (int $month) use ($view, $payments, $advances, $refunds, $manual, $settlements, $salaries) {
+            $manualTotal = $manual[$month] + $settlements[$month];
+            $salaryTotal = $salaries[$month];
+            if ($view->active()) {
+                $income = round($payments[$month] + $advances[$month] - $refunds[$month], 2);
+                $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal), 2);
+
+                return [
+                    'month' => $month,
+                    'income' => $income,
+                    'expenses' => $expenses,
+                    'net_profit' => round($income - $expenses, 2),
+                ];
+            }
+
+            $income = $payments[$month] + $advances[$month] - $refunds[$month];
+            $expenses = $manualTotal + $salaryTotal;
+
+            return [
+                'month' => $month,
+                'income' => $income,
+                'expenses' => $expenses,
+                'net_profit' => $income - $expenses,
+            ];
+        })->all();
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function yearlyReceiptTotals(int $year, MonetaryView $view, string $kind): array
+    {
+        $query = match ($kind) {
+            'advance' => BranchQuery::constrainViaBill(BillItem::query())
+                ->where('type', 'advance')
+                ->whereYear('created_at', $year),
+            'refund' => BranchQuery::constrainViaBill(BillRefund::query())
+                ->whereYear('refunded_at', $year),
+            default => BranchQuery::constrainViaBill(BillPayment::query()->countingTowardPaid())
+                ->whereYear('paid_at', $year),
+        };
+        $dateColumn = match ($kind) {
+            'advance' => 'created_at',
+            'refund' => 'refunded_at',
+            default => 'paid_at',
+        };
+        $amountColumn = $kind === 'advance' ? 'line_total' : 'amount';
+
+        if (! $view->active()) {
+            return $this->fillMonthSums($query, $dateColumn, $amountColumn);
+        }
+
+        $totals = $this->blankMonths();
+        $query->with(['bill.items'])->get()->each(function ($row) use (&$totals, $view, $dateColumn, $amountColumn) {
+            $month = (int) $row->{$dateColumn}?->month;
+            if ($month < 1 || $month > 12) {
+                return;
+            }
+            $totals[$month] += $view->scaleReceipt((float) $row->{$amountColumn}, $row->bill?->items ?? []);
+        });
+
+        return $totals;
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function yearlyManualExpenseTotals(int $year): array
+    {
+        $totals = $this->blankMonths();
+        BranchQuery::constrain(Expense::query())
+            ->paid()
+            ->whereDoesntHave('settlements')
+            ->where(function ($nested) use ($year) {
+                $nested->where(function ($settled) use ($year) {
+                    $settled->whereNotNull('settled_at')->whereYear('settled_at', $year);
+                })->orWhere(function ($legacy) use ($year) {
+                    $legacy->whereNull('settled_at')->whereYear('expense_date', $year);
+                });
+            })
+            ->get(['amount', 'settled_at', 'expense_date'])
+            ->each(function (Expense $expense) use (&$totals) {
+                $month = $expense->settled_at
+                    ? (int) $expense->settled_at->month
+                    : (int) $expense->expense_date?->month;
+                if ($month >= 1 && $month <= 12) {
+                    $totals[$month] += (float) $expense->amount;
+                }
+            });
+
+        return $totals;
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function yearlySettlementTotals(int $year): array
+    {
+        $rows = ExpenseSettlement::query()
+            ->whereHas('expense', function ($query) {
+                $id = BranchQuery::idForRead();
+                if ($id !== null) {
+                    $query->where('branch_id', $id);
+                }
+            })
+            ->whereYear('settled_on', $year)
+            ->selectRaw('MONTH(settled_on) as month_num, SUM(amount) as total')
+            ->groupByRaw('MONTH(settled_on)')
+            ->get();
+
+        return $this->rowsToMonths($rows);
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function yearlySalaryTotals(int $year): array
+    {
+        $rows = BranchQuery::constrain(Payroll::query())
+            ->where('year', $year)
+            ->selectRaw('month as month_num, SUM(net_salary) as total')
+            ->groupBy('month')
+            ->get();
+
+        return $this->rowsToMonths($rows);
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function fillMonthSums($query, string $dateColumn, string $amountColumn): array
+    {
+        $rows = (clone $query)
+            ->selectRaw('MONTH('.$dateColumn.') as month_num, SUM('.$amountColumn.') as total')
+            ->groupByRaw('MONTH('.$dateColumn.')')
+            ->get();
+
+        return $this->rowsToMonths($rows);
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function rowsToMonths($rows): array
+    {
+        $totals = $this->blankMonths();
+        foreach ($rows as $row) {
+            $month = (int) $row->month_num;
+            if ($month >= 1 && $month <= 12) {
+                $totals[$month] = (float) $row->total;
+            }
+        }
+
+        return $totals;
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function blankMonths(): array
+    {
+        $totals = [];
+        foreach (range(1, 12) as $month) {
+            $totals[$month] = 0.0;
+        }
+
+        return $totals;
+    }
+
+    /**
      * Chronological ledger for the selected month with running balance.
      *
      * @return list<array{
@@ -430,7 +610,7 @@ class BalanceSheetController extends Controller
 
         $analyzer = app(BillProfitAnalyzer::class);
         BranchQuery::constrain(Bill::query())
-            ->with(['items.part', 'vehicle:id,number_plate,make,model', 'customer:id,name'])
+            ->with(['items.part', 'refunds.items', 'vehicle:id,number_plate,make,model', 'customer:id,name'])
             ->whereNotNull('closed_at')
             ->whereYear('closed_at', $year)
             ->whereMonth('closed_at', $month)
@@ -604,12 +784,13 @@ class BalanceSheetController extends Controller
      */
     private function billReceivables(MonetaryView $view): array
     {
-        $bills = BranchQuery::constrain(Bill::query())->where('status', 'owe_in')->get(['balance_due']);
-        $total = (float) $bills->sum('balance_due');
+        $query = BranchQuery::constrain(Bill::query())->where('status', 'owe_in');
 
         return [
-            'receivables_total' => $view->active() ? $view->scaleExpense($total) : round($total, 2),
-            'count' => $bills->count(),
+            'receivables_total' => $view->active()
+                ? $view->scaleExpense((float) (clone $query)->sum('balance_due'))
+                : round((float) (clone $query)->sum('balance_due'), 2),
+            'count' => (clone $query)->count(),
         ];
     }
 }

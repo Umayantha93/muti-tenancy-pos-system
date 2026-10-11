@@ -8,6 +8,7 @@ use App\Models\Feature;
 use App\Models\Part;
 use App\Models\Tenant;
 use App\Models\User;
+use Database\Seeders\FeatureSeeder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -17,7 +18,7 @@ class JobPhotosStockUnitAndPdfTest extends TestCase
 {
     public function test_job_photos_are_off_until_enabled(): void
     {
-        $this->seed(\Database\Seeders\FeatureSeeder::class);
+        $this->seed(FeatureSeeder::class);
         $superAdmin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
         Sanctum::actingAs($superAdmin);
 
@@ -183,6 +184,45 @@ class JobPhotosStockUnitAndPdfTest extends TestCase
             'unit_cost' => 900,
             'payment_status' => 'paid',
         ])->assertUnprocessable();
+    }
+
+    public function test_edit_can_correct_a_mistaken_stock_unit(): void
+    {
+        $user = $this->garageUser();
+        Sanctum::actingAs($user);
+
+        $part = $this->postJson('/api/parts', [
+            'name' => 'Engine oil 5W-30',
+            'brand' => 'Castrol',
+            'type' => 'Lubricant',
+            'price' => 5200,
+            'cost_price' => 4100,
+            'stock_qty' => 10,
+            'stock_unit' => 'qty',
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$part['id'], [
+            'name' => 'Engine oil 5W-30',
+            'brand' => 'Castrol',
+            'price' => 5200,
+            'stock_unit' => 'l',
+        ])->assertOk()->assertJsonPath('stock_unit', 'l');
+
+        $saved = Part::query()->findOrFail($part['id']);
+        $this->assertSame('l', $saved->stock_unit);
+        $this->assertEquals(10, (float) $saved->stock_qty);
+
+        $fraction = $this->postJson('/api/parts', [
+            'name' => 'Thinner',
+            'brand' => 'Generic',
+            'price' => 100,
+            'stock_qty' => 1.5,
+            'stock_unit' => 'l',
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$fraction['id'], [
+            'stock_unit' => 'qty',
+        ])->assertUnprocessable()->assertJsonValidationErrors('stock_unit');
     }
 
     private function openJob(): Bill

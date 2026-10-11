@@ -23,8 +23,33 @@ class PartSerials
             return false;
         }
 
-        return (bool) $part->serialized
-            || $part->serials()->where('status', PartSerial::IN_STOCK)->exists();
+        return (bool) ($part->serialized || self::requiredMap(collect([$part]))[$part->id]);
+    }
+
+    /**
+     * @param  Collection<int, Part>|iterable<Part>  $parts
+     * @return array<int, bool>
+     */
+    public static function requiredMap(iterable $parts): array
+    {
+        $parts = collect($parts);
+        if (! self::enabled() || $parts->isEmpty()) {
+            return [];
+        }
+
+        $withStock = PartSerial::query()
+            ->whereIn('part_id', $parts->pluck('id')->all())
+            ->where('status', PartSerial::IN_STOCK)
+            ->distinct()
+            ->pluck('part_id')
+            ->flip();
+
+        $required = [];
+        foreach ($parts as $part) {
+            $required[$part->id] = (bool) $part->serialized || $withStock->has($part->id);
+        }
+
+        return $required;
     }
 
     /**
@@ -34,12 +59,25 @@ class PartSerials
     public static function receive(Part $part, array $codes): Collection
     {
         $created = collect();
+        $normalized = [];
         foreach ($codes as $raw) {
             $serial = PartSerial::normalize((string) $raw);
             if ($serial === '') {
                 continue;
             }
-            if (PartSerial::query()->where('serial', $serial)->exists()) {
+            if (isset($normalized[$serial])) {
+                throw ValidationException::withMessages([
+                    'serials' => ["IMEI / serial {$serial} is already in stock or sold."],
+                ]);
+            }
+            $normalized[$serial] = $serial;
+        }
+
+        $existing = $normalized === []
+            ? collect()
+            : PartSerial::query()->whereIn('serial', array_values($normalized))->pluck('serial');
+        foreach ($normalized as $serial) {
+            if ($existing->contains($serial)) {
                 throw ValidationException::withMessages([
                     'serials' => ["IMEI / serial {$serial} is already in stock or sold."],
                 ]);
@@ -75,12 +113,15 @@ class PartSerials
             ]);
         }
 
+        $rows = $part->serials()
+            ->whereIn('serial', $wanted->all())
+            ->where('status', PartSerial::IN_STOCK)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('serial');
+
         foreach ($wanted as $serial) {
-            $row = $part->serials()
-                ->where('serial', $serial)
-                ->where('status', PartSerial::IN_STOCK)
-                ->lockForUpdate()
-                ->first();
+            $row = $rows->pull($serial);
             if (! $row) {
                 throw ValidationException::withMessages([
                     'serials' => ["IMEI / serial {$serial} is not in stock for this item."],

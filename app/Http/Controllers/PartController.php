@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BillItem;
+use App\Models\BranchStock;
 use App\Models\Expense;
 use App\Models\Part;
 use App\Models\PartCategory;
@@ -19,10 +20,12 @@ use App\Support\InventoryCosting;
 use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -65,7 +68,7 @@ class PartController extends Controller
             ->orderBy($sort, $direction)
             ->paginate($perPage);
 
-        $parts->getCollection()->transform(fn (Part $part) => BranchInventory::overlayPart($part));
+        BranchInventory::overlayParts($parts->getCollection());
 
         return $this->moneyJson($parts);
     }
@@ -117,7 +120,7 @@ class PartController extends Controller
             ],
         ], null, 'A2');
 
-        $lastColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+        $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
         $sheet->getStyle("A1:{$lastColumn}1")->getFont()->setBold(true);
         $sheet->getStyle("A1:{$lastColumn}1")->getFill()
             ->setFillType(Fill::FILL_SOLID)
@@ -216,6 +219,29 @@ class PartController extends Controller
         $seenSku = [];
         /** @var array<string, int> $seenBarcode index in $parsed */
         $seenBarcode = [];
+        $barcodeNeedles = [];
+        $skuNeedles = [];
+        foreach ($rows as $row) {
+            if ($this->rowIsEmpty($row)) {
+                continue;
+            }
+            $barcodeIndex = $headerIndex['barcode'] ?? null;
+            $skuIndex = $headerIndex['sku'] ?? null;
+            $barcode = $barcodeIndex !== null && isset($row[$barcodeIndex]) ? trim((string) $row[$barcodeIndex]) : '';
+            $sku = $skuIndex !== null && isset($row[$skuIndex]) ? trim((string) $row[$skuIndex]) : '';
+            if ($barcode !== '') {
+                $barcodeNeedles[] = $barcode;
+            }
+            if ($sku !== '') {
+                $skuNeedles[] = $sku;
+            }
+        }
+        $partsByBarcode = $barcodeNeedles === []
+            ? collect()
+            : Part::query()->whereIn('barcode', array_values(array_unique($barcodeNeedles)))->get()->keyBy(fn (Part $part) => mb_strtolower((string) $part->barcode));
+        $partsBySku = $skuNeedles === []
+            ? collect()
+            : Part::query()->whereIn('sku', array_values(array_unique($skuNeedles)))->get()->keyBy(fn (Part $part) => mb_strtolower((string) $part->sku));
 
         foreach ($rows as $index => $row) {
             $line = $index + 2;
@@ -324,7 +350,7 @@ class PartController extends Controller
             // Against existing catalogue: merge only when name matches; otherwise free the code.
             $matchId = null;
             if ($barcode !== null) {
-                $barcodeOwner = Part::query()->where('barcode', $barcode)->first();
+                $barcodeOwner = $partsByBarcode->get(mb_strtolower($barcode));
                 if ($barcodeOwner) {
                     if (PartBarcode::namesMatch($barcodeOwner->name, $name)) {
                         $matchId = $barcodeOwner->id;
@@ -335,7 +361,7 @@ class PartController extends Controller
                 }
             }
             if ($sku !== null) {
-                $skuOwner = Part::query()->where('sku', $sku)->first();
+                $skuOwner = $partsBySku->get(mb_strtolower($sku));
                 if ($skuOwner) {
                     if (PartBarcode::namesMatch($skuOwner->name, $name)) {
                         if ($matchId !== null && $matchId !== $skuOwner->id) {
@@ -395,10 +421,15 @@ class PartController extends Controller
             $updated = 0;
             $expenses = 0;
             $expenseTotal = 0.0;
+            $matchIds = collect($parsed)->pluck('match_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            $matchedParts = $matchIds->isEmpty()
+                ? collect()
+                : Part::query()->whereIn('id', $matchIds->all())->get()->keyBy('id');
+            $shopQtys = BranchInventory::partQtys($matchIds);
 
             foreach ($parsed as $row) {
                 $existing = $row['match_id']
-                    ? Part::query()->find($row['match_id'])
+                    ? $matchedParts->get((int) $row['match_id'])
                     : null;
 
                 $qty = $row['stock_qty'];
@@ -406,7 +437,7 @@ class PartController extends Controller
                 $incomingUnit = $row['stock_unit'] ?? StockUnit::QTY;
 
                 if ($existing) {
-                    $shopQty = BranchInventory::partQty($existing->id);
+                    $shopQty = $shopQtys[$existing->id] ?? BranchInventory::partQty($existing->id);
                     $partUnit = StockUnit::normalize($existing->stock_unit, $businessType);
                     $qty = $this->qtyInUnit($qty, $incomingUnit, $partUnit);
                     $blendedCost = InventoryCosting::catalogueCost(
@@ -417,6 +448,7 @@ class PartController extends Controller
                         $unitCost,
                     );
                     BranchInventory::addPart($existing, $qty);
+                    $shopQtys[$existing->id] = ($shopQtys[$existing->id] ?? $shopQty) + $qty;
                     $existing->refresh();
                     $existing->update([
                         'name' => $row['name'],
@@ -662,9 +694,21 @@ class PartController extends Controller
         [$rows, $receipt, $expense] = DB::transaction(function () use ($data, $request, $paymentStatus, $invoiceNumber, $receivedAt) {
             $rows = [];
             $lines = [];
+            $existingIds = collect($data['items'])->pluck('part_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+            $existingParts = $existingIds->isEmpty()
+                ? collect()
+                : Part::query()->whereIn('id', $existingIds->all())->lockForUpdate()->get()->keyBy('id');
+            $newSkus = collect($data['items'])
+                ->map(fn ($line) => trim((string) (is_array($line['new_part'] ?? null) ? ($line['new_part']['sku'] ?? '') : '')))
+                ->filter()
+                ->unique()
+                ->values();
+            $takenSkus = $newSkus->isEmpty()
+                ? collect()
+                : Part::query()->whereIn('sku', $newSkus->all())->pluck('sku')->map(fn ($sku) => mb_strtolower((string) $sku));
             foreach ($data['items'] as $index => $line) {
                 try {
-                    $part = $this->partForRestockLine($request, $line);
+                    $part = $this->partForRestockLine($request, $line, $existingParts, $takenSkus);
                     [$part, $qty, $unitCost] = $this->receiveStock($request, $part, $line);
                 } catch (ValidationException $exception) {
                     $prefixed = [];
@@ -673,9 +717,10 @@ class PartController extends Controller
                     }
                     throw ValidationException::withMessages($prefixed);
                 }
-                $rows[] = BranchInventory::overlayPart($part);
+                $rows[] = $part;
                 $lines[] = ['part' => $part, 'quantity' => $qty, 'unit_cost' => $unitCost];
             }
+            BranchInventory::overlayParts($rows);
 
             $payable = round(array_sum(array_map(fn ($line) => $line['quantity'] * $line['unit_cost'], $lines)), 2);
             if ($payable > 0 && $paymentStatus === 'credit' && empty($data['due_date'])) {
@@ -708,16 +753,25 @@ class PartController extends Controller
 
     /**
      * @param  array<string, mixed>  $line
+     * @param  Collection<int, Part>  $existingParts
+     * @param  Collection<int, string>  $takenSkus
      */
-    private function partForRestockLine(Request $request, array $line): Part
+    private function partForRestockLine(Request $request, array $line, $existingParts = null, $takenSkus = null): Part
     {
         if (! empty($line['part_id'])) {
-            return Part::query()->findOrFail($line['part_id']);
+            $partId = (int) $line['part_id'];
+
+            return $existingParts?->get($partId) ?? Part::query()->lockForUpdate()->findOrFail($partId);
         }
 
         $new = is_array($line['new_part'] ?? null) ? $line['new_part'] : [];
         $sku = trim((string) ($new['sku'] ?? ''));
-        if ($sku !== '' && Part::query()->where('sku', $sku)->exists()) {
+        $skuTaken = $sku !== '' && (
+            $takenSkus !== null
+                ? $takenSkus->contains(mb_strtolower($sku))
+                : Part::query()->where('sku', $sku)->exists()
+        );
+        if ($skuTaken) {
             throw ValidationException::withMessages([
                 'sku' => ['That SKU is already in inventory. Select the existing item instead.'],
             ]);
@@ -730,7 +784,7 @@ class PartController extends Controller
 
         PartCategory::remember($new['type'] ?? null, $new['subcategory'] ?? null);
 
-        return Part::create([
+        $part = Part::create([
             'name' => $new['name'],
             'brand' => $new['brand'],
             'type' => trim((string) ($new['type'] ?? '')),
@@ -744,6 +798,11 @@ class PartController extends Controller
             'stock_unit' => StockUnit::normalize($new['stock_unit'] ?? null, $businessType),
             'description' => trim((string) ($new['description'] ?? '')) !== '' ? $new['description'] : null,
         ]);
+        if ($sku !== '' && $takenSkus !== null) {
+            $takenSkus->push(mb_strtolower($sku));
+        }
+
+        return $part;
     }
 
     /**
@@ -875,10 +934,19 @@ class PartController extends Controller
         unset($data['images'], $data['payment_status'], $data['due_date']);
 
         $businessType = $request->user()?->tenant?->business_type;
-        if ($part) {
-            unset($data['stock_unit']);
-        } else {
+        if (array_key_exists('stock_unit', $data) || ! $part) {
             $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
+        }
+        if ($part) {
+            $currentUnit = StockUnit::normalize($part->stock_unit, $businessType);
+            if (isset($data['stock_unit']) && $data['stock_unit'] !== $currentUnit) {
+                foreach ($this->stockQuantities($part) as $qty) {
+                    if ($quantityError = StockUnit::quantityError($data['stock_unit'], $qty, $businessType)) {
+                        throw ValidationException::withMessages(['stock_unit' => [$quantityError]]);
+                    }
+                }
+            }
+        } else {
             $qty = (float) ($data['stock_qty'] ?? 0);
             if ($quantityError = StockUnit::quantityError($data['stock_unit'], $qty, $businessType)) {
                 throw ValidationException::withMessages(['stock_qty' => [$quantityError]]);
@@ -910,6 +978,19 @@ class PartController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * @return list<float>
+     */
+    private function stockQuantities(Part $part): array
+    {
+        $quantities = [(float) $part->stock_qty];
+        foreach (BranchStock::query()->where('part_id', $part->id)->pluck('qty') as $qty) {
+            $quantities[] = (float) $qty;
+        }
+
+        return $quantities;
     }
 
     private function storeImages(Request $request, Part $part): void
