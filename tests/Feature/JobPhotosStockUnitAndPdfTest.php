@@ -225,6 +225,49 @@ class JobPhotosStockUnitAndPdfTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('stock_unit');
     }
 
+    public function test_owner_can_correct_on_hand_quantity_and_staff_need_edit_access(): void
+    {
+        $owner = $this->garageUser();
+        Sanctum::actingAs($owner);
+
+        $part = $this->postJson('/api/parts', [
+            'name' => 'Brake pad',
+            'brand' => 'Bosch',
+            'price' => 4500,
+            'stock_qty' => 4,
+            'stock_unit' => 'qty',
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$part['id'], [
+            'stock_qty' => 7,
+        ])->assertOk();
+        $this->assertEquals(7, (float) Part::query()->findOrFail($part['id'])->stock_qty);
+
+        $staff = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+        ]);
+        $inventory = Feature::query()->where('key', 'parts_inventory')->firstOrFail();
+        $staff->permissions()->sync([$inventory->id => ['can_access' => true]]);
+
+        Sanctum::actingAs($staff);
+        $this->postJson('/api/parts/'.$part['id'], ['stock_qty' => 9])->assertForbidden();
+
+        $edit = Feature::query()->firstOrCreate(
+            ['key' => 'inventory_edit'],
+            ['name' => 'Edit inventory', 'group' => 'Inventory', 'sort_order' => 48],
+        );
+        $owner->tenant->features()->syncWithoutDetaching([$edit->id => ['is_enabled' => true]]);
+        $staff->permissions()->sync([
+            $inventory->id => ['can_access' => true],
+            $edit->id => ['can_access' => true],
+        ]);
+
+        $this->postJson('/api/parts/'.$part['id'], ['stock_qty' => 9])->assertOk();
+        $this->assertEquals(9, (float) Part::query()->findOrFail($part['id'])->stock_qty);
+    }
+
     private function openJob(): Bill
     {
         $billId = $this->postJson('/api/bills', [

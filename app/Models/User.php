@@ -8,12 +8,12 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
 #[Fillable(['tenant_id', 'employee_id', 'home_branch_id', 'last_branch_id', 'name', 'email', 'password', 'role', 'status', 'locale', 'is_secondary_view'])]
 #[Hidden(['password', 'remember_token', 'is_secondary_view'])]
@@ -38,11 +38,30 @@ class User extends Authenticatable
         });
     }
 
-    public function tenant(): BelongsTo { return $this->belongsTo(Tenant::class); }
-    public function employee(): BelongsTo { return $this->belongsTo(Employee::class); }
-    public function homeBranch(): BelongsTo { return $this->belongsTo(Branch::class, 'home_branch_id'); }
-    public function lastBranch(): BelongsTo { return $this->belongsTo(Branch::class, 'last_branch_id'); }
-    public function permissions(): BelongsToMany { return $this->belongsToMany(Feature::class, 'user_permissions')->withPivot('can_access')->withTimestamps(); }
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
+    }
+
+    public function homeBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'home_branch_id');
+    }
+
+    public function lastBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'last_branch_id');
+    }
+
+    public function permissions(): BelongsToMany
+    {
+        return $this->belongsToMany(Feature::class, 'user_permissions')->withPivot('can_access')->withTimestamps();
+    }
 
     public function linkedEmployee(): ?Employee
     {
@@ -80,6 +99,23 @@ class User extends Authenticatable
             ->where('features.key', $key)
             ->wherePivot('can_access', true)
             ->exists();
+    }
+
+    public function canEditInventory(): bool
+    {
+        if ($this->role === 'super_admin') {
+            return true;
+        }
+
+        if (! $this->canAccessFeature('parts_inventory')) {
+            return false;
+        }
+
+        if ($this->role === 'business_owner') {
+            return true;
+        }
+
+        return $this->canAccessFeature('inventory_edit');
     }
 
     public function accessibleFeatureKeys(): array
