@@ -534,7 +534,10 @@ class SuperAdminTenantController extends Controller
 
     public function features(Request $request, Tenant $tenant): JsonResponse
     {
-        $keys = BusinessTypes::featuresForType($tenant->business_type);
+        $keys = array_values(array_filter(
+            BusinessTypes::featuresForType($tenant->business_type),
+            fn (string $key) => $key !== 'inventory_edit',
+        ));
 
         return response()->json([
             'available' => Feature::query()->whereIn('key', $keys)->orderBy('sort_order')->orderBy('name')->get()

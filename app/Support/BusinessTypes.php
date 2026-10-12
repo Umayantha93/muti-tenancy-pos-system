@@ -2,6 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\Bill;
+use App\Models\User;
+use Illuminate\Validation\ValidationException;
+
 class BusinessTypes
 {
     public const GARAGE = 'garage';
@@ -44,9 +48,9 @@ class BusinessTypes
         $shared = ['customers', 'billing', 'bill_sms', 'bill_whatsapp', 'bill_profits', 'employees_management', 'attendance', 'payroll', 'balance_sheet', 'cash_up', 'reports'];
         $inventoryExtras = ['purchase_orders', 'part_fitment'];
 
-        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'suppliers', 'warranties', 'job_bookings', ...$inventoryExtras], $shared);
+        $garageFamily = array_merge(['admit_vehicle', 'parts_inventory', 'inventory_edit', 'suppliers', 'warranties', 'job_bookings', ...$inventoryExtras], $shared);
         $retailFamily = array_merge(['retail_pos', 'product_catalog', 'suppliers'], $shared);
-        $storeFamily = array_merge(['parts_inventory', 'suppliers', 'repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory'], $shared);
+        $storeFamily = array_merge(['parts_inventory', 'inventory_edit', 'suppliers', 'repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory'], $shared);
 
         return [
             self::GARAGE => array_merge($garageFamily, [
@@ -376,6 +380,7 @@ class BusinessTypes
             'job_videos' => 'admit_vehicle',
             'service_reminders' => 'bill_sms',
             'serial_inventory' => 'parts_inventory',
+            'inventory_edit' => 'parts_inventory',
             'bill_whatsapp' => 'billing',
             'expense_job_split' => 'balance_sheet',
             'finance_report_export' => 'balance_sheet',
@@ -399,6 +404,7 @@ class BusinessTypes
             'service_reminders' => ['bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
+            'inventory_edit' => ['parts_inventory'],
             'station_consumables' => ['parts_inventory'],
             'bill_whatsapp' => ['billing'],
             'expense_job_split', 'finance_report_export' => ['balance_sheet'],
@@ -447,7 +453,9 @@ class BusinessTypes
             unset($set['serial_inventory']);
         }
         if (! isset($set['parts_inventory'])) {
-            unset($set['station_consumables']);
+            unset($set['station_consumables'], $set['inventory_edit']);
+        } elseif (in_array('inventory_edit', $allowed, true)) {
+            $set['inventory_edit'] = true;
         }
         if (! isset($set['billing'])) {
             unset($set['bill_whatsapp']);
@@ -458,7 +466,7 @@ class BusinessTypes
 
         if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])
             && ! isset($set['admit_repair']) && ! isset($set['admit_service'])) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'features' => ['Choose Repair, Service, or both.'],
             ]);
         }
@@ -469,37 +477,37 @@ class BusinessTypes
     /**
      * @return list<string>
      */
-    public static function allowedJobKinds(\App\Models\User $user): array
+    public static function allowedJobKinds(User $user): array
     {
         $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
         if ($type !== self::GARAGE) {
-            return [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE];
+            return [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE];
         }
 
         $attached = $user->tenant?->features()->whereIn('features.key', ['admit_repair', 'admit_service'])->pluck('features.key') ?? collect();
         if ($attached->isEmpty()) {
             return $user->canAccessFeature('admit_vehicle')
-                ? [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE]
+                ? [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE]
                 : [];
         }
 
         $kinds = [];
         if ($user->canAccessFeature('admit_repair')) {
-            $kinds[] = \App\Models\Bill::JOB_KIND_REPAIR;
+            $kinds[] = Bill::JOB_KIND_REPAIR;
         }
         if ($user->canAccessFeature('admit_service')) {
-            $kinds[] = \App\Models\Bill::JOB_KIND_SERVICE;
+            $kinds[] = Bill::JOB_KIND_SERVICE;
         }
 
         return $kinds;
     }
 
-    public static function jobKindAllowed(\App\Models\User $user, ?string $kind): bool
+    public static function jobKindAllowed(User $user, ?string $kind): bool
     {
-        if ($kind === null || $kind === \App\Models\Bill::JOB_KIND_PARTS_SALE) {
+        if ($kind === null || $kind === Bill::JOB_KIND_PARTS_SALE) {
             return true;
         }
-        if (! in_array($kind, [\App\Models\Bill::JOB_KIND_REPAIR, \App\Models\Bill::JOB_KIND_SERVICE], true)) {
+        if (! in_array($kind, [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE], true)) {
             return true;
         }
 
@@ -511,16 +519,16 @@ class BusinessTypes
         return in_array($kind, self::allowedJobKinds($user), true);
     }
 
-    public static function defaultJobKind(\App\Models\User $user, string $type): string
+    public static function defaultJobKind(User $user, string $type): string
     {
         if (self::usesStoreCounter($type)) {
-            return \App\Models\Bill::JOB_KIND_PARTS_SALE;
+            return Bill::JOB_KIND_PARTS_SALE;
         }
         $allowed = self::allowedJobKinds($user);
         if (count($allowed) === 1) {
             return $allowed[0];
         }
 
-        return \App\Models\Bill::JOB_KIND_REPAIR;
+        return Bill::JOB_KIND_REPAIR;
     }
 }
