@@ -25,6 +25,11 @@ return [
         'super_administrator' => 'Super administrator',
         'platform_account' => 'Platform account',
         'business' => 'Business',
+        'job_alerts' => 'Job card alerts',
+        'new_job_card' => 'New job card :number is available',
+        'new_job_card_for' => 'New job card :number for :plate is available',
+        'no_job_alerts' => 'No new job cards',
+        'mark_alerts_read' => 'Mark all read',
     ],
     'ops' => [
         'Garage operations' => 'Garage operations',
@@ -403,6 +408,9 @@ return [
         'opening_job' => 'Opening job card...',
         'open_failed' => 'Could not open job card.',
         'admit_failed' => 'Admission failed.',
+        'admitted_vehicle' => 'Vehicle successfully admitted.',
+        'admitted_device' => 'Device successfully admitted.',
+        'opened_for_desk' => 'Job card :number is open. Someone with Job cards can add the work and take payment.',
     ],
     'pos' => [
         'title' => 'New sale',
