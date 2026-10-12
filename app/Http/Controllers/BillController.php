@@ -12,6 +12,7 @@ use App\Models\Vehicle;
 use App\Services\BillCalculator;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
+use App\Support\JobCardAlerts;
 use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -145,6 +146,8 @@ class BillController extends Controller
             return $this->openBill($request, $customer->id, $data, $this->jobType($request), $vehicle->id);
         });
 
+        JobCardAlerts::notifyDesk($bill, $request->user());
+
         return response()->json($bill, 201);
     }
 
@@ -170,6 +173,7 @@ class BillController extends Controller
             abort(403, 'This job kind is not enabled for this account.');
         }
         $bill = $this->openBill($request, $vehicle->customer_id, $data, $this->jobType($request), $vehicle->id);
+        JobCardAlerts::notifyDesk($bill, $request->user());
 
         return response()->json($bill, 201);
     }
