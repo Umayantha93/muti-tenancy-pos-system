@@ -23,6 +23,7 @@ use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FinanceReportController;
+use App\Http\Controllers\JobAlertController;
 use App\Http\Controllers\JobBoardController;
 use App\Http\Controllers\JobBookingController;
 use App\Http\Controllers\JobPhotoController;
@@ -137,9 +138,16 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::apiResource('customers', CustomerController::class)->except('destroy');
         });
 
-        Route::middleware('feature:billing')->group(function () {
-            Route::apiResource('bills', BillController::class)->only(['index', 'store', 'show', 'update']);
+        Route::middleware('feature:admit_vehicle,billing')->group(function () {
+            Route::post('/bills', [BillController::class, 'store']);
             Route::post('/bills/from-vehicle', [BillController::class, 'storeFromVehicle']);
+        });
+
+        Route::middleware('feature:billing')->group(function () {
+            Route::get('/job-alerts', [JobAlertController::class, 'index']);
+            Route::post('/job-alerts/read-all', [JobAlertController::class, 'readAll']);
+            Route::post('/job-alerts/{jobCardAlert}/read', [JobAlertController::class, 'read']);
+            Route::apiResource('bills', BillController::class)->only(['index', 'show', 'update']);
             Route::post('/bills/instant', [BillController::class, 'storeInstant']);
             Route::post('/bills/quick', [BillController::class, 'storeQuick']);
             Route::post('/bills/{bill}/close', [BillController::class, 'close']);

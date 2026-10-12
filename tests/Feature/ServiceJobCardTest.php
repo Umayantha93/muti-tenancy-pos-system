@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Bill;
 use App\Models\Feature;
+use App\Models\JobCardAlert;
+use App\Models\Part;
 use App\Models\ServiceAddon;
 use App\Models\Tenant;
 use App\Models\User;
@@ -12,7 +14,6 @@ use Tests\TestCase;
 
 class ServiceJobCardTest extends TestCase
 {
-
     public function test_admit_can_open_a_service_or_repair_job_card(): void
     {
         Sanctum::actingAs($this->garageUser('staff'));
@@ -22,6 +23,75 @@ class ServiceJobCardTest extends TestCase
 
         $this->assertSame(Bill::JOB_KIND_REPAIR, Bill::find($repairId)->job_kind);
         $this->assertSame(Bill::JOB_KIND_SERVICE, Bill::find($serviceId)->job_kind);
+    }
+
+    public function test_admit_staff_can_open_a_job_without_job_card_access(): void
+    {
+        $staff = $this->garageUser('staff');
+        $billing = Feature::where('key', 'billing')->firstOrFail();
+        $staff->permissions()->detach($billing->id);
+        Sanctum::actingAs($staff);
+
+        $created = $this->openJob('repair');
+        $vehicleId = $created->json('vehicle_id');
+
+        $this->postJson('/api/bills/from-vehicle', [
+            'vehicle_id' => $vehicleId,
+            'job_kind' => 'service',
+        ])->assertCreated();
+
+        $this->getJson('/api/bills')->assertForbidden();
+        $this->postJson('/api/bills/instant', [
+            'items' => [],
+        ])->assertForbidden();
+    }
+
+    public function test_admit_only_staff_notifies_job_card_users(): void
+    {
+        $owner = $this->garageUser('business_owner');
+        $billing = Feature::where('key', 'billing')->firstOrFail();
+        $admit = Feature::where('key', 'admit_vehicle')->firstOrFail();
+
+        $desk = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+        ]);
+        $desk->permissions()->sync([$billing->id => ['can_access' => true]]);
+
+        $porter = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+        ]);
+        $porter->permissions()->sync([$admit->id => ['can_access' => true]]);
+
+        Sanctum::actingAs($porter);
+        $created = $this->openJob('repair');
+
+        $this->assertDatabaseMissing('job_card_alerts', [
+            'user_id' => $owner->id,
+            'bill_id' => $created->json('id'),
+        ]);
+        $this->assertDatabaseHas('job_card_alerts', [
+            'user_id' => $desk->id,
+            'bill_id' => $created->json('id'),
+        ]);
+        $this->assertDatabaseMissing('job_card_alerts', [
+            'user_id' => $porter->id,
+        ]);
+
+        Sanctum::actingAs($desk);
+        $list = $this->getJson('/api/job-alerts')->assertOk()->assertJsonPath('unread', 1);
+        $this->postJson('/api/job-alerts/'.$list->json('data.0.id').'/read')->assertOk();
+        $this->getJson('/api/job-alerts')->assertOk()->assertJsonPath('unread', 0);
+
+        Sanctum::actingAs($owner);
+        $this->openJob('service');
+        $this->assertSame(1, JobCardAlert::where('user_id', $desk->id)->count());
+
+        Sanctum::actingAs($porter);
+        $this->getJson('/api/job-alerts')->assertForbidden();
     }
 
     public function test_service_job_can_store_next_service_mileage(): void
@@ -135,7 +205,7 @@ class ServiceJobCardTest extends TestCase
     public function test_service_job_card_can_add_inventory_and_deduct_stock(): void
     {
         Sanctum::actingAs($this->garageUser('staff'));
-        $part = \App\Models\Part::create([
+        $part = Part::create([
             'name' => 'Oil Filter', 'brand' => 'Bosch', 'type' => 'filter',
             'price' => 1500, 'cost_price' => 800, 'stock_qty' => 10,
         ]);
