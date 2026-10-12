@@ -41,6 +41,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'repair_bills', 'name' => 'Repair', 'description' => 'Repair bills and repair profit for stores (phones, parts counters). Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 34],
             ['key' => 'warranties', 'name' => 'Warranties', 'description' => 'Add a warranty on the job or sale in months or years.', 'group' => 'Service Intake', 'sort_order' => 35],
             ['key' => 'parts_inventory', 'name' => 'Inventory', 'description' => 'Garage stock and inventory', 'group' => 'Inventory', 'sort_order' => 40],
+            ['key' => 'inventory_edit', 'name' => 'Edit inventory', 'description' => 'Add, edit, and delete catalog items, including the on-hand quantity. The shop owner always has this. Staff only have it when the owner turns it on.', 'group' => 'Inventory', 'sort_order' => 48],
             ['key' => 'product_catalog', 'name' => 'Product catalog', 'description' => 'Clothing SKUs, sizes, and stock', 'group' => 'Inventory', 'sort_order' => 41],
             ['key' => 'cottage_rooms', 'name' => 'Rooms', 'description' => 'Cottage rooms and rates', 'group' => 'Inventory', 'sort_order' => 42],
             ['key' => 'suppliers', 'name' => 'Suppliers', 'description' => 'Supplier directory and goods received notes', 'group' => 'Inventory', 'sort_order' => 43],

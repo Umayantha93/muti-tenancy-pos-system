@@ -15,6 +15,7 @@ use App\Models\Supplier;
 use App\Services\BranchInventory;
 use App\Services\PartBarcode;
 use App\Services\PartSerials;
+use App\Support\BranchContext;
 use App\Support\BusinessTypes;
 use App\Support\InventoryCosting;
 use App\Support\StockUnit;
@@ -75,6 +76,7 @@ class PartController extends Controller
 
     public function importTemplate(): StreamedResponse
     {
+        $this->authorizeInventoryEdit();
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Parts');
@@ -164,6 +166,7 @@ class PartController extends Controller
 
     public function import(Request $request): JsonResponse
     {
+        $this->authorizeInventoryEdit();
         $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:5120'],
             'payment_status' => ['nullable', Rule::in(['paid', 'credit', 'debit'])],
@@ -525,6 +528,7 @@ class PartController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->authorizeInventoryEdit();
         $part = DB::transaction(function () use ($request) {
             $data = $this->validated($request);
             $part = Part::create($data);
@@ -553,16 +557,22 @@ class PartController extends Controller
 
     public function update(Request $request, Part $part): JsonResponse
     {
+        $this->authorizeInventoryEdit();
         $data = $this->validated($request, $part);
+        $qty = array_key_exists('stock_qty', $data) ? (float) $data['stock_qty'] : null;
+        unset($data['stock_qty']);
         $priceChanged = array_key_exists('price', $data) && abs((float) $data['price'] - (float) $part->price) > 0.001;
         $part->update($data);
+        if ($qty !== null) {
+            BranchInventory::setPartQty($part->refresh(), $qty);
+        }
         if ($priceChanged && $part->pending_price !== null) {
             $part->forceFill(['pending_price' => null, 'pending_price_at_qty' => null])->save();
         }
         $this->storeImages($request, $part);
         PartBarcode::ensure($part->refresh());
 
-        return response()->json($part->refresh());
+        return response()->json(BranchInventory::overlayPart($part->refresh()));
     }
 
     public function ensureBarcode(Part $part): JsonResponse
@@ -572,6 +582,7 @@ class PartController extends Controller
 
     public function destroy(Part $part): JsonResponse
     {
+        $this->authorizeInventoryEdit();
         DB::transaction(function () use ($part) {
             $this->reversePartPurchases($part);
 
@@ -589,6 +600,7 @@ class PartController extends Controller
 
     public function image(Request $request, Part $part): JsonResponse
     {
+        $this->authorizeInventoryEdit();
         $this->normalizeImageUploads($request);
         $request->validate(['images' => ['required', 'array', 'max:5'], 'images.*' => ['image', 'max:5120']]);
         $this->storeImages($request, $part);
@@ -938,13 +950,16 @@ class PartController extends Controller
             $data['stock_unit'] = StockUnit::normalize($data['stock_unit'] ?? null, $businessType);
         }
         if ($part) {
+            $unit = $data['stock_unit'] ?? StockUnit::normalize($part->stock_unit, $businessType);
+            if (array_key_exists('stock_qty', $data)) {
+                if ($quantityError = StockUnit::quantityError($unit, (float) $data['stock_qty'], $businessType)) {
+                    throw ValidationException::withMessages(['stock_qty' => [$quantityError]]);
+                }
+            }
             $currentUnit = StockUnit::normalize($part->stock_unit, $businessType);
             if (isset($data['stock_unit']) && $data['stock_unit'] !== $currentUnit) {
-                foreach ($this->stockQuantities($part) as $qty) {
-                    if ($quantityError = StockUnit::quantityError($data['stock_unit'], $qty, $businessType)) {
-                        throw ValidationException::withMessages(['stock_unit' => [$quantityError]]);
-                    }
-                }
+                $replacement = array_key_exists('stock_qty', $data) ? (float) $data['stock_qty'] : null;
+                $this->assertUnitFitsStock($part, $data['stock_unit'], $businessType, $replacement);
             }
         } else {
             $qty = (float) ($data['stock_qty'] ?? 0);
@@ -980,17 +995,30 @@ class PartController extends Controller
         return $data;
     }
 
-    /**
-     * @return list<float>
-     */
-    private function stockQuantities(Part $part): array
+    private function assertUnitFitsStock(Part $part, string $unit, ?string $businessType, ?float $replacementQty): void
     {
-        $quantities = [(float) $part->stock_qty];
-        foreach (BranchStock::query()->where('part_id', $part->id)->pluck('qty') as $qty) {
-            $quantities[] = (float) $qty;
-        }
+        $branchId = BranchContext::id();
+        $rows = BranchStock::query()->where('part_id', $part->id)->get(['branch_id', 'qty']);
+        $quantities = $rows->isEmpty()
+            ? [$replacementQty ?? (float) $part->stock_qty]
+            : $rows->map(function ($row) use ($replacementQty, $branchId) {
+                if ($replacementQty !== null && $branchId && (int) $row->branch_id === (int) $branchId) {
+                    return $replacementQty;
+                }
 
-        return $quantities;
+                return (float) $row->qty;
+            })->all();
+
+        foreach ($quantities as $qty) {
+            if ($quantityError = StockUnit::quantityError($unit, $qty, $businessType)) {
+                throw ValidationException::withMessages(['stock_unit' => [$quantityError]]);
+            }
+        }
+    }
+
+    private function authorizeInventoryEdit(): void
+    {
+        abort_unless(request()->user()?->canEditInventory(), 403, 'Inventory editing is not enabled for this account.');
     }
 
     private function storeImages(Request $request, Part $part): void

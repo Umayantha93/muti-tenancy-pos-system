@@ -7,8 +7,8 @@ use App\Http\Controllers\BayController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\BillItemController;
 use App\Http\Controllers\BillPaymentController;
-use App\Http\Controllers\BillRefundController;
 use App\Http\Controllers\BillProfitController;
+use App\Http\Controllers\BillRefundController;
 use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\BranchController;
@@ -17,16 +17,19 @@ use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DiscountTypeController;
 use App\Http\Controllers\EmployeeController;
-use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\EmployeeLeaveController;
 use App\Http\Controllers\EmployeeTargetController;
+use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FinanceReportController;
-use App\Http\Controllers\JobPhotoController;
-use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\JobBoardController;
 use App\Http\Controllers\JobBookingController;
+use App\Http\Controllers\JobPhotoController;
+use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\LaborCatalogController;
+use App\Http\Controllers\LocaleController;
+use App\Http\Controllers\MeController;
 use App\Http\Controllers\PartCategoryController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
@@ -38,22 +41,19 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\RetailSaleController;
 use App\Http\Controllers\ServiceAddonController;
-use App\Http\Controllers\DiscountTypeController;
-use App\Http\Controllers\ServiceVehicleClassController;
 use App\Http\Controllers\ServiceOpsReportController;
 use App\Http\Controllers\ServiceReminderController;
+use App\Http\Controllers\ServiceVehicleClassController;
 use App\Http\Controllers\StationConsumableController;
 use App\Http\Controllers\StockReceiptController;
 use App\Http\Controllers\StockTransferController;
-use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\SuperAdminBillController;
 use App\Http\Controllers\SuperAdminBranchController;
 use App\Http\Controllers\SuperAdminIncomeController;
 use App\Http\Controllers\SuperAdminInventoryController;
 use App\Http\Controllers\SuperAdminTenantController;
 use App\Http\Controllers\SuperAdminUserController;
-use App\Http\Controllers\LocaleController;
-use App\Http\Controllers\MeController;
+use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\TenantProfileController;
 use App\Http\Controllers\TenantStaffController;
 use App\Http\Controllers\VehicleController;
@@ -72,7 +72,7 @@ Route::get('/bills/shared/{token}/photos/{photo}/file', [BillShareController::cl
 Route::get('/bills/shared/{token}/videos/{video}/file', [BillShareController::class, 'video'])->middleware('throttle:60,1');
 
 Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.context'])->group(function () {
-        Route::get('/user', fn (Request $request) => SessionPayload::for($request->user()));
+    Route::get('/user', fn (Request $request) => SessionPayload::for($request->user()));
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::put('/locale', [LocaleController::class, 'update']);
 
@@ -124,7 +124,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::delete('/users/{user}', [SuperAdminUserController::class, 'destroy']);
     });
 
-        Route::middleware('role:business_owner,staff')->middleware('block.secondary.writes')->group(function () {
+    Route::middleware('role:business_owner,staff')->middleware('block.secondary.writes')->group(function () {
         Route::get('/dashboard', DashboardController::class);
 
         Route::middleware('feature:admit_vehicle')->group(function () {
@@ -207,11 +207,18 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/part-categories', [PartCategoryController::class, 'store']);
             Route::post('/part-categories/{part_category}/subcategories', [PartCategoryController::class, 'storeSubcategory']);
             Route::post('/parts/restock/bulk', [PartController::class, 'restockBulk']);
+            Route::post('/parts', [PartController::class, 'store']);
+            Route::get('/parts/import/template', [PartController::class, 'importTemplate']);
+            Route::post('/parts/import', [PartController::class, 'import']);
             Route::get('/stock-receipts', [StockReceiptController::class, 'index']);
             Route::put('/stock-receipts/{stock_receipt}', [StockReceiptController::class, 'update']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
             Route::post('/parts/{part}/restock', [PartController::class, 'restock']);
             Route::post('/parts/{part}/ensure-barcode', [PartController::class, 'ensureBarcode']);
+            Route::put('/parts/{part}', [PartController::class, 'update']);
+            Route::post('/parts/{part}', [PartController::class, 'update']);
+            Route::delete('/parts/{part}', [PartController::class, 'destroy']);
+            Route::post('/parts/{part}/image', [PartController::class, 'image']);
             Route::get('/part-sales', [PartSaleController::class, 'index']);
             Route::post('/part-sales', [PartSaleController::class, 'store']);
             Route::get('/part-sales/{sale}', [PartSaleController::class, 'show']);
@@ -297,13 +304,6 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::middleware('role:business_owner')->group(function () {
             Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->middleware('feature:customers,admit_vehicle,photo_bookings,retail_pos,cottage_stays');
             Route::delete('/vehicles/{vehicle}', [VehicleController::class, 'destroy'])->middleware('feature:admit_vehicle');
-            Route::post('/parts', [PartController::class, 'store'])->middleware('feature:parts_inventory');
-            Route::get('/parts/import/template', [PartController::class, 'importTemplate'])->middleware('feature:parts_inventory');
-            Route::post('/parts/import', [PartController::class, 'import'])->middleware('feature:parts_inventory');
-            Route::put('/parts/{part}', [PartController::class, 'update'])->middleware('feature:parts_inventory');
-            Route::post('/parts/{part}', [PartController::class, 'update'])->middleware('feature:parts_inventory');
-            Route::delete('/parts/{part}', [PartController::class, 'destroy'])->middleware('feature:parts_inventory');
-            Route::post('/parts/{part}/image', [PartController::class, 'image'])->middleware('feature:parts_inventory');
             Route::post('/service-addons', [ServiceAddonController::class, 'store'])->middleware('feature:billing');
             Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update'])->middleware('feature:billing');
             Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy'])->middleware('feature:billing');
