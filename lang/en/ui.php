@@ -410,6 +410,7 @@ return [
         'admit_failed' => 'Admission failed.',
         'admitted_vehicle' => 'Vehicle successfully admitted.',
         'admitted_device' => 'Device successfully admitted.',
+        'added_to_job_cards' => ':plate is successfully added to job cards.',
         'opened_for_desk' => 'Job card :number is open. Someone with Job cards can add the work and take payment.',
     ],
     'pos' => [
