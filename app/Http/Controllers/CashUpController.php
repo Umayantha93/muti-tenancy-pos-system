@@ -6,6 +6,7 @@ use App\Models\BillPayment;
 use App\Models\BillRefund;
 use App\Models\Branch;
 use App\Models\CashUp;
+use App\Models\Feature;
 use App\Models\User;
 use App\Support\BranchContext;
 use App\Support\BranchQuery;
@@ -342,7 +343,11 @@ class CashUpController extends Controller
             return (int) $request->user()->id;
         }
 
-        return $requested ?: (int) $request->user()->id;
+        $id = $requested ?: (int) $request->user()->id;
+        $allowed = collect($this->cashiers($request))->contains(fn ($cashier) => (int) $cashier['id'] === $id);
+        abort_unless($allowed, 422, 'That person does not have billing access.');
+
+        return $id;
     }
 
     private function shopId(Request $request): ?int
@@ -361,9 +366,23 @@ class CashUpController extends Controller
             return [['id' => (int) $request->user()->id, 'name' => (string) $request->user()->name]];
         }
 
+        $billingId = Feature::query()->where('key', 'billing')->value('id');
+
         return User::query()
-            ->whereIn('role', ['business_owner', 'staff'])
+            ->where('tenant_id', $request->user()->tenant_id)
             ->where('status', 'active')
+            ->where(function ($query) use ($billingId) {
+                $query->where('role', 'business_owner');
+                if ($billingId) {
+                    $query->orWhere(function ($staff) use ($billingId) {
+                        $staff->where('role', 'staff')
+                            ->whereHas('permissions', function ($permissions) use ($billingId) {
+                                $permissions->where('features.id', $billingId)
+                                    ->where('user_permissions.can_access', true);
+                            });
+                    });
+                }
+            })
             ->orderBy('name')
             ->get(['id', 'name'])
             ->all();

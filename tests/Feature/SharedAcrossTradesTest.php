@@ -140,6 +140,46 @@ class SharedAcrossTradesTest extends TestCase
         $this->assertEquals($expectedBank + 200, (float) $surplus->json('cash_up.counted_bank'));
     }
 
+    public function test_cash_up_lists_only_this_tenants_cashiers(): void
+    {
+        [, $owner] = $this->storeOwner('Cashier Scope '.fake()->unique()->numerify('###'));
+        $billing = Feature::where('key', 'billing')->firstOrFail();
+        $same = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+            'name' => 'Same Shop Cashier',
+        ]);
+        $same->permissions()->sync([$billing->id => ['can_access' => true]]);
+        $blocked = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+            'name' => 'No Billing Cashier',
+        ]);
+        $otherTenant = Tenant::create([
+            'business_name' => 'Other Cashier Shop '.fake()->unique()->numerify('###'),
+            'business_type' => 'store',
+            'owner_name' => 'Other',
+            'owner_phone' => '0771234567',
+            'owner_email' => fake()->unique()->safeEmail(),
+            'status' => 'active',
+        ]);
+        $foreign = User::factory()->create([
+            'tenant_id' => $otherTenant->id,
+            'role' => 'staff',
+            'status' => 'active',
+            'name' => 'Foreign Cashier',
+        ]);
+
+        Sanctum::actingAs($owner);
+        $ids = collect($this->getJson('/api/cash-up')->assertOk()->json('cashiers'))->pluck('id');
+        $this->assertTrue($ids->contains($owner->id));
+        $this->assertTrue($ids->contains($same->id));
+        $this->assertFalse($ids->contains($blocked->id));
+        $this->assertFalse($ids->contains($foreign->id));
+    }
+
     public function test_outstanding_lists_ageing_and_share_token(): void
     {
         $owner = $this->garageOwner();
