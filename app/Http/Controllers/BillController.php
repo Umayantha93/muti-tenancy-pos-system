@@ -7,6 +7,7 @@ use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\Customer;
 use App\Models\Employee;
+use App\Models\EmployeePayment;
 use App\Models\Part;
 use App\Models\Vehicle;
 use App\Services\BillCalculator;
@@ -30,14 +31,14 @@ class BillController extends Controller
             'status' => ['nullable', 'string', 'max:50'],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PARTS_SALE])],
             'assigned_to_me' => ['nullable', 'boolean'],
             'open_only' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $bills = Bill::query()
-            ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position', 'branch:id,name,code,address,phone'])
+            ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position,commission_percent', 'branch:id,name,code,address,phone'])
             ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
             ->when($request->boolean('assigned_to_me'), function ($query) use ($request) {
@@ -88,7 +89,7 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH])],
             'tyre_size' => ['nullable', 'string', 'max:40'],
             'axle' => ['nullable', 'string', 'max:40'],
             'imei' => ['nullable', 'string', 'max:40'],
@@ -164,7 +165,7 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH])],
             ...$this->employeeIdsRules($request),
         ]);
 
@@ -315,7 +316,7 @@ class BillController extends Controller
                 }
             }
 
-            return $bill->fresh()->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
+            return $bill->fresh()->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position,commission_percent']);
         });
 
         return response()->json($bill, 201);
@@ -406,7 +407,7 @@ class BillController extends Controller
             'refunds.items.billItem',
             'refunds.creator:id,name',
             'creator',
-            'employees:id,name,position',
+            'employees:id,name,position,commission_percent',
             'branch:id,name,code,address,phone',
         ]));
     }
@@ -467,7 +468,7 @@ class BillController extends Controller
             $this->syncBillEmployees($bill, $employeeIds);
         }
 
-        return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position']));
+        return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position,commission_percent']));
     }
 
     public function syncEmployees(Request $request, Bill $bill): JsonResponse
@@ -477,7 +478,45 @@ class BillController extends Controller
         $data = $request->validate($this->employeeIdsRules($request));
         $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position,commission_percent']));
+    }
+
+    public function deductCommission(Request $request, Bill $bill, Employee $employee): JsonResponse
+    {
+        abort_unless($request->user()->canAccessFeature('job_commissions'), 403, 'Job commission is not enabled for this account.');
+
+        $assigned = $bill->employees()->where('employees.id', $employee->id)->first();
+        abort_unless($assigned, 422, 'Assign this employee to the job card first.');
+        abort_if($assigned->pivot->commission_deducted_at, 422, 'Commission is already deducted.');
+
+        $percent = (float) $employee->commission_percent;
+        abort_if($percent <= 0, 422, 'Set a commission percent on this employee first.');
+
+        $bill->loadMissing('items');
+        $base = (float) $bill->items
+            ->filter(fn (BillItem $item) => in_array($item->type, ['labor', 'service_addon', 'service', 'charge'], true))
+            ->sum(fn (BillItem $item) => (float) $item->line_total);
+        $amount = round($base * $percent / 100, 2);
+        abort_if($amount <= 0, 422, 'There is no labor or service amount to commission yet.');
+
+        DB::transaction(function () use ($request, $bill, $employee, $amount) {
+            $payment = EmployeePayment::create([
+                'employee_id' => $employee->id,
+                'bill_id' => $bill->id,
+                'kind' => EmployeePayment::KIND_COMMISSION,
+                'amount' => $amount,
+                'paid_on' => now()->toDateString(),
+                'created_by' => $request->user()->id,
+                'branch_id' => $bill->branch_id,
+            ]);
+            $bill->employees()->updateExistingPivot($employee->id, [
+                'commission_amount' => $amount,
+                'commission_deducted_at' => now(),
+                'employee_payment_id' => $payment->id,
+            ]);
+        });
+
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position,commission_percent']));
     }
 
     public function close(Request $request, Bill $bill): JsonResponse
@@ -623,7 +662,7 @@ class BillController extends Controller
         ]);
         $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
 
-        return $bill->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position']);
+        return $bill->load(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position,commission_percent']);
     }
 
     /**
@@ -685,8 +724,22 @@ class BillController extends Controller
             ? []
             : Employee::query()->whereIn('id', $ids)->pluck('id')->all();
 
+        $existing = $bill->employees()->get()->keyBy('id');
+        $locked = $existing->filter(fn (Employee $employee) => $employee->pivot->commission_deducted_at !== null)->keys();
+        $removed = $locked->diff($validIds);
+        abort_if($removed->isNotEmpty(), 422, 'An employee with deducted commission has to stay on this job card.');
+
         $bill->employees()->sync(
-            collect($validIds)->mapWithKeys(fn (int $id) => [$id => ['tenant_id' => $bill->tenant_id]])->all()
+            collect($validIds)->mapWithKeys(function (int $id) use ($bill, $existing) {
+                $row = $existing->get($id);
+
+                return [$id => [
+                    'tenant_id' => $bill->tenant_id,
+                    'commission_amount' => $row?->pivot->commission_amount,
+                    'commission_deducted_at' => $row?->pivot->commission_deducted_at,
+                    'employee_payment_id' => $row?->pivot->employee_payment_id,
+                ]];
+            })->all()
         );
     }
 

@@ -64,7 +64,7 @@ class LaborCatalogTest extends TestCase
         $this->assertNull(LaborCategory::query()->find($category['id']));
     }
 
-    public function test_staff_cannot_mutate_the_catalog(): void
+    public function test_job_card_staff_can_mutate_the_catalog(): void
     {
         $owner = $this->garageUser();
         Sanctum::actingAs($owner);
@@ -82,12 +82,12 @@ class LaborCatalogTest extends TestCase
         Sanctum::actingAs($staff);
 
         $this->getJson('/api/labor-catalog')->assertOk();
-        $this->postJson('/api/labor-categories', ['name' => 'Nope'])->assertForbidden();
+        $this->postJson('/api/labor-categories', ['name' => 'Job card labor '.fake()->unique()->numerify('###')])->assertCreated();
         $this->postJson("/api/labor-categories/{$categoryId}/items", [
-            'name' => 'Nope',
+            'name' => 'Job card item '.fake()->unique()->numerify('###'),
             'hourly_rate' => 1000,
             'standard_hours' => 1,
-        ])->assertForbidden();
+        ])->assertCreated();
     }
 
     public function test_bill_labor_hours_change_the_amount_and_shared_bill_hides_hours(): void

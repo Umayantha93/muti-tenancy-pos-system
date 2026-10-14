@@ -9,16 +9,20 @@ use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class JobPhotoController extends Controller
 {
-    public function index(Bill $bill): JsonResponse
+    public function index(Request $request, Bill $bill): JsonResponse
     {
         $this->assertGarageJob($bill);
+        $kind = $this->kind($request);
 
-        return response()->json($bill->photos->map(fn (BillPhoto $photo) => $this->payload($photo))->values());
+        return response()->json(
+            $bill->photos()->where('kind', $kind)->get()->map(fn (BillPhoto $photo) => $this->payload($photo))->values()
+        );
     }
 
     public function store(Request $request, Bill $bill, JobPhotoStore $store): JsonResponse
@@ -26,7 +30,13 @@ class JobPhotoController extends Controller
         $this->assertGarageJob($bill);
         abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
         abort_if($bill->job_kind === Bill::JOB_KIND_PARTS_SALE, 422, 'Photos can only be added on repair or service jobs.');
-        abort_if($bill->photos()->count() >= BillPhoto::MAX_PER_BILL, 422, 'This job already has 15 photos.');
+        $kind = $this->kind($request);
+        $limit = $kind === BillPhoto::KIND_ADMIT ? BillPhoto::MAX_ADMIT : BillPhoto::MAX_PER_BILL;
+        abort_if(
+            $bill->photos()->where('kind', $kind)->count() >= $limit,
+            422,
+            $kind === BillPhoto::KIND_ADMIT ? 'This admission already has 5 photos.' : 'This job already has 15 photos.',
+        );
 
         $photo = $request->file('photo');
         if (! $photo || ! $photo->isValid()) {
@@ -42,6 +52,7 @@ class JobPhotoController extends Controller
         $request->validate([
             'photo' => ['required', 'file', 'max:'.BillPhoto::MAX_UPLOAD_KILOBYTES, 'mimes:jpeg,jpg,png,webp,gif'],
             'label' => ['nullable', 'string', 'max:40'],
+            'kind' => ['nullable', Rule::in([BillPhoto::KIND_JOB, BillPhoto::KIND_ADMIT])],
         ]);
 
         try {
@@ -55,6 +66,7 @@ class JobPhotoController extends Controller
         }
 
         $photo = $bill->photos()->create([
+            'kind' => $kind,
             'path' => $stored['path'],
             'original_name' => $request->file('photo')->getClientOriginalName(),
             'label' => $request->input('label'),
@@ -64,9 +76,10 @@ class JobPhotoController extends Controller
         return response()->json($this->payload($photo->fresh()), 201);
     }
 
-    public function file(Bill $bill, BillPhoto $photo): StreamedResponse
+    public function file(Request $request, Bill $bill, BillPhoto $photo): StreamedResponse
     {
         $this->assertGarageJob($bill);
+        $this->assertKindAccess($request, $photo->kind ?: BillPhoto::KIND_JOB);
         abort_unless($photo->bill_id === $bill->id, 404);
         abort_unless(Storage::disk('local')->exists($photo->path), 404);
 
@@ -75,15 +88,31 @@ class JobPhotoController extends Controller
         ]);
     }
 
-    public function destroy(Bill $bill, BillPhoto $photo, JobPhotoStore $store): JsonResponse
+    public function destroy(Request $request, Bill $bill, BillPhoto $photo, JobPhotoStore $store): JsonResponse
     {
         $this->assertGarageJob($bill);
+        $this->assertKindAccess($request, $photo->kind ?: BillPhoto::KIND_JOB);
         abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
         abort_unless($photo->bill_id === $bill->id, 404);
         $store->delete($photo->path);
         $photo->delete();
 
         return response()->json(null, 204);
+    }
+
+    private function kind(Request $request): string
+    {
+        $kind = (string) $request->input('kind', BillPhoto::KIND_JOB);
+        abort_unless(in_array($kind, [BillPhoto::KIND_JOB, BillPhoto::KIND_ADMIT], true), 422, 'Unknown photo kind.');
+        $this->assertKindAccess($request, $kind);
+
+        return $kind;
+    }
+
+    private function assertKindAccess(Request $request, string $kind): void
+    {
+        $feature = $kind === BillPhoto::KIND_ADMIT ? 'admit_photos' : 'job_photos';
+        abort_unless($request->user()?->canAccessFeature($feature), 403, 'This feature is not available for this account.');
     }
 
     private function assertGarageJob(Bill $bill): void

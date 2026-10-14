@@ -168,6 +168,23 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/service-vehicle-classes', [ServiceVehicleClassController::class, 'index']);
             Route::get('/discount-types', [DiscountTypeController::class, 'index']);
             Route::get('/labor-catalog', [LaborCatalogController::class, 'index']);
+            Route::post('/service-addons', [ServiceAddonController::class, 'store']);
+            Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update']);
+            Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy']);
+            Route::put('/service-addons/{addon}/vehicle-classes/{service_vehicle_class}', [ServiceAddonController::class, 'saveVehicleSetting']);
+            Route::post('/service-vehicle-classes', [ServiceVehicleClassController::class, 'store']);
+            Route::put('/service-vehicle-classes/{service_vehicle_class}', [ServiceVehicleClassController::class, 'update']);
+            Route::delete('/service-vehicle-classes/{service_vehicle_class}', [ServiceVehicleClassController::class, 'destroy']);
+            Route::post('/discount-types', [DiscountTypeController::class, 'store']);
+            Route::put('/discount-types/{discount_type}', [DiscountTypeController::class, 'update']);
+            Route::delete('/discount-types/{discount_type}', [DiscountTypeController::class, 'destroy']);
+            Route::post('/labor-categories', [LaborCatalogController::class, 'storeCategory']);
+            Route::put('/labor-categories/{labor_category}', [LaborCatalogController::class, 'updateCategory']);
+            Route::delete('/labor-categories/{labor_category}', [LaborCatalogController::class, 'destroyCategory']);
+            Route::post('/labor-categories/{labor_category}/items', [LaborCatalogController::class, 'storeItem']);
+            Route::put('/labor-items/{labor_item}', [LaborCatalogController::class, 'updateItem']);
+            Route::delete('/labor-items/{labor_item}', [LaborCatalogController::class, 'destroyItem']);
+            Route::post('/bills/{bill}/commissions/{employee}', [BillController::class, 'deductCommission'])->middleware('feature:job_commissions');
         });
 
         Route::post('/bills/{bill}/send-sms', BillSmsController::class)->middleware('feature:bill_sms');
@@ -196,12 +213,14 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/bills/{bill}/videos/{video}/file', [JobVideoController::class, 'file']);
             Route::delete('/bills/{bill}/videos/{video}', [JobVideoController::class, 'destroy']);
         });
-        Route::middleware('feature:job_photos')->group(function () {
+        Route::middleware('feature:job_photos,admit_photos')->group(function () {
             Route::get('/bills/{bill}/photos', [JobPhotoController::class, 'index']);
             Route::post('/bills/{bill}/photos', [JobPhotoController::class, 'store']);
             Route::get('/bills/{bill}/photos/{photo}/file', [JobPhotoController::class, 'file']);
             Route::delete('/bills/{bill}/photos/{photo}', [JobPhotoController::class, 'destroy']);
         });
+
+        Route::get('/parts', [PartController::class, 'index'])->middleware('feature:parts_inventory,billing');
 
         Route::middleware('feature:warranties')->group(function () {
             Route::get('/warranties', [WarrantyController::class, 'index']);
@@ -210,7 +229,6 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::middleware('feature:parts_inventory')->group(function () {
-            Route::get('/parts', [PartController::class, 'index']);
             Route::get('/part-categories', [PartCategoryController::class, 'index']);
             Route::post('/part-categories', [PartCategoryController::class, 'store']);
             Route::post('/part-categories/{part_category}/subcategories', [PartCategoryController::class, 'storeSubcategory']);
@@ -312,22 +330,6 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::middleware('role:business_owner')->group(function () {
             Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->middleware('feature:customers,admit_vehicle,photo_bookings,retail_pos,cottage_stays');
             Route::delete('/vehicles/{vehicle}', [VehicleController::class, 'destroy'])->middleware('feature:admit_vehicle');
-            Route::post('/service-addons', [ServiceAddonController::class, 'store'])->middleware('feature:billing');
-            Route::put('/service-addons/{addon}', [ServiceAddonController::class, 'update'])->middleware('feature:billing');
-            Route::delete('/service-addons/{addon}', [ServiceAddonController::class, 'destroy'])->middleware('feature:billing');
-            Route::put('/service-addons/{addon}/vehicle-classes/{service_vehicle_class}', [ServiceAddonController::class, 'saveVehicleSetting'])->middleware('feature:billing');
-            Route::post('/service-vehicle-classes', [ServiceVehicleClassController::class, 'store'])->middleware('feature:billing');
-            Route::put('/service-vehicle-classes/{service_vehicle_class}', [ServiceVehicleClassController::class, 'update'])->middleware('feature:billing');
-            Route::delete('/service-vehicle-classes/{service_vehicle_class}', [ServiceVehicleClassController::class, 'destroy'])->middleware('feature:billing');
-            Route::post('/discount-types', [DiscountTypeController::class, 'store'])->middleware('feature:billing');
-            Route::put('/discount-types/{discount_type}', [DiscountTypeController::class, 'update'])->middleware('feature:billing');
-            Route::delete('/discount-types/{discount_type}', [DiscountTypeController::class, 'destroy'])->middleware('feature:billing');
-            Route::post('/labor-categories', [LaborCatalogController::class, 'storeCategory'])->middleware('feature:billing');
-            Route::put('/labor-categories/{labor_category}', [LaborCatalogController::class, 'updateCategory'])->middleware('feature:billing');
-            Route::delete('/labor-categories/{labor_category}', [LaborCatalogController::class, 'destroyCategory'])->middleware('feature:billing');
-            Route::post('/labor-categories/{labor_category}/items', [LaborCatalogController::class, 'storeItem'])->middleware('feature:billing');
-            Route::put('/labor-items/{labor_item}', [LaborCatalogController::class, 'updateItem'])->middleware('feature:billing');
-            Route::delete('/labor-items/{labor_item}', [LaborCatalogController::class, 'destroyItem'])->middleware('feature:billing');
         });
 
         Route::middleware('feature:employees_management,attendance')->group(function () {
@@ -347,6 +349,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
         Route::middleware('feature:payroll')->group(function () {
             Route::get('/payroll', [PayrollController::class, 'index']);
+            Route::get('/payroll/day-wages', [PayrollController::class, 'dayWages']);
+            Route::post('/payroll/day-wages', [PayrollController::class, 'payDayWage']);
             Route::get('/payroll/{payroll}', [PayrollController::class, 'show']);
             Route::post('/payroll/generate', [PayrollController::class, 'generate']);
         });

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'bill_id',
+    'kind',
     'path',
     'original_name',
     'label',
@@ -19,6 +20,12 @@ class BillPhoto extends Model
     use BelongsToTenant;
 
     public const MAX_PER_BILL = 15;
+
+    public const MAX_ADMIT = 5;
+
+    public const KIND_JOB = 'job';
+
+    public const KIND_ADMIT = 'admit';
 
     public const MAX_UPLOAD_KILOBYTES = 12288;
 
