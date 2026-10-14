@@ -33,12 +33,12 @@ class ServiceVehicleClassTest extends TestCase
         $this->getJson('/api/service-vehicle-classes')->assertJsonCount(1);
     }
 
-    public function test_staff_can_list_categories_but_not_change_them(): void
+    public function test_job_card_staff_can_list_and_change_categories(): void
     {
         Sanctum::actingAs($this->garageUser('staff'));
 
         $this->getJson('/api/service-vehicle-classes')->assertOk();
-        $this->postJson('/api/service-vehicle-classes', ['name' => 'Van'])->assertForbidden();
+        $this->postJson('/api/service-vehicle-classes', ['name' => 'Van '.fake()->unique()->numerify('###')])->assertCreated();
     }
 
     public function test_service_job_stores_category_and_uses_the_typed_price(): void

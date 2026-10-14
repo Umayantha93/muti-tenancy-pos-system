@@ -67,6 +67,8 @@ class Bill extends Model
 
     public const JOB_KIND_PARTS_SALE = 'parts_sale';
 
+    public const JOB_KIND_BOTH = 'both';
+
     protected $appends = [
         'has_pending_cheque',
         'pending_cheque_date',
@@ -146,6 +148,7 @@ class Bill extends Model
     public function employees(): BelongsToMany
     {
         return $this->belongsToMany(Employee::class, 'bill_employees')
+            ->withPivot(['commission_amount', 'commission_deducted_at', 'employee_payment_id'])
             ->withTimestamps()
             ->orderBy('employees.name');
     }

@@ -16,7 +16,7 @@ class BillProfitController extends Controller
         $data = $request->validate([
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_PARTS_SALE])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PARTS_SALE])],
             'search' => ['nullable', 'string', 'max:255'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
@@ -29,7 +29,9 @@ class BillProfitController extends Controller
         $base = fn () => BranchQuery::constrain(Bill::query())
             ->whereDate('admission_date', '>=', $from)
             ->whereDate('admission_date', '<=', $to)
-            ->when($jobKind, fn ($query) => $query->where('job_kind', $jobKind));
+            ->when($jobKind === Bill::JOB_KIND_SERVICE, fn ($query) => $query->whereIn('job_kind', [Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH]))
+            ->when($jobKind === Bill::JOB_KIND_REPAIR, fn ($query) => $query->whereIn('job_kind', [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH]))
+            ->when($jobKind && ! in_array($jobKind, [Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR], true), fn ($query) => $query->where('job_kind', $jobKind));
 
         $bills = $base()
             ->with(['customer', 'vehicle', 'items.part', 'payments', 'refunds.items', 'branch:id,name,code'])
@@ -67,7 +69,41 @@ class BillProfitController extends Controller
         $allForPeriod = $base()->with(['items.part', 'refunds.items'])->get();
         $allForPeriod->loadMissing(['items.part', 'refunds.items']);
 
-        $totals = $allForPeriod->reduce(function (array $carry, Bill $bill) use ($analyzer) {
+        $totals = $allForPeriod->reduce(function (array $carry, Bill $bill) use ($analyzer, $jobKind) {
+            if ($bill->job_kind === Bill::JOB_KIND_BOTH && ($jobKind === null || $jobKind === Bill::JOB_KIND_BOTH)) {
+                $summary = $analyzer->summarize($bill);
+                $split = $analyzer->sectionSplit($bill);
+                $carry['total_revenue'] += $summary['revenue'];
+                $carry['total_cogs'] += $summary['cogs'];
+                $carry['gross_profit'] += $summary['profit'];
+                foreach (['service', 'repair'] as $bucket) {
+                    $carry["{$bucket}_revenue"] += $split[$bucket]['revenue'];
+                    $carry["{$bucket}_cogs"] += $split[$bucket]['cogs'];
+                    $carry["{$bucket}_gross_profit"] += $split[$bucket]['profit'];
+                    $carry["{$bucket}_count"]++;
+                }
+                if ($summary['billing_type'] === 'credit') {
+                    $carry['credit_count']++;
+                    $carry['credit_generated'] += $summary['revenue'];
+                    $carry['credit_collected'] += (float) $bill->amount_paid;
+                    $carry['credit_pending'] += (float) $bill->balance_due;
+                }
+
+                return $carry;
+            }
+            if ($bill->job_kind === Bill::JOB_KIND_BOTH && in_array($jobKind, [Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR], true)) {
+                $split = $analyzer->sectionSplit($bill);
+                $part = $split[$jobKind];
+                $carry['total_revenue'] += $part['revenue'];
+                $carry['total_cogs'] += $part['cogs'];
+                $carry['gross_profit'] += $part['profit'];
+                $carry["{$jobKind}_revenue"] += $part['revenue'];
+                $carry["{$jobKind}_cogs"] += $part['cogs'];
+                $carry["{$jobKind}_gross_profit"] += $part['profit'];
+                $carry["{$jobKind}_count"]++;
+
+                return $carry;
+            }
             $summary = $analyzer->summarize($bill);
             $kind = match ($summary['job_kind']) {
                 Bill::JOB_KIND_SERVICE => 'service',

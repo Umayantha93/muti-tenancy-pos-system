@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'name', 'nic', 'phone', 'position', 'base_salary', 'overtime_hourly_rate', 'fingerprint_id',
+    'name', 'nic', 'phone', 'position', 'base_salary', 'pay_type', 'daily_rate', 'commission_percent', 'overtime_hourly_rate', 'fingerprint_id',
     'active', 'epf_enabled', 'paid_leave_days_per_year', 'allowances', 'default_shift_id', 'home_branch_id',
 ])]
 class Employee extends Model
@@ -32,6 +32,8 @@ class Employee extends Model
             'active' => 'boolean',
             'epf_enabled' => 'boolean',
             'base_salary' => 'decimal:2',
+            'daily_rate' => 'decimal:2',
+            'commission_percent' => 'decimal:2',
             'allowances' => 'array',
         ];
     }
@@ -79,6 +81,7 @@ class Employee extends Model
     public function bills(): BelongsToMany
     {
         return $this->belongsToMany(Bill::class, 'bill_employees')
+            ->withPivot(['commission_amount', 'commission_deducted_at', 'employee_payment_id'])
             ->withTimestamps();
     }
 }

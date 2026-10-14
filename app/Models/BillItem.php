@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'panel_group_id',
     'panel_name',
     'type',
+    'section',
     'description',
     'included_services',
     'quantity',

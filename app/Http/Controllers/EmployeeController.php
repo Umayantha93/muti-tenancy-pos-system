@@ -26,7 +26,11 @@ class EmployeeController extends Controller
 
     public function show(Employee $employee): JsonResponse
     {
-        return $this->moneyJson($employee->load(['attendance' => fn ($query) => $query->latest('date')->limit(31), 'payrolls' => fn ($query) => $query->latest('year')->latest('month')]));
+        return $this->moneyJson($employee->load([
+            'attendance' => fn ($query) => $query->latest('date')->limit(31),
+            'payrolls' => fn ($query) => $query->latest('year')->latest('month'),
+            'bills' => fn ($query) => $query->with('vehicle:id,number_plate')->latest('bills.admission_date')->limit(50),
+        ]));
     }
 
     public function update(Request $request, Employee $employee): JsonResponse
@@ -50,14 +54,17 @@ class EmployeeController extends Controller
 
     private function validated(Request $request, ?Employee $employee = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'name' => [$employee ? 'sometimes' : 'required', 'string', 'max:255'],
             'nic' => [$employee ? 'sometimes' : 'required', 'string', 'max:20', Rule::unique('employees')->where('tenant_id', $request->user()->tenant_id)->ignore($employee)],
-            'phone' => [$employee ? 'sometimes' : 'required', 'regex:/^[0-9+() -]{7,20}$/'],
-            'position' => [$employee ? 'sometimes' : 'required', 'string', 'max:100'],
-            'base_salary' => [$employee ? 'sometimes' : 'required', 'numeric', 'min:0'],
+            'phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
+            'position' => ['nullable', 'string', 'max:100'],
+            'base_salary' => ['nullable', 'numeric', 'min:0'],
+            'pay_type' => ['nullable', Rule::in(['monthly', 'daily'])],
+            'daily_rate' => ['nullable', 'numeric', 'gt:0', 'required_if:pay_type,daily'],
+            'commission_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'overtime_hourly_rate' => ['nullable', 'numeric', 'min:0'],
-            'fingerprint_id' => [$employee ? 'sometimes' : 'required', 'string', 'max:100', Rule::unique('employees')->where('tenant_id', $request->user()->tenant_id)->ignore($employee)],
+            'fingerprint_id' => ['nullable', 'string', 'max:100', Rule::unique('employees')->where('tenant_id', $request->user()->tenant_id)->ignore($employee)],
             'active' => ['sometimes', 'boolean'],
             'epf_enabled' => ['sometimes', 'boolean'],
             'paid_leave_days_per_year' => ['nullable', 'integer', 'min:0', 'max:366'],
@@ -69,5 +76,17 @@ class EmployeeController extends Controller
             'allowances.*.kind' => ['nullable', Rule::in(['fixed', 'attendance'])],
             'allowances.*.min_days' => ['nullable', 'integer', 'min:0', 'max:31'],
         ]);
+
+        if (! isset($data['pay_type']) || $data['pay_type'] === null || $data['pay_type'] === '') {
+            $data['pay_type'] = $employee?->pay_type ?? 'monthly';
+        }
+        if (array_key_exists('base_salary', $data) && $data['base_salary'] === null) {
+            $data['base_salary'] = 0;
+        }
+        if (($data['pay_type'] ?? 'monthly') !== 'daily') {
+            $data['daily_rate'] = $data['daily_rate'] ?? $employee?->daily_rate;
+        }
+
+        return $data;
     }
 }
