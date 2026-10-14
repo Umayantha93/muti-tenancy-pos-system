@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BillPayment;
 use App\Models\BillRefund;
+use App\Models\EmployeePayment;
 use App\Models\Expense;
 use App\Models\ExpenseCheque;
 use App\Models\ExpenseSettlement;
@@ -95,6 +96,7 @@ class BalanceSheetController extends Controller
 
         $split['other'] += (float) BranchQuery::constrain(Payroll::query())
             ->where('year', $year)->where('month', $month)->sum('net_salary');
+        $split['other'] += $this->employeePaymentsTotal($month, $year);
 
         return array_map(
             fn (float $amount) => $view->active() ? $view->scaleExpense($amount) : round($amount, 2),
@@ -184,8 +186,9 @@ class BalanceSheetController extends Controller
             $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
             $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
             $salaryTotal = (float) BranchQuery::constrain(Payroll::query())->where('year', $year)->where('month', $month)->sum('net_salary');
+            $employeePayTotal = $this->employeePaymentsTotal($month, $year);
             $income = round((float) $payments + (float) $advances - (float) $refunds, 2);
-            $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal), 2);
+            $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal + $employeePayTotal), 2);
             $result = [
                 'income' => $income,
                 'expenses' => $expenses,
@@ -197,7 +200,8 @@ class BalanceSheetController extends Controller
                     ->selectRaw('category, SUM(amount) as total')->groupBy('category')
                     ->pluck('total', 'category')
                     ->map(fn ($amount) => $view->scaleExpense((float) $amount))
-                    ->put('salary', $view->scaleExpense($salaryTotal));
+                    ->put('salary', $view->scaleExpense($salaryTotal))
+                    ->put('employee_payments', $view->scaleExpense($employeePayTotal));
                 $settlements = $this->settlementsTotal($month, $year);
                 if ($settlements > 0) {
                     $result['expense_breakdown']['inventory'] = round(
@@ -216,15 +220,17 @@ class BalanceSheetController extends Controller
         $manualExpenses = BranchQuery::constrain(Expense::postedIn($month, $year));
         $manualTotal = (float) (clone $manualExpenses)->sum('amount') + $this->settlementsTotal($month, $year);
         $salaryTotal = (float) BranchQuery::constrain(Payroll::query())->where('year', $year)->where('month', $month)->sum('net_salary');
+        $employeePayTotal = $this->employeePaymentsTotal($month, $year);
         $income = $payments + $advances - $refunds;
-        $expenses = $manualTotal + $salaryTotal;
+        $expenses = $manualTotal + $salaryTotal + $employeePayTotal;
         $result = ['income' => $income, 'expenses' => $expenses, 'net_profit' => $income - $expenses];
 
         if ($withBreakdown) {
             $result['expense_breakdown'] = (clone $manualExpenses)
                 ->selectRaw('category, SUM(amount) as total')->groupBy('category')
                 ->pluck('total', 'category')->map(fn ($amount) => (float) $amount)
-                ->put('salary', $salaryTotal);
+                ->put('salary', $salaryTotal)
+                ->put('employee_payments', $employeePayTotal);
             $settlements = $this->settlementsTotal($month, $year);
             if ($settlements > 0) {
                 $result['expense_breakdown']['inventory'] = round(
@@ -250,10 +256,11 @@ class BalanceSheetController extends Controller
         $manual = $this->yearlyManualExpenseTotals($year);
         $settlements = $this->yearlySettlementTotals($year);
         $salaries = $this->yearlySalaryTotals($year);
+        $employeePays = $this->yearlyEmployeePaymentTotals($year);
 
-        return collect(range(1, 12))->map(function (int $month) use ($view, $payments, $advances, $refunds, $manual, $settlements, $salaries) {
+        return collect(range(1, 12))->map(function (int $month) use ($view, $payments, $advances, $refunds, $manual, $settlements, $salaries, $employeePays) {
             $manualTotal = $manual[$month] + $settlements[$month];
-            $salaryTotal = $salaries[$month];
+            $salaryTotal = $salaries[$month] + $employeePays[$month];
             if ($view->active()) {
                 $income = round($payments[$month] + $advances[$month] - $refunds[$month], 2);
                 $expenses = round($view->scaleExpense($manualTotal) + $view->scaleExpense($salaryTotal), 2);
@@ -359,6 +366,31 @@ class BalanceSheetController extends Controller
             ->whereYear('settled_on', $year)
             ->selectRaw('MONTH(settled_on) as month_num, SUM(amount) as total')
             ->groupByRaw('MONTH(settled_on)')
+            ->get();
+
+        return $this->rowsToMonths($rows);
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function employeePaymentsTotal(int $month, int $year): float
+    {
+        return (float) BranchQuery::constrain(EmployeePayment::query())
+            ->whereYear('paid_on', $year)
+            ->whereMonth('paid_on', $month)
+            ->sum('amount');
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function yearlyEmployeePaymentTotals(int $year): array
+    {
+        $rows = BranchQuery::constrain(EmployeePayment::query())
+            ->whereYear('paid_on', $year)
+            ->selectRaw('MONTH(paid_on) as month_num, SUM(amount) as total')
+            ->groupByRaw('MONTH(paid_on)')
             ->get();
 
         return $this->rowsToMonths($rows);
@@ -654,7 +686,35 @@ class BalanceSheetController extends Controller
                     'reference' => sprintf('PAY-%04d-%02d-%d', $year, $month, $payroll->id),
                     'vehicle' => null,
                     'details' => null,
-                    'category' => 'Salaries',
+                'category' => 'Salaries',
+                'type' => 'expense',
+                'debit' => $amount,
+                'credit' => 0.0,
+            ]);
+        });
+
+        BranchQuery::constrain(EmployeePayment::query())
+            ->with(['employee:id,name', 'bill:id,bill_number'])
+            ->whereYear('paid_on', $year)
+            ->whereMonth('paid_on', $month)
+            ->orderBy('paid_on')
+            ->orderBy('id')
+            ->get()
+            ->each(function (EmployeePayment $payment) use ($rows, $view) {
+                $amount = $view->active()
+                    ? $view->scaleExpense((float) $payment->amount)
+                    : (float) $payment->amount;
+                $name = $payment->employee?->name ?? 'Employee';
+                $rows->push([
+                    'date' => $payment->paid_on?->toDateString(),
+                    'sort_at' => ($payment->paid_on?->toDateString() ?? '').' 18:00:00',
+                    'description' => $payment->kind === EmployeePayment::KIND_COMMISSION
+                        ? 'Commission · '.$name
+                        : 'Payment for employee · '.$name,
+                    'reference' => $payment->bill?->bill_number,
+                    'vehicle' => null,
+                    'details' => null,
+                    'category' => 'Employee payments',
                     'type' => 'expense',
                     'debit' => $amount,
                     'credit' => 0.0,

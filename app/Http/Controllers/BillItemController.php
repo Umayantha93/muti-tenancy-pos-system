@@ -37,6 +37,7 @@ class BillItemController extends Controller
 
         $data = $request->validate([
             'type' => ['required', Rule::in($allowed)],
+            'section' => ['nullable', Rule::in(['service', 'repair', 'discount'])],
             'part_id' => ['nullable', Rule::exists('parts', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'description' => ['nullable', 'string', 'max:255'],
             'quantity' => ['nullable', 'numeric', 'gt:0'],
@@ -77,6 +78,7 @@ class BillItemController extends Controller
             }
         }
 
+        $data['section'] = $this->resolveSection($bill, $data);
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id, $bill->service_vehicle_class_id);
         $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
         if (($data['type'] ?? '') === 'discount' || ! empty($data['discount_type_id'])) {
@@ -262,6 +264,36 @@ class BillItemController extends Controller
      * @param  array<string, mixed>  $data
      * @param  Collection<string, array<string, mixed>>  $typeMeta
      */
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveSection(Bill $bill, array $data): string
+    {
+        $type = (string) $data['type'];
+        $derived = match ($type) {
+            'discount' => 'discount',
+            'service_addon', 'service', 'charge' => 'service',
+            'labor' => 'repair',
+            default => $bill->job_kind === Bill::JOB_KIND_SERVICE ? 'service' : 'repair',
+        };
+
+        if ($bill->job_kind !== Bill::JOB_KIND_BOTH) {
+            return $derived;
+        }
+
+        $section = in_array($data['section'] ?? null, ['service', 'repair', 'discount'], true)
+            ? (string) $data['section']
+            : $derived;
+        $allowed = match ($section) {
+            'service' => ['service_addon', 'service', 'charge', 'part', 'customer_part'],
+            'repair' => ['labor', 'part', 'customer_part'],
+            default => ['discount'],
+        };
+        abort_unless(in_array($type, $allowed, true), 422, 'That line does not belong in this section.');
+
+        return $section;
+    }
+
     private function assertLineReady(array $data, $typeMeta): void
     {
         $kind = BusinessTypes::billItemKind($data['type']);
@@ -421,6 +453,7 @@ class BillItemController extends Controller
                 'panel_group_id' => $data['panel_group_id'] ?? null,
                 'panel_name' => $data['panel_name'] ?? null,
                 'type' => $data['type'],
+                'section' => $data['section'] ?? null,
                 'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
                 'included_services' => $data['included_services'] ?? null,
                 'quantity' => $layerQty,

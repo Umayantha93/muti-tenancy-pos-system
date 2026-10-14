@@ -19,6 +19,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'counted_card',
     'counted_bank',
     'counted_cheque',
+    'opening_float',
+    'cash_count',
+    'bank_lines',
     'notes',
     'closed_at',
     'branch_id',
@@ -40,6 +43,9 @@ class CashUp extends Model
             'counted_card' => 'decimal:2',
             'counted_bank' => 'decimal:2',
             'counted_cheque' => 'decimal:2',
+            'opening_float' => 'decimal:2',
+            'cash_count' => 'array',
+            'bank_lines' => 'array',
         ];
     }
 

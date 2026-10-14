@@ -139,15 +139,15 @@ class ServiceJobCardTest extends TestCase
         $this->assertNull(ServiceAddon::find($created['id']));
     }
 
-    public function test_staff_can_list_addons_but_cannot_mutate_them(): void
+    public function test_job_card_staff_can_list_and_mutate_addons(): void
     {
         Sanctum::actingAs($this->garageUser('staff'));
 
         $this->getJson('/api/service-addons')->assertOk();
         $this->postJson('/api/service-addons', [
-            'name' => 'Extra wash',
+            'name' => 'Extra wash '.fake()->unique()->numerify('###'),
             'price' => 500,
-        ])->assertForbidden();
+        ])->assertCreated();
     }
 
     public function test_service_job_card_adds_addon_lines_with_typed_price_and_full_service_inclusions(): void

@@ -24,7 +24,9 @@ class BillShareController extends Controller
                 'panel_group_id', 'panel_name', 'warranty_months', 'warranty_starts_on', 'warranty_until',
             ]),
             'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
-            'photos' => fn ($query) => $query->withoutGlobalScopes()->latest(),
+            'photos' => fn ($query) => $query->withoutGlobalScopes()->where(function ($photos) {
+                $photos->where('kind', BillPhoto::KIND_JOB)->orWhereNull('kind');
+            })->latest(),
             'videos' => fn ($query) => $query->withoutGlobalScopes()->latest(),
             'tenant:id,business_name,business_type,logo,address,tin,contact_email,contact_phone,contact_phones,owner_email,owner_phone,owner_phones',
             'branch:id,name,address,phone,code',

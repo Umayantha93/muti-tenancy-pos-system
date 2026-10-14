@@ -67,13 +67,77 @@ class SharedAcrossTradesTest extends TestCase
         $this->assertEquals(500, (float) $preview->json('expected.expected_cash'));
 
         $closed = $this->postJson('/api/cash-up', [
-            'counted_cash' => 480,
+            'opening_float' => 0,
+            'cash_count' => ['100' => 4, '50' => 1, '20' => 1, 'coins' => 10],
+            'bank_lines' => [],
             'counted_card' => 0,
-            'counted_bank' => 0,
             'counted_cheque' => 0,
         ])->assertOk();
+        $this->assertEquals(480, (float) $closed->json('cash_up.counted_cash'));
         $this->assertEquals(-20, (float) $closed->json('difference.cash'));
         $this->assertNotEmpty($closed->json('cash_up.closed_at'));
+
+        $balanced = $this->postJson('/api/cash-up', [
+            'opening_float' => 100,
+            'cash_count' => ['500' => 1, '100' => 1],
+            'bank_lines' => [],
+            'counted_card' => 0,
+            'counted_cheque' => 0,
+        ])->assertOk();
+        $this->assertEquals(600, (float) $balanced->json('expected.expected_cash'));
+        $this->assertEquals(600, (float) $balanced->json('cash_up.counted_cash'));
+        $this->assertEquals(0, (float) $balanced->json('difference.cash'));
+    }
+
+    public function test_cash_up_ticks_bank_transfers_and_records_an_extra(): void
+    {
+        [, $owner] = $this->storeOwner('Cash Count '.fake()->unique()->numerify('###'));
+        Sanctum::actingAs($owner);
+
+        $part = Part::create([
+            'name' => 'Transfer cable '.fake()->unique()->numerify('###'),
+            'brand' => 'Generic',
+            'type' => 'Cable',
+            'price' => 1000,
+            'cost_price' => 400,
+            'stock_qty' => 5,
+        ]);
+        $sale = $this->postJson('/api/part-sales', [
+            'customer_name' => 'Kamal',
+            'customer_phone' => '0771234567',
+            'items' => [['part_id' => $part->id, 'quantity' => 1]],
+            'payment_amount' => 1000,
+            'payment_method' => 'bank_transfer',
+        ])->assertCreated()->json();
+        $paymentId = $sale['bill']['payments'][0]['id'];
+
+        $preview = $this->getJson('/api/cash-up')->assertOk();
+        $this->assertTrue(collect($preview->json('bank_payments'))->contains('id', $paymentId));
+        $expectedBank = (float) $preview->json('expected.expected_bank');
+
+        $lines = collect($preview->json('bank_payments'))->map(fn (array $payment) => [
+            'payment_id' => $payment['id'],
+            'seen' => (int) $payment['id'] !== (int) $paymentId,
+        ])->all();
+
+        $short = $this->postJson('/api/cash-up', [
+            'cash_count' => ['coins' => 0],
+            'bank_lines' => $lines,
+            'counted_card' => 0,
+            'counted_cheque' => 0,
+        ])->assertOk();
+        $this->assertEquals(-1000, (float) $short->json('difference.bank'));
+        $this->assertEquals($expectedBank - 1000, (float) $short->json('cash_up.counted_bank'));
+
+        $seen = collect($lines)->map(fn (array $line) => ['payment_id' => $line['payment_id'], 'seen' => true])->all();
+        $surplus = $this->postJson('/api/cash-up', [
+            'cash_count' => ['coins' => 0],
+            'bank_lines' => [...$seen, ['amount' => 200, 'reference' => 'CEFT extra', 'seen' => true]],
+            'counted_card' => 0,
+            'counted_cheque' => 0,
+        ])->assertOk();
+        $this->assertEquals(200, (float) $surplus->json('difference.bank'));
+        $this->assertEquals($expectedBank + 200, (float) $surplus->json('cash_up.counted_bank'));
     }
 
     public function test_outstanding_lists_ageing_and_share_token(): void
@@ -114,13 +178,13 @@ class SharedAcrossTradesTest extends TestCase
     /**
      * @return array{0: Tenant, 1: User}
      */
-    private function storeOwner(): array
+    private function storeOwner(?string $businessName = null): array
     {
         $this->seed(\Database\Seeders\FeatureSeeder::class);
         $superAdmin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
         Sanctum::actingAs($superAdmin);
         $tenantId = $this->postJson('/api/super-admin/tenants', $this->onboardPayload(
-            'Matara Counter',
+            $businessName ?? 'Matara Counter',
             BusinessTypes::STORE,
         ))->assertCreated()->json('id');
         $owner = User::query()->where('tenant_id', $tenantId)->where('role', 'business_owner')->firstOrFail();

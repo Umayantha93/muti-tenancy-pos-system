@@ -96,10 +96,70 @@ class BillProfitAnalyzer
             'payment_status' => $this->paymentStatus($bill),
             'refund_status' => $bill->resolvedRefundStatus(),
             'amount_refunded' => round((float) $bill->amount_refunded, 2),
-            'job_kind' => $bill->job_kind === Bill::JOB_KIND_SERVICE
-                ? Bill::JOB_KIND_SERVICE
-                : ($bill->job_kind === Bill::JOB_KIND_PARTS_SALE ? Bill::JOB_KIND_PARTS_SALE : Bill::JOB_KIND_REPAIR),
+            'job_kind' => match ($bill->job_kind) {
+                Bill::JOB_KIND_SERVICE => Bill::JOB_KIND_SERVICE,
+                Bill::JOB_KIND_PARTS_SALE => Bill::JOB_KIND_PARTS_SALE,
+                Bill::JOB_KIND_BOTH => Bill::JOB_KIND_BOTH,
+                default => Bill::JOB_KIND_REPAIR,
+            },
             'lines' => $lines,
+        ];
+    }
+
+    /**
+     * Labor and service stay in their section. Discounts are shared by section revenue.
+     *
+     * @return array{service: array{revenue: float, cogs: float, profit: float}, repair: array{revenue: float, cogs: float, profit: float}}
+     */
+    public function sectionSplit(Bill $bill): array
+    {
+        $bill->loadMissing(['items.part']);
+        $serviceRevenue = 0.0;
+        $repairRevenue = 0.0;
+        $serviceCogs = 0.0;
+        $repairCogs = 0.0;
+        $discounts = 0.0;
+
+        foreach ($bill->items as $item) {
+            if (in_array($item->type, BusinessTypes::discountItemTypes(), true)) {
+                $discounts += (float) $item->line_total;
+                continue;
+            }
+            $revenue = (float) $item->line_total;
+            $cogs = $item->type === 'part'
+                ? (float) ($item->purchase_unit_cost ?? $item->part?->cost_price ?? 0) * (float) $item->quantity
+                : 0.0;
+            $section = $item->section ?: match ($item->type) {
+                'service_addon', 'service', 'charge' => 'service',
+                'labor' => 'repair',
+                default => $bill->job_kind === Bill::JOB_KIND_SERVICE ? 'service' : 'repair',
+            };
+            if ($section === 'service') {
+                $serviceRevenue += $revenue;
+                $serviceCogs += $cogs;
+            } else {
+                $repairRevenue += $revenue;
+                $repairCogs += $cogs;
+            }
+        }
+
+        $base = $serviceRevenue + $repairRevenue;
+        $serviceDiscount = $base > 0 ? $discounts * ($serviceRevenue / $base) : 0.0;
+        $repairDiscount = $discounts - $serviceDiscount;
+        $serviceNet = max(0.0, round($serviceRevenue - $serviceDiscount, 2));
+        $repairNet = max(0.0, round($repairRevenue - $repairDiscount, 2));
+
+        return [
+            'service' => [
+                'revenue' => $serviceNet,
+                'cogs' => round($serviceCogs, 2),
+                'profit' => round($serviceNet - $serviceCogs, 2),
+            ],
+            'repair' => [
+                'revenue' => $repairNet,
+                'cogs' => round($repairCogs, 2),
+                'profit' => round($repairNet - $repairCogs, 2),
+            ],
         ];
     }
 

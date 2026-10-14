@@ -24,7 +24,7 @@ class JobPhotosStockUnitAndPdfTest extends TestCase
 
         $catalog = $this->getJson('/api/super-admin/feature-catalog?business_type=garage')->assertOk();
         $this->assertContains('job_photos', $catalog->json('optional'));
-        $this->assertSame('admit_vehicle', $catalog->json('nested.job_photos'));
+        $this->assertSame('billing', $catalog->json('nested.job_photos'));
 
         $garage = $this->postJson('/api/super-admin/tenants', [
             'business_name' => 'Photo Garage',

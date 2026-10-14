@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Employee;
+use App\Models\EmployeePayment;
+use App\Models\Payroll;
 use App\Services\PayrollGenerator;
+use App\Support\BranchQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Models\Payroll;
 use Illuminate\Validation\Rule;
 
 class PayrollController extends Controller
@@ -64,5 +67,76 @@ class PayrollController extends Controller
             'epf_payable' => round($epfTotal, 2),
             'etf_payable' => round($etfTotal, 2),
         ]);
+    }
+
+    public function dayWages(Request $request): JsonResponse
+    {
+        $date = $request->validate([
+            'date' => ['nullable', 'date'],
+        ])['date'] ?? now()->toDateString();
+
+        $shopId = BranchQuery::idForRead();
+        $employees = Employee::query()
+            ->where('active', true)
+            ->where('pay_type', 'daily')
+            ->when($shopId, fn ($query) => $query->where('home_branch_id', $shopId))
+            ->orderBy('name')
+            ->get(['id', 'name', 'nic', 'daily_rate', 'position']);
+
+        $paid = EmployeePayment::query()
+            ->where('kind', EmployeePayment::KIND_DAILY_WAGE)
+            ->whereDate('paid_on', $date)
+            ->whereIn('employee_id', $employees->pluck('id'))
+            ->get()
+            ->keyBy('employee_id');
+
+        return $this->moneyJson([
+            'date' => $date,
+            'employees' => $employees->map(function (Employee $employee) use ($paid) {
+                $payment = $paid->get($employee->id);
+
+                return [
+                    'id' => $employee->id,
+                    'name' => $employee->name,
+                    'nic' => $employee->nic,
+                    'position' => $employee->position,
+                    'daily_rate' => $employee->daily_rate,
+                    'paid' => $payment !== null,
+                    'payment_id' => $payment?->id,
+                    'amount' => $payment?->amount,
+                ];
+            })->values(),
+        ]);
+    }
+
+    public function payDayWage(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'employee_id' => ['required', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'paid_on' => ['required', 'date'],
+            'amount' => ['required', 'numeric', 'gt:0'],
+        ]);
+
+        $employee = Employee::query()->findOrFail($data['employee_id']);
+        abort_unless($employee->pay_type === 'daily', 422, 'This employee is paid monthly.');
+        abort_if(
+            EmployeePayment::query()
+                ->where('employee_id', $employee->id)
+                ->where('kind', EmployeePayment::KIND_DAILY_WAGE)
+                ->whereDate('paid_on', $data['paid_on'])
+                ->exists(),
+            422,
+            'This employee is already paid for that day.',
+        );
+
+        $payment = EmployeePayment::create([
+            'employee_id' => $employee->id,
+            'kind' => EmployeePayment::KIND_DAILY_WAGE,
+            'amount' => $data['amount'],
+            'paid_on' => $data['paid_on'],
+            'created_by' => $request->user()->id,
+        ]);
+
+        return $this->moneyJson($payment->load('employee:id,name'), 201);
     }
 }

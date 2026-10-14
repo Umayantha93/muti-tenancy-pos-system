@@ -28,6 +28,9 @@ class PayrollGenerator
     public function generate(Request $request, int $month, int $year, ?int $employeeId = null, array $bonuses = [], array $deductions = []): array
     {
         $employees = Employee::where('active', true)
+            ->where(function ($query) {
+                $query->where('pay_type', 'monthly')->orWhereNull('pay_type');
+            })
             ->when($employeeId, fn ($query) => $query->whereKey($employeeId))
             ->with([
                 'attendance' => fn ($query) => $query->whereYear('date', $year)->whereMonth('date', $month),

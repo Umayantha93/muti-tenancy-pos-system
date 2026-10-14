@@ -54,7 +54,8 @@ class BusinessTypes
 
         return [
             self::GARAGE => array_merge($garageFamily, [
-                'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos',
+                'admit_repair', 'admit_service', 'admit_combined', 'admit_photos',
+                'job_board', 'owner_bill_sms', 'job_photos', 'job_videos', 'job_commissions',
                 'service_reminders', 'service_ops_report', 'station_consumables',
                 'expense_job_split', 'finance_report_export',
             ]),
@@ -85,7 +86,8 @@ class BusinessTypes
             self::STORE => ['repair_bills', 'warranties', ...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::GARAGE => [
-                'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos',
+                'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos', 'job_commissions',
+                'admit_combined', 'admit_photos',
                 'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
                 'expense_job_split', 'finance_report_export',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
@@ -374,11 +376,15 @@ class BusinessTypes
         return [
             'admit_repair' => 'admit_vehicle',
             'admit_service' => 'admit_vehicle',
+            'admit_combined' => 'admit_vehicle',
+            'admit_photos' => 'admit_vehicle',
             'job_board' => 'admit_vehicle',
             'owner_bill_sms' => 'admit_vehicle',
-            'job_photos' => 'admit_vehicle',
-            'job_videos' => 'admit_vehicle',
-            'service_reminders' => 'bill_sms',
+            'job_photos' => 'billing',
+            'job_videos' => 'billing',
+            'bill_sms' => 'billing',
+            'service_reminders' => 'billing',
+            'job_commissions' => 'billing',
             'serial_inventory' => 'parts_inventory',
             'inventory_edit' => 'parts_inventory',
             'bill_whatsapp' => 'billing',
@@ -400,8 +406,10 @@ class BusinessTypes
     public static function requires(string $key): array
     {
         return match ($key) {
-            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos' => ['admit_vehicle'],
-            'service_reminders' => ['bill_sms', 'admit_service'],
+            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'admit_photos' => ['admit_vehicle'],
+            'admit_combined' => ['admit_vehicle', 'admit_repair', 'admit_service'],
+            'job_photos', 'job_videos', 'bill_sms', 'job_commissions' => ['billing'],
+            'service_reminders' => ['billing', 'bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
             'inventory_edit' => ['parts_inventory'],
@@ -441,7 +449,10 @@ class BusinessTypes
         $set = array_flip(array_values(array_intersect($enabled, $allowed)));
 
         if (! isset($set['admit_vehicle'])) {
-            unset($set['admit_repair'], $set['admit_service'], $set['job_board'], $set['owner_bill_sms'], $set['job_photos'], $set['job_videos']);
+            unset($set['admit_repair'], $set['admit_service'], $set['admit_combined'], $set['admit_photos'], $set['job_board'], $set['owner_bill_sms']);
+        }
+        if (! isset($set['admit_repair']) || ! isset($set['admit_service'])) {
+            unset($set['admit_combined']);
         }
         if (! isset($set['bill_sms'])) {
             unset($set['service_reminders']);
@@ -458,7 +469,7 @@ class BusinessTypes
             $set['inventory_edit'] = true;
         }
         if (! isset($set['billing'])) {
-            unset($set['bill_whatsapp']);
+            unset($set['bill_whatsapp'], $set['bill_sms'], $set['service_reminders'], $set['job_photos'], $set['job_videos'], $set['job_commissions']);
         }
         if (! isset($set['balance_sheet'])) {
             unset($set['expense_job_split'], $set['finance_report_export']);
@@ -506,6 +517,16 @@ class BusinessTypes
     {
         if ($kind === null || $kind === Bill::JOB_KIND_PARTS_SALE) {
             return true;
+        }
+        if ($kind === Bill::JOB_KIND_BOTH) {
+            $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+            if ($type !== self::GARAGE || ! $user->canAccessFeature('admit_combined')) {
+                return false;
+            }
+            $allowed = self::allowedJobKinds($user);
+
+            return in_array(Bill::JOB_KIND_REPAIR, $allowed, true)
+                && in_array(Bill::JOB_KIND_SERVICE, $allowed, true);
         }
         if (! in_array($kind, [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE], true)) {
             return true;
