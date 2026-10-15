@@ -403,6 +403,7 @@ class BillController extends Controller
             'vehicle',
             'serviceVehicleClass:id,name',
             'items.part',
+            'items.employee:id,name',
             'payments.receiver',
             'refunds.items.billItem',
             'refunds.creator:id,name',
@@ -468,7 +469,8 @@ class BillController extends Controller
             $this->syncBillEmployees($bill, $employeeIds);
         }
 
-        return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position,commission_percent']));
+        return response()->json($bill->refresh()->load(['customer', 'vehicle', 'items.part',
+            'items.employee:id,name', 'payments', 'employees:id,name,position,commission_percent']));
     }
 
     public function syncEmployees(Request $request, Bill $bill): JsonResponse
@@ -478,7 +480,8 @@ class BillController extends Controller
         $data = $request->validate($this->employeeIdsRules($request));
         $this->syncBillEmployees($bill, $data['employee_ids'] ?? []);
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position,commission_percent']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part',
+            'items.employee:id,name', 'payments.receiver', 'creator', 'employees:id,name,position,commission_percent']));
     }
 
     public function deductCommission(Request $request, Bill $bill, Employee $employee): JsonResponse
@@ -493,13 +496,27 @@ class BillController extends Controller
         abort_if($percent <= 0, 422, 'Set a commission percent on this employee first.');
 
         $bill->loadMissing('items');
-        $base = (float) $bill->items
-            ->filter(fn (BillItem $item) => in_array($item->type, ['labor', 'service_addon', 'service', 'charge'], true))
-            ->sum(fn (BillItem $item) => (float) $item->line_total);
-        $amount = round($base * $percent / 100, 2);
+        $lines = $bill->items->filter(
+            fn (BillItem $item) => (int) $item->employee_id === (int) $employee->id && $item->earnsCommission()
+        );
+        $amount = round($lines->sum(function (BillItem $item) use ($percent) {
+            if ($item->commission_amount !== null) {
+                return (float) $item->commission_amount;
+            }
+
+            return round((float) $item->line_total * $percent / 100, 2);
+        }), 2);
         abort_if($amount <= 0, 422, 'There is no labor or service amount to commission yet.');
 
-        DB::transaction(function () use ($request, $bill, $employee, $amount) {
+        DB::transaction(function () use ($request, $bill, $employee, $lines, $percent, $amount) {
+            foreach ($lines as $item) {
+                if ($item->commission_amount !== null) {
+                    continue;
+                }
+                $item->update([
+                    'commission_amount' => round((float) $item->line_total * $percent / 100, 2),
+                ]);
+            }
             $payment = EmployeePayment::create([
                 'employee_id' => $employee->id,
                 'bill_id' => $bill->id,
@@ -516,7 +533,8 @@ class BillController extends Controller
             ]);
         });
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator', 'employees:id,name,position,commission_percent']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part',
+            'items.employee:id,name', 'payments.receiver', 'creator', 'employees:id,name,position,commission_percent']));
     }
 
     public function close(Request $request, Bill $bill): JsonResponse
@@ -531,7 +549,43 @@ class BillController extends Controller
             'updated_by' => $request->user()->id,
         ]);
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part',
+            'items.employee:id,name', 'payments.receiver', 'creator']));
+    }
+
+    public function markFree(Request $request, Bill $bill): JsonResponse
+    {
+        abort_unless($request->user()->canAccessFeature('free_service'), 403, 'Free service is not enabled for this account.');
+
+        $data = $request->validate([
+            'is_free' => ['required', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $reason = trim((string) ($data['reason'] ?? ''));
+        if ($data['is_free'] && $reason === '') {
+            abort(422, 'Write a reason for the free service.');
+        }
+
+        abort_if($bill->isClosed(), 422, 'A closed job stays marked as it was closed.');
+        abort_unless($bill->status === 'open', 422, 'Free service can change only while the job is open and nothing has been paid.');
+        abort_if((float) $bill->amount_paid > 0, 422, 'Remove the payment before changing free service.');
+
+        $bill->update([
+            'is_free' => $data['is_free'],
+            'free_reason' => $data['is_free'] ? $reason : null,
+            'updated_by' => $request->user()->id,
+        ]);
+        app(BillCalculator::class)->recalculate($bill);
+
+        return $this->moneyJson($bill->fresh()->load([
+            'customer',
+            'vehicle',
+            'items.part',
+            'items.employee:id,name',
+            'payments.receiver',
+            'creator',
+            'employees:id,name,position,commission_percent',
+        ]));
     }
 
     public function oweIn(Request $request, Bill $bill): JsonResponse
@@ -551,7 +605,8 @@ class BillController extends Controller
             'updated_by' => $request->user()->id,
         ]);
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments.receiver', 'creator']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part',
+            'items.employee:id,name', 'payments.receiver', 'creator']));
     }
 
     public function moveBranch(Request $request, Bill $bill): JsonResponse
@@ -585,7 +640,8 @@ class BillController extends Controller
             }
         });
 
-        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'branch:id,name,code,address,phone']));
+        return $this->moneyJson($bill->fresh()->load(['customer', 'vehicle', 'items.part',
+            'items.employee:id,name', 'payments', 'branch:id,name,code,address,phone']));
     }
 
     private function storeGeneric(Request $request, string $type): JsonResponse
@@ -729,6 +785,11 @@ class BillController extends Controller
         $removed = $locked->diff($validIds);
         abort_if($removed->isNotEmpty(), 422, 'An employee with deducted commission has to stay on this job card.');
 
+        $dropped = $existing->keys()->map(fn ($id) => (int) $id)->diff(collect($validIds)->map(fn ($id) => (int) $id));
+        if ($dropped->isNotEmpty()) {
+            $bill->items()->whereIn('employee_id', $dropped->all())->update(['employee_id' => null]);
+        }
+
         $bill->employees()->sync(
             collect($validIds)->mapWithKeys(function (int $id) use ($bill, $existing) {
                 $row = $existing->get($id);
@@ -750,6 +811,10 @@ class BillController extends Controller
 
     private function isPaidBill(Bill $bill): bool
     {
+        if ($bill->is_free && (float) $bill->balance_due <= 0) {
+            return true;
+        }
+
         return (float) $bill->amount_paid > 0 && (float) $bill->balance_due <= 0;
     }
 

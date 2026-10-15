@@ -151,6 +151,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/bills/instant', [BillController::class, 'storeInstant']);
             Route::post('/bills/quick', [BillController::class, 'storeQuick']);
             Route::post('/bills/{bill}/close', [BillController::class, 'close']);
+            Route::put('/bills/{bill}/free', [BillController::class, 'markFree'])->middleware('feature:free_service');
             Route::post('/bills/{bill}/owe-in', [BillController::class, 'oweIn']);
             Route::post('/bills/{bill}/move-branch', [BillController::class, 'moveBranch']);
             Route::put('/bills/{bill}/employees', [BillController::class, 'syncEmployees']);
@@ -347,6 +348,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/attendance', [AttendanceController::class, 'store']);
             Route::post('/attendance/punch', [AttendanceController::class, 'punch']);
         });
+        Route::get('/commissions/day', [PayrollController::class, 'commissionBoard'])->middleware('feature:job_commissions');
         Route::middleware('feature:payroll')->group(function () {
             Route::get('/payroll', [PayrollController::class, 'index']);
             Route::get('/payroll/day-wages', [PayrollController::class, 'dayWages']);

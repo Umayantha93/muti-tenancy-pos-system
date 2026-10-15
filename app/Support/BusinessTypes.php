@@ -56,6 +56,7 @@ class BusinessTypes
             self::GARAGE => array_merge($garageFamily, [
                 'admit_repair', 'admit_service', 'admit_combined', 'admit_photos',
                 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos', 'job_commissions',
+                'free_service', 'show_bill_technicians',
                 'service_reminders', 'service_ops_report', 'station_consumables',
                 'expense_job_split', 'finance_report_export',
             ]),
@@ -87,6 +88,7 @@ class BusinessTypes
             self::MOBILE_SHOP => [...$inventoryExtras, 'serial_inventory', ...$whatsapp],
             self::GARAGE => [
                 'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos', 'job_commissions',
+                'free_service', 'show_bill_technicians',
                 'admit_combined', 'admit_photos',
                 'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
                 'expense_job_split', 'finance_report_export',
@@ -385,6 +387,8 @@ class BusinessTypes
             'bill_sms' => 'billing',
             'service_reminders' => 'billing',
             'job_commissions' => 'billing',
+            'free_service' => 'billing',
+            'show_bill_technicians' => 'billing',
             'serial_inventory' => 'parts_inventory',
             'inventory_edit' => 'parts_inventory',
             'bill_whatsapp' => 'billing',
@@ -408,7 +412,7 @@ class BusinessTypes
         return match ($key) {
             'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'admit_photos' => ['admit_vehicle'],
             'admit_combined' => ['admit_vehicle', 'admit_repair', 'admit_service'],
-            'job_photos', 'job_videos', 'bill_sms', 'job_commissions' => ['billing'],
+            'job_photos', 'job_videos', 'bill_sms', 'job_commissions', 'free_service', 'show_bill_technicians' => ['billing'],
             'service_reminders' => ['billing', 'bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
@@ -469,7 +473,7 @@ class BusinessTypes
             $set['inventory_edit'] = true;
         }
         if (! isset($set['billing'])) {
-            unset($set['bill_whatsapp'], $set['bill_sms'], $set['service_reminders'], $set['job_photos'], $set['job_videos'], $set['job_commissions']);
+            unset($set['bill_whatsapp'], $set['bill_sms'], $set['service_reminders'], $set['job_photos'], $set['job_videos'], $set['job_commissions'], $set['free_service'], $set['show_bill_technicians']);
         }
         if (! isset($set['balance_sheet'])) {
             unset($set['expense_job_split'], $set['finance_report_export']);

@@ -46,6 +46,7 @@ class BillItemController extends Controller
             'service_addon_id' => ['nullable', Rule::exists('service_addons', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'discount_type_id' => ['nullable', Rule::exists('discount_types', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
+            'employee_id' => ['nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
             'warranty_starts_on' => ['nullable', 'date'],
@@ -79,6 +80,7 @@ class BillItemController extends Controller
         }
 
         $data['section'] = $this->resolveSection($bill, $data);
+        $this->assertAssignableTechnician($bill, (string) $data['type'], $data['employee_id'] ?? null);
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id, $bill->service_vehicle_class_id);
         $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
         if (($data['type'] ?? '') === 'discount' || ! empty($data['discount_type_id'])) {
@@ -211,7 +213,17 @@ class BillItemController extends Controller
         $data = $request->validate([
             'quantity' => ['sometimes', 'numeric', 'gt:0'],
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
+            'employee_id' => ['sometimes', 'nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
+
+        if (array_key_exists('employee_id', $data) && ! array_key_exists('quantity', $data) && ! array_key_exists('unit_price', $data)) {
+            $this->assignLineTechnician($bill, $item, $data['employee_id'] ?? null);
+
+            return response()->json([
+                'item' => $item->fresh(),
+                'bill' => $bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position,commission_percent']),
+            ]);
+        }
 
         $garageService = $item->type === 'service_addon'
             && BusinessTypes::normalizeLegacy((string) $bill->tenant?->business_type) === BusinessTypes::GARAGE;
@@ -239,6 +251,7 @@ class BillItemController extends Controller
         abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
             ? 'Owe-in bills cannot be edited. Record a payment instead.'
             : 'Closed bills cannot be edited.');
+        abort_if($item->commission_amount !== null, 422, 'This line is already included in a deducted commission.');
 
         DB::transaction(function () use ($bill, $item, $calculator) {
             $lines = $item->panel_group_id
@@ -246,6 +259,7 @@ class BillItemController extends Controller
                 : collect([$item->loadMissing('part')]);
 
             foreach ($lines as $line) {
+                abort_if($line->commission_amount !== null, 422, 'This line is already included in a deducted commission.');
                 if ($line->part_id) {
                     $line->part?->returnStock((float) $line->quantity, $bill->branch_id);
                 }
@@ -267,6 +281,49 @@ class BillItemController extends Controller
     /**
      * @param  array<string, mixed>  $data
      */
+    private function assertAssignableTechnician(Bill $bill, string $type, mixed $employeeId): void
+    {
+        if ($employeeId === null || $employeeId === '') {
+            return;
+        }
+        abort_unless(in_array($type, BillItem::COMMISSION_TYPES, true), 422, 'Only labor and service lines can be assigned.');
+        $this->assertTechnicianOnCard($bill, (int) $employeeId);
+    }
+
+    private function assignLineTechnician(Bill $bill, BillItem $item, ?int $employeeId): void
+    {
+        abort_unless($item->earnsCommission(), 422, 'Only labor and service lines can be assigned.');
+        abort_if(
+            $item->commission_amount !== null || $this->technicianDeducted($bill, $item->employee_id),
+            422,
+            'This line is already included in a deducted commission.'
+        );
+        if ($employeeId) {
+            $this->assertTechnicianOnCard($bill, $employeeId);
+            abort_if($this->technicianDeducted($bill, $employeeId), 422, 'That technician\'s commission is already deducted.');
+        }
+        $item->update(['employee_id' => $employeeId]);
+    }
+
+    private function assertTechnicianOnCard(Bill $bill, int $employeeId): void
+    {
+        abort_unless(
+            $bill->employees()->where('employees.id', $employeeId)->exists(),
+            422,
+            'Assign this technician to the job card first.'
+        );
+    }
+
+    private function technicianDeducted(Bill $bill, mixed $employeeId): bool
+    {
+        if (! $employeeId) {
+            return false;
+        }
+        $assigned = $bill->employees()->where('employees.id', $employeeId)->first();
+
+        return $assigned?->pivot->commission_deducted_at !== null;
+    }
+
     private function resolveSection(Bill $bill, array $data): string
     {
         $type = (string) $data['type'];
@@ -454,6 +511,7 @@ class BillItemController extends Controller
                 'panel_name' => $data['panel_name'] ?? null,
                 'type' => $data['type'],
                 'section' => $data['section'] ?? null,
+                'employee_id' => $data['employee_id'] ?? null,
                 'description' => $data['description'] ?? $part?->name ?? BusinessTypes::billItemLabel($data['type']),
                 'included_services' => $data['included_services'] ?? null,
                 'quantity' => $layerQty,

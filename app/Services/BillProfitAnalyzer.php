@@ -57,10 +57,11 @@ class BillProfitAnalyzer
             $refundedQty = (float) ($itemRefund['qty'] ?? 0);
 
             $lineCogs = round($unitCost * max(0.0, $quantity - $restockQty), 2);
-            $lineRevenue = $isDiscount ? 0.0 : max(0.0, round((float) $item->line_total - $lineRefundRevenue, 2));
-            if ($isDiscount) {
+            $free = (bool) $bill->is_free;
+            $lineRevenue = ($free || $isDiscount) ? 0.0 : max(0.0, round((float) $item->line_total - $lineRefundRevenue, 2));
+            if ($isDiscount && ! $free) {
                 $discounts += (float) $item->line_total;
-            } else {
+            } elseif (! $free) {
                 $refundedRevenue += $lineRefundRevenue;
             }
             $cogs += $lineCogs;
@@ -77,13 +78,15 @@ class BillProfitAnalyzer
                 'refunded_amount' => $lineRefundRevenue,
                 'restocked_quantity' => round($restockQty, 2),
                 'cogs' => $lineCogs,
-                'profit' => $isDiscount
-                    ? round(-1 * (float) $item->line_total, 2)
-                    : round($lineRevenue - $lineCogs, 2),
+                'profit' => $free
+                    ? round(0 - $lineCogs, 2)
+                    : ($isDiscount
+                        ? round(-1 * (float) $item->line_total, 2)
+                        : round($lineRevenue - $lineCogs, 2)),
             ];
         }
 
-        $revenue = max(0.0, round((float) $bill->subtotal - $discounts - $refundedRevenue, 2));
+        $revenue = $bill->is_free ? 0.0 : max(0.0, round((float) $bill->subtotal - $discounts - $refundedRevenue, 2));
         $cogs = round($cogs, 2);
         $profit = round($revenue - $cogs, 2);
 
@@ -125,7 +128,7 @@ class BillProfitAnalyzer
                 $discounts += (float) $item->line_total;
                 continue;
             }
-            $revenue = (float) $item->line_total;
+            $revenue = $bill->is_free ? 0.0 : (float) $item->line_total;
             $cogs = $item->type === 'part'
                 ? (float) ($item->purchase_unit_cost ?? $item->part?->cost_price ?? 0) * (float) $item->quantity
                 : 0.0;

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Bill;
+use App\Models\BillItem;
 use App\Models\Employee;
 use App\Models\EmployeePayment;
 use App\Models\Payroll;
@@ -138,5 +140,76 @@ class PayrollController extends Controller
         ]);
 
         return $this->moneyJson($payment->load('employee:id,name'), 201);
+    }
+
+    public function commissionBoard(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->canAccessFeature('job_commissions'), 403, 'Job commission is not enabled for this account.');
+
+        $date = $request->validate([
+            'date' => ['nullable', 'date'],
+        ])['date'] ?? now()->toDateString();
+
+        $bills = BranchQuery::constrain(Bill::query())
+            ->whereDate('admission_date', $date)
+            ->with([
+                'items.employee:id,name,commission_percent',
+                'employees:id,name,commission_percent',
+            ])
+            ->orderBy('bill_number')
+            ->get();
+
+        $people = [];
+        foreach ($bills as $bill) {
+            $lines = $bill->items->filter(
+                fn (BillItem $item) => $item->employee_id && $item->earnsCommission()
+            );
+            foreach ($lines->groupBy(fn (BillItem $item) => (int) $item->employee_id) as $employeeId => $employeeLines) {
+                $employee = $employeeLines->first()->employee;
+                if (! $employee) {
+                    continue;
+                }
+                $assigned = $bill->employees->firstWhere('id', (int) $employeeId);
+                $deducted = (bool) $assigned?->pivot?->commission_deducted_at;
+                $percent = (float) $employee->commission_percent;
+                $amount = round($employeeLines->sum(function (BillItem $item) use ($percent) {
+                    if ($item->commission_amount !== null) {
+                        return (float) $item->commission_amount;
+                    }
+
+                    return round((float) $item->line_total * $percent / 100, 2);
+                }), 2);
+
+                $people[$employee->id] ??= [
+                    'id' => $employee->id,
+                    'name' => $employee->name,
+                    'commission_percent' => $employee->commission_percent,
+                    'might_receive' => 0.0,
+                    'deducted' => 0.0,
+                    'pending' => 0.0,
+                    'jobs' => [],
+                ];
+                $people[$employee->id]['might_receive'] = round($people[$employee->id]['might_receive'] + $amount, 2);
+                $people[$employee->id][$deducted ? 'deducted' : 'pending'] = round(
+                    $people[$employee->id][$deducted ? 'deducted' : 'pending'] + $amount,
+                    2
+                );
+                $people[$employee->id]['jobs'][] = [
+                    'bill_id' => $bill->id,
+                    'bill_number' => $bill->bill_number,
+                    'amount' => $amount,
+                    'deducted' => $deducted,
+                    'lines' => $employeeLines->pluck('description')->values()->all(),
+                ];
+            }
+        }
+
+        $employees = collect($people)->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)->values();
+
+        return $this->moneyJson([
+            'date' => $date,
+            'might_total' => round((float) $employees->sum('might_receive'), 2),
+            'employees' => $employees->all(),
+        ]);
     }
 }
