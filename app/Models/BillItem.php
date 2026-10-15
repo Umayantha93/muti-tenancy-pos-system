@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'panel_name',
     'type',
     'section',
+    'employee_id',
     'description',
     'included_services',
     'quantity',
@@ -25,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'purchase_unit_cost',
     'purchase_expense_id',
     'line_total',
+    'commission_amount',
     'warranty_months',
     'warranty_starts_on',
     'warranty_until',
@@ -32,6 +34,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class BillItem extends Model
 {
     use BelongsToTenant;
+
+    protected $hidden = ['employee'];
 
     protected function casts(): array
     {
@@ -42,15 +46,42 @@ class BillItem extends Model
             'discount_percent' => 'decimal:2',
             'purchase_unit_cost' => 'decimal:2',
             'line_total' => 'decimal:2',
+            'commission_amount' => 'decimal:2',
             'warranty_months' => 'integer',
             'warranty_starts_on' => 'date:Y-m-d',
             'warranty_until' => 'date:Y-m-d',
         ];
     }
 
+    public const COMMISSION_TYPES = ['labor', 'service_addon', 'service', 'charge'];
+
     public function bill(): BelongsTo
     {
         return $this->belongsTo(Bill::class);
+    }
+
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
+    }
+
+    public function earnsCommission(): bool
+    {
+        return in_array($this->type, self::COMMISSION_TYPES, true);
+    }
+
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        $user = auth()->user();
+        if ($user && $user->canAccessFeature('show_bill_technicians') && $this->earnsCommission()) {
+            $name = $this->relationLoaded('employee') ? $this->employee?->name : null;
+            if (is_string($name) && $name !== '') {
+                $array['technician_name'] = $name;
+            }
+        }
+
+        return $array;
     }
 
     public function part(): BelongsTo
