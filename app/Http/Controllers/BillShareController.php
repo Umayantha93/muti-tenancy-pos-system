@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bill;
+use App\Models\BillItem;
 use App\Models\BillPhoto;
 use App\Models\BillVideo;
 use App\Models\Branch;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -21,7 +23,7 @@ class BillShareController extends Controller
             'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
             'items' => fn ($query) => $query->withoutGlobalScopes()->select([
                 'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_total',
-                'panel_group_id', 'panel_name', 'warranty_months', 'warranty_starts_on', 'warranty_until',
+                'panel_group_id', 'panel_name', 'employee_id', 'warranty_months', 'warranty_starts_on', 'warranty_until',
             ]),
             'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
             'photos' => fn ($query) => $query->withoutGlobalScopes()->where(function ($photos) {
@@ -36,11 +38,17 @@ class BillShareController extends Controller
         $isPaint = (string) $bill->tenant?->business_type === BusinessTypes::PAINT;
         $isGarage = (string) $bill->tenant?->business_type === BusinessTypes::GARAGE;
         $repairNote = $isGarage && $bill->isRepairNote();
+        $showTechnicians = $this->tenantFeatureEnabled((int) $bill->tenant_id, 'show_bill_technicians');
+        if ($showTechnicians) {
+            $bill->load(['items.employee' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name'])]);
+        }
 
         return response()->json([
             'bill_number' => $bill->bill_number,
             'admission_date' => $bill->admission_date?->format('Y-m-d'),
             'status' => $bill->status,
+            'is_free' => (bool) $bill->is_free,
+            'free_reason' => $bill->is_free ? $bill->free_reason : null,
             'hide_amounts' => $repairNote,
             'subtotal' => $repairNote ? null : $bill->subtotal,
             'total_deductions' => $repairNote ? null : $bill->total_deductions,
@@ -63,8 +71,8 @@ class BillShareController extends Controller
             'customer' => $bill->customer,
             'vehicle' => $bill->vehicle,
             'items' => $isPaint
-                ? $this->paintCustomerItems($bill->items, $repairNote)
-                : $bill->items->map(fn ($item) => $this->shareItem($item, $item->type === 'labor', $repairNote)),
+                ? $this->paintCustomerItems($bill->items, $repairNote, $showTechnicians)
+                : $bill->items->map(fn ($item) => $this->shareItem($item, $item->type === 'labor', $repairNote, $showTechnicians)),
             'payments' => $repairNote ? [] : $bill->payments,
             'photos' => $bill->photos->map(fn (BillPhoto $photo) => [
                 'id' => $photo->id,
@@ -126,7 +134,7 @@ class BillShareController extends Controller
      * @param  Collection<int, \App\Models\BillItem>  $items
      * @return list<array<string, mixed>>
      */
-    private function paintCustomerItems(Collection $items, bool $hideAmounts = false): array
+    private function paintCustomerItems(Collection $items, bool $hideAmounts = false, bool $showTechnicians = false): array
     {
         $seen = [];
         $rows = [];
@@ -141,7 +149,7 @@ class BillShareController extends Controller
                 $members = $items->where('panel_group_id', $groupId);
                 $total = round((float) $members->sum(fn ($line) => (float) $line->line_total), 2);
                 $first = $members->first();
-                $rows[] = [
+                $row = [
                     'id' => $first->id,
                     'bill_id' => $first->bill_id,
                     'type' => 'labor',
@@ -153,11 +161,23 @@ class BillShareController extends Controller
                     'hide_hours' => true,
                     'hide_amounts' => $hideAmounts,
                 ];
+                $names = $showTechnicians
+                    ? $members
+                        ->filter(fn ($line) => in_array($line->type, BillItem::COMMISSION_TYPES, true))
+                        ->map(fn ($line) => $line->employee?->name)
+                        ->filter()
+                        ->unique()
+                        ->values()
+                    : collect();
+                if ($names->count() === 1) {
+                    $row['technician_name'] = $names->first();
+                }
+                $rows[] = $row;
 
                 continue;
             }
 
-            $rows[] = $this->shareItem($item, $item->type === 'labor', $hideAmounts);
+            $rows[] = $this->shareItem($item, $item->type === 'labor', $hideAmounts, $showTechnicians);
         }
 
         return $rows;
@@ -166,11 +186,10 @@ class BillShareController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function shareItem($item, bool $hideHours, bool $hideAmounts = false): array
+    private function shareItem($item, bool $hideHours, bool $hideAmounts = false, bool $showTechnicians = false): array
     {
         $hideRate = $hideHours || $hideAmounts;
-
-        return [
+        $row = [
             'id' => $item->id,
             'bill_id' => $item->bill_id,
             'type' => $item->type,
@@ -189,5 +208,20 @@ class BillShareController extends Controller
                 ? \Illuminate\Support\Carbon::parse($item->warranty_until)->toDateString()
                 : null,
         ];
+        if ($showTechnicians && in_array($item->type, BillItem::COMMISSION_TYPES, true) && $item->employee?->name) {
+            $row['technician_name'] = $item->employee->name;
+        }
+
+        return $row;
+    }
+
+    private function tenantFeatureEnabled(int $tenantId, string $key): bool
+    {
+        return DB::table('tenant_features')
+            ->join('features', 'features.id', '=', 'tenant_features.feature_id')
+            ->where('tenant_features.tenant_id', $tenantId)
+            ->where('tenant_features.is_enabled', true)
+            ->where('features.key', $key)
+            ->exists();
     }
 }
