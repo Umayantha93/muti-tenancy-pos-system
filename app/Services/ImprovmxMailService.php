@@ -2,17 +2,16 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 
 class ImprovmxMailService
 {
     public function configured(): bool
     {
-        return filled(config('services.improvmx.api_key'))
-            && filled(config('services.improvmx.domain'))
-            && filled(config('services.improvmx.from'));
+        return config('mail.default') !== 'log'
+            && filled(config('mail.from.address'));
     }
 
     /**
@@ -21,29 +20,14 @@ class ImprovmxMailService
     public function send(array $payload): void
     {
         if (! $this->configured()) {
-            throw new RuntimeException('Improvmx mail is not configured.');
+            throw new RuntimeException('Mail is not configured.');
         }
 
-        $domain = config('services.improvmx.domain');
-        $response = Http::withBasicAuth('api', (string) config('services.improvmx.api_key'))
-            ->acceptJson()
-            ->timeout(20)
-            ->post("https://api.improvmx.com/v4/domains/{$domain}/emails/outbound", [
-                'from' => config('services.improvmx.from'),
-                'to' => $payload['to'],
-                'subject' => $payload['subject'],
-                'text' => $payload['text'],
-                'html' => $payload['html'] ?? nl2br(e($payload['text'])),
-            ]);
+        $html = $payload['html'] ?? nl2br(e($payload['text']));
 
-        if (! $response->successful()) {
-            $message = data_get($response->json(), 'error')
-                ?? data_get($response->json(), 'message')
-                ?? $response->body()
-                ?: 'Email could not be sent.';
-
-            throw new RuntimeException(is_string($message) ? $message : 'Email could not be sent.');
-        }
+        Mail::html($html, function ($message) use ($payload) {
+            $message->to($payload['to'])->subject($payload['subject']);
+        });
     }
 
     public function sendTenantWelcome(
