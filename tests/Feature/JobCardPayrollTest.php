@@ -519,6 +519,67 @@ class JobCardPayrollTest extends TestCase
         $this->assertArrayNotHasKey('technician_name', $sharedHidden);
     }
 
+    public function test_line_discount_lowers_the_total_and_flags_a_sale_under_cost(): void
+    {
+        $owner = $this->userWith([
+            'admit_vehicle', 'admit_repair', 'billing', 'parts_inventory', 'line_discounts', 'job_commissions', 'employees_management',
+        ]);
+        Sanctum::actingAs($owner);
+        $part = Part::create([
+            'name' => 'Discount pad '.fake()->unique()->numerify('###'),
+            'brand' => 'Test',
+            'type' => 'brake',
+            'price' => 8000,
+            'cost_price' => 5000,
+            'stock_qty' => 4,
+        ]);
+        $mechanic = Employee::create([
+            'name' => 'Discount Mechanic '.fake()->unique()->numerify('###'),
+            'nic' => fake()->unique()->numerify('##########V'),
+            'commission_percent' => 10,
+            'pay_type' => 'monthly',
+        ]);
+        $billId = $this->postJson('/api/bills', [
+            'number_plate' => 'DSC-'.fake()->unique()->numerify('####'),
+            'admission_date' => now()->toDateString(),
+            'job_kind' => 'repair',
+            'employee_ids' => [$mechanic->id],
+        ])->assertCreated()->json('id');
+        $partItem = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'part',
+            'part_id' => $part->id,
+            'quantity' => 1,
+        ])->assertCreated()->json('item');
+        $laborId = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor',
+            'description' => 'Brake labor',
+            'quantity' => 1,
+            'unit_price' => 4000,
+            'employee_id' => $mechanic->id,
+        ])->assertCreated()->json('item.id');
+
+        $blocked = $this->staffWith($owner, ['billing']);
+        Sanctum::actingAs($blocked);
+        $this->putJson("/api/bills/{$billId}/items/{$partItem['id']}", ['line_discount' => 100])->assertForbidden();
+
+        Sanctum::actingAs($owner);
+        $under = $this->putJson("/api/bills/{$billId}/items/{$partItem['id']}", ['line_discount' => 4000])->assertOk()->json('item');
+        $this->assertEquals(4000, $under['line_total']);
+        $this->assertTrue($under['below_cost']);
+
+        $safe = $this->putJson("/api/bills/{$billId}/items/{$partItem['id']}", ['line_discount' => 2000])->assertOk()->json('item');
+        $this->assertEquals(6000, $safe['line_total']);
+        $this->assertFalse($safe['below_cost']);
+
+        $this->putJson("/api/bills/{$billId}/items/{$partItem['id']}", ['line_discount' => 9000])->assertStatus(422);
+
+        $labor = $this->putJson("/api/bills/{$billId}/items/{$laborId}", ['line_discount' => 1000])->assertOk()->json('item');
+        $this->assertEquals(3000, $labor['line_total']);
+        $this->assertFalse($labor['below_cost']);
+        $pay = $this->postJson("/api/bills/{$billId}/commissions/{$mechanic->id}")->assertOk()->json();
+        $this->assertEquals(300, collect($pay['employees'])->firstWhere('id', $mechanic->id)['pivot']['commission_amount']);
+    }
+
     /**
      * @param  list<string>  $keys
      */

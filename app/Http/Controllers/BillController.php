@@ -28,7 +28,8 @@ class BillController extends Controller
     {
         $data = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
-            'status' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', Rule::in(['open', 'partially_paid', 'paid', 'closed', 'owe_in', 'cheque'])],
+            'closed_kind' => ['nullable', Rule::in(['free', 'refunded'])],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PARTS_SALE])],
@@ -39,7 +40,18 @@ class BillController extends Controller
 
         $bills = Bill::query()
             ->with(['customer', 'vehicle', 'items', 'payments', 'employees:id,name,position,commission_percent', 'branch:id,name,code,address,phone'])
-            ->when(! empty($data['status']), fn ($query) => $query->where('status', $data['status']))
+            ->when(! empty($data['status']), function ($query) use ($data) {
+                if ($data['status'] === 'cheque') {
+                    $query->whereHas('payments', fn ($payments) => $payments->pendingCheques());
+
+                    return;
+                }
+
+                $query->where('status', $data['status'])
+                    ->whereDoesntHave('payments', fn ($payments) => $payments->pendingCheques());
+            })
+            ->when(($data['status'] ?? null) === 'closed' && ($data['closed_kind'] ?? null) === 'free', fn ($query) => $query->where('is_free', true))
+            ->when(($data['status'] ?? null) === 'closed' && ($data['closed_kind'] ?? null) === 'refunded', fn ($query) => $query->where('amount_refunded', '>', 0))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
             ->when($request->boolean('assigned_to_me'), function ($query) use ($request) {
                 $employeeId = $request->user()->employee_id;

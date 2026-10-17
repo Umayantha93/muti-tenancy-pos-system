@@ -196,6 +196,112 @@ class GarageApiTest extends TestCase
         $this->assertNull(Part::find($unused->id));
     }
 
+    public function test_bill_list_can_be_shortlisted_by_status(): void
+    {
+        $cashier = $this->tenantUser('staff');
+        Sanctum::actingAs($cashier);
+        $plate = fake()->unique()->numerify('ST-####');
+        $openId = $this->postJson('/api/bills', [
+            'customer_name' => 'Open Customer',
+            'customer_phone' => '0771111111',
+            'number_plate' => $plate,
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+        $part = Part::create([
+            'name' => 'Status pad '.fake()->unique()->numerify('###'),
+            'brand' => 'Test',
+            'type' => 'brake',
+            'price' => 5000,
+            'cost_price' => 3000,
+            'stock_qty' => 4,
+        ]);
+        $partialId = $this->postJson('/api/bills', [
+            'customer_name' => 'Partial Customer',
+            'customer_phone' => '0772222222',
+            'number_plate' => fake()->unique()->numerify('ST-####'),
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+        $this->postJson("/api/bills/{$partialId}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => 1,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$partialId}/payments", [
+            'amount' => 1000, 'method' => 'cash',
+        ])->assertCreated();
+        $chequeId = $this->postJson('/api/bills', [
+            'customer_name' => 'Cheque Customer',
+            'customer_phone' => '0773333333',
+            'number_plate' => fake()->unique()->numerify('ST-####'),
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+        $this->postJson("/api/bills/{$chequeId}/payments", [
+            'amount' => 500,
+            'method' => 'cheque',
+            'cheque_number' => fake()->unique()->numerify('CH####'),
+            'cheque_date' => now()->toDateString(),
+        ])->assertCreated();
+        $laterOpenId = $this->postJson('/api/bills', [
+            'customer_name' => 'Later Open',
+            'customer_phone' => '0775555555',
+            'number_plate' => fake()->unique()->numerify('ST-####'),
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+        $tomorrowId = $this->postJson('/api/bills', [
+            'customer_name' => 'Tomorrow Cheque',
+            'customer_phone' => '0776666666',
+            'number_plate' => fake()->unique()->numerify('ST-####'),
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+        $this->postJson("/api/bills/{$tomorrowId}/payments", [
+            'amount' => 500,
+            'method' => 'cheque',
+            'cheque_number' => fake()->unique()->numerify('CH####'),
+            'cheque_date' => now()->addDay()->toDateString(),
+        ])->assertCreated();
+
+        $queue = collect($this->getJson('/api/bills?per_page=50')->assertOk()->json('data'));
+        $ids = $queue->pluck('id');
+        $this->assertSame($chequeId, $ids->first());
+        $this->assertTrue($queue->first()['cheque_due_today']);
+        $this->assertFalse($queue->firstWhere('id', $tomorrowId)['cheque_due_today']);
+        $this->assertTrue($ids->search($chequeId) < $ids->search($laterOpenId));
+        $this->assertTrue($ids->search($chequeId) < $ids->search($tomorrowId));
+
+        $open = collect($this->getJson('/api/bills?status=open&per_page=50')->assertOk()->json('data'))->pluck('id');
+        $partial = collect($this->getJson('/api/bills?status=partially_paid&per_page=50')->assertOk()->json('data'))->pluck('id');
+        $cheques = collect($this->getJson('/api/bills?status=cheque&per_page=50')->assertOk()->json('data'))->pluck('id');
+
+        $this->assertTrue($open->contains($openId));
+        $this->assertFalse($open->contains($partialId));
+        $this->assertFalse($open->contains($chequeId));
+        $this->assertTrue($partial->contains($partialId));
+        $this->assertFalse($partial->contains($openId));
+        $this->assertTrue($cheques->contains($chequeId));
+        $this->getJson('/api/bills?status=draft')->assertStatus(422);
+
+        Bill::query()->whereKey($openId)->update(['status' => 'closed', 'is_free' => true, 'closed_at' => now()]);
+        Bill::query()->whereKey($partialId)->update(['status' => 'closed', 'amount_paid' => 1000, 'amount_refunded' => 200, 'closed_at' => now()]);
+        $plainId = $this->postJson('/api/bills', [
+            'customer_name' => 'Closed Customer',
+            'customer_phone' => '0774444444',
+            'number_plate' => fake()->unique()->numerify('ST-####'),
+            'job_kind' => 'repair',
+        ])->assertCreated()->json('id');
+        Bill::query()->whereKey($plainId)->update(['status' => 'closed', 'closed_at' => now()]);
+
+        $closed = collect($this->getJson('/api/bills?status=closed&per_page=50')->assertOk()->json('data'))->pluck('id');
+        $free = collect($this->getJson('/api/bills?status=closed&closed_kind=free&per_page=50')->assertOk()->json('data'))->pluck('id');
+        $refunded = collect($this->getJson('/api/bills?status=closed&closed_kind=refunded&per_page=50')->assertOk()->json('data'))->pluck('id');
+
+        $this->assertTrue($closed->contains($openId));
+        $this->assertTrue($closed->contains($partialId));
+        $this->assertTrue($closed->contains($plainId));
+        $this->assertTrue($free->contains($openId));
+        $this->assertFalse($free->contains($plainId));
+        $this->assertTrue($refunded->contains($partialId));
+        $this->assertFalse($refunded->contains($plainId));
+        $this->assertFalse($refunded->contains($openId));
+    }
+
     public function test_fingerprint_ingestion_and_payroll_feed_balance_sheet(): void
     {
         $admin = $this->tenantUser('business_owner');
