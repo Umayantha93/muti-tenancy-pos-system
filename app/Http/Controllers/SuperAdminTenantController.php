@@ -602,6 +602,15 @@ class SuperAdminTenantController extends Controller
         ]);
         $this->audit($request, $isSecondary ? 'tenant.secondary_user_created' : 'tenant.user_created', $tenant, ['user_id' => $user->id]);
 
+        $emailed = app(ImprovmxMailService::class)->sendTenantWelcomeSafely(
+            $user->email,
+            $user->name,
+            $tenant->business_name,
+            $user->email,
+            $data['password'],
+        );
+        $user->setAttribute('welcome_email_sent', $emailed);
+
         return response()->json($user->makeVisible(['is_secondary_view']), 201);
     }
 

@@ -48,6 +48,7 @@ class BillItemController extends Controller
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'employee_id' => ['nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'line_discount' => ['nullable', 'numeric', 'min:0'],
             'warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
             'warranty_starts_on' => ['nullable', 'date'],
             'warranty_until' => ['nullable', 'date'],
@@ -213,11 +214,27 @@ class BillItemController extends Controller
         $data = $request->validate([
             'quantity' => ['sometimes', 'numeric', 'gt:0'],
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
+            'line_discount' => ['sometimes', 'numeric', 'min:0'],
             'employee_id' => ['sometimes', 'nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
-        if (array_key_exists('employee_id', $data) && ! array_key_exists('quantity', $data) && ! array_key_exists('unit_price', $data)) {
+        if (array_key_exists('employee_id', $data) && ! array_key_exists('quantity', $data) && ! array_key_exists('unit_price', $data) && ! array_key_exists('line_discount', $data)) {
             $this->assignLineTechnician($bill, $item, $data['employee_id'] ?? null);
+
+            return response()->json([
+                'item' => $item->fresh(),
+                'bill' => $bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position,commission_percent']),
+            ]);
+        }
+
+        if (array_key_exists('line_discount', $data) && ! array_key_exists('quantity', $data) && ! array_key_exists('unit_price', $data)) {
+            abort_unless($request->user()->canAccessFeature('line_discounts'), 403, 'Line discounts are not enabled for this account.');
+            abort_if(in_array($item->type, ['discount', 'customer_part', 'advance'], true), 422, 'This line cannot take a discount.');
+
+            DB::transaction(function () use ($data, $bill, $item, $calculator) {
+                $item->update($this->pricedLine($item, (float) $item->quantity, (float) $item->unit_price, (float) $data['line_discount']));
+                $calculator->recalculate($bill);
+            });
 
             return response()->json([
                 'item' => $item->fresh(),
@@ -234,11 +251,8 @@ class BillItemController extends Controller
         DB::transaction(function () use ($data, $bill, $item, $calculator) {
             $quantity = (float) ($data['quantity'] ?? $item->quantity);
             $unitPrice = (float) ($data['unit_price'] ?? $item->unit_price);
-            $item->update([
-                'quantity' => $quantity,
-                'unit_price' => $unitPrice,
-                'line_total' => round($unitPrice * $quantity, 2),
-            ]);
+            $discount = array_key_exists('line_discount', $data) ? (float) $data['line_discount'] : null;
+            $item->update($this->pricedLine($item, $quantity, $unitPrice, $discount));
             $calculator->recalculate($bill);
         });
 
@@ -392,6 +406,54 @@ class BillItemController extends Controller
     /**
      * @param  array<string, mixed>  $data
      */
+    private function lineDiscountAmount(array $data, Request $request, float $gross): float
+    {
+        if (! isset($data['line_discount']) || $data['line_discount'] === null || $data['line_discount'] === '') {
+            return 0.0;
+        }
+        if (in_array($data['type'] ?? '', ['discount', 'customer_part', 'advance'], true)) {
+            abort(422, 'This line cannot take a discount.');
+        }
+        abort_unless($request->user()?->canAccessFeature('line_discounts'), 403, 'Line discounts are not enabled for this account.');
+
+        return $this->cappedDiscount($gross, (float) $data['line_discount']);
+    }
+
+    /**
+     * @return array{quantity: float, unit_price: float, line_discount: float, line_total: float}
+     */
+    private function pricedLine(BillItem $item, float $quantity, float $unitPrice, ?float $lineDiscount = null): array
+    {
+        $gross = round($unitPrice * $quantity, 2);
+        $percent = (float) ($item->discount_percent ?? 0);
+        if ($percent > 0) {
+            $gross = round($gross * (1 - ($percent / 100)), 2);
+        }
+        $discount = $this->cappedDiscount($gross, $lineDiscount ?? (float) $item->line_discount);
+
+        return [
+            'quantity' => $quantity,
+            'unit_price' => $unitPrice,
+            'line_discount' => $discount,
+            'line_total' => round($gross - $discount, 2),
+        ];
+    }
+
+    private function cappedDiscount(float $gross, float $discount): float
+    {
+        if ($discount < 0) {
+            abort(422, 'Discount cannot be negative.');
+        }
+        if ($discount - $gross > 0.009) {
+            abort(422, 'Discount cannot be more than the line.');
+        }
+
+        return round($discount, 2);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
     private function createLine(Bill $bill, array $data, Request $request, ?object $stock = null): BillItem
     {
         if ($data['type'] === 'customer_part') {
@@ -503,6 +565,8 @@ class BillItemController extends Controller
             if ($discountPercent !== null && $discountPercent > 0) {
                 $lineTotal = round($lineTotal * (1 - ($discountPercent / 100)), 2);
             }
+            $lineDiscount = $this->lineDiscountAmount($data, $request, $lineTotal);
+            $lineTotal = round($lineTotal - $lineDiscount, 2);
             $created = $bill->items()->create([
                 'part_id' => $part?->id,
                 'service_addon_id' => $data['service_addon_id'] ?? null,
@@ -517,6 +581,7 @@ class BillItemController extends Controller
                 'quantity' => $layerQty,
                 'unit_price' => $unitPrice,
                 'discount_percent' => $discountPercent,
+                'line_discount' => $lineDiscount,
                 'purchase_unit_cost' => $purchaseUnitCost,
                 'purchase_expense_id' => $expense?->id,
                 'line_total' => $lineTotal,
