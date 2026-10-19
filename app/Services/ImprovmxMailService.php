@@ -27,6 +27,7 @@ class ImprovmxMailService
 
         Mail::html($html, function ($message) use ($payload) {
             $message->to($payload['to'])->subject($payload['subject']);
+            $message->getSymfonyMessage()->text($payload['text']);
         });
     }
 
@@ -42,26 +43,24 @@ class ImprovmxMailService
         $text = implode("\n", [
             "Hi {$ownerName},",
             '',
-            "Your business account for {$businessName} has been created.",
+            "Your business account for {$businessName} has been created. Use the details below to sign in, then change the temporary password.",
             '',
-            "Login link: {$loginUrl}",
             "Email: {$loginEmail}",
             "Temporary password: {$plainPassword}",
+            "Sign in: {$loginUrl}",
             '',
-            'Please sign in and change your password after your first login.',
+            'This password is temporary. Change it after your first sign-in.',
             '',
-            '— '.config('app.name', 'Business Operations'),
+            '— IUBits',
         ]);
-
-        $html = '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#20221f">'
-            .'<p>Hi '.e($ownerName).',</p>'
-            .'<p>Your business account for <strong>'.e($businessName).'</strong> has been created.</p>'
-            .'<p><strong>Login link:</strong> <a href="'.e($loginUrl).'">'.e($loginUrl).'</a><br>'
-            .'<strong>Email:</strong> '.e($loginEmail).'<br>'
-            .'<strong>Temporary password:</strong> '.e($plainPassword).'</p>'
-            .'<p>Please sign in and change your password after your first login.</p>'
-            .'<p>— '.e((string) config('app.name', 'Business Operations')).'</p>'
-            .'</div>';
+        $html = view('mail.tenant-welcome', [
+            'subjectLine' => $subject,
+            'ownerName' => $ownerName,
+            'businessName' => $businessName,
+            'loginEmail' => $loginEmail,
+            'plainPassword' => $plainPassword,
+            'loginUrl' => $loginUrl,
+        ])->render();
 
         $this->send([
             'to' => $toEmail,
@@ -69,30 +68,6 @@ class ImprovmxMailService
             'text' => $text,
             'html' => $html,
         ]);
-    }
-
-    public function queueTenantWelcome(
-        string $toEmail,
-        string $ownerName,
-        string $businessName,
-        string $loginEmail,
-        string $plainPassword,
-    ): bool {
-        if (! $this->configured()) {
-            return false;
-        }
-
-        dispatch(function () use ($toEmail, $ownerName, $businessName, $loginEmail, $plainPassword) {
-            app(self::class)->sendTenantWelcomeSafely(
-                $toEmail,
-                $ownerName,
-                $businessName,
-                $loginEmail,
-                $plainPassword,
-            );
-        })->afterResponse();
-
-        return true;
     }
 
     public function sendTenantWelcomeSafely(
