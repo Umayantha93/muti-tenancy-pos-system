@@ -61,7 +61,7 @@ class TenantStaffController extends Controller
         }
 
         $tenant = $request->user()->tenant;
-        $emailed = app(ImprovmxMailService::class)->queueTenantWelcome(
+        $emailed = app(ImprovmxMailService::class)->sendTenantWelcomeSafely(
             $user->email,
             $user->name,
             $tenant->business_name,
