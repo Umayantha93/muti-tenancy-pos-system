@@ -74,6 +74,7 @@ class Bill extends Model
     protected $appends = [
         'has_pending_cheque',
         'pending_cheque_date',
+        'cheque_due_today',
         'refund_status',
     ];
 
@@ -256,6 +257,25 @@ class Bill extends Model
         return (bool) $this->has_pending_cheque;
     }
 
+    public function chequeIsDueToday(): bool
+    {
+        $today = now()->toDateString();
+        $due = function (BillPayment $payment) use ($today): bool {
+            return $payment->isPendingCheque() && $payment->cheque_date?->toDateString() === $today;
+        };
+
+        if ($this->relationLoaded('payments')) {
+            return $this->payments->contains($due);
+        }
+
+        return $this->payments()->pendingCheques()->whereDate('cheque_date', $today)->exists();
+    }
+
+    protected function chequeDueToday(): Attribute
+    {
+        return Attribute::get(fn () => $this->chequeIsDueToday());
+    }
+
     public function isRepairNote(): bool
     {
         return (bool) $this->hide_amounts && (float) $this->amount_paid <= 0;
@@ -300,20 +320,30 @@ class Bill extends Model
      */
     public function scopeQueued($query)
     {
+        $today = now()->toDateString();
         $soon = now()->startOfDay()->addDays(3)->toDateString();
+        $bills = $query->getModel()->getTable();
+        $payments = (new BillPayment)->getTable();
 
         return $query
             ->orderByRaw("
                 CASE
-                    WHEN status = 'owe_in' AND owe_in_due_date IS NOT NULL AND owe_in_due_date <= ? THEN 0
-                    WHEN status = 'open' THEN 1
-                    WHEN status = 'partially_paid' THEN 2
-                    WHEN status = 'owe_in' THEN 3
-                    WHEN status = 'paid' THEN 4
-                    WHEN status = 'closed' THEN 5
-                    ELSE 6
+                    WHEN EXISTS (
+                        SELECT 1 FROM {$payments}
+                        WHERE {$payments}.bill_id = {$bills}.id
+                          AND {$payments}.method = 'cheque'
+                          AND {$payments}.cheque_status = ?
+                          AND {$payments}.cheque_date = ?
+                    ) THEN 0
+                    WHEN status = 'owe_in' AND owe_in_due_date IS NOT NULL AND owe_in_due_date <= ? THEN 1
+                    WHEN status = 'open' THEN 2
+                    WHEN status = 'partially_paid' THEN 3
+                    WHEN status = 'owe_in' THEN 4
+                    WHEN status = 'paid' THEN 5
+                    WHEN status = 'closed' THEN 6
+                    ELSE 7
                 END
-            ", [$soon])
+            ", [BillPayment::CHEQUE_PENDING, $today, $soon])
             ->orderByRaw("CASE WHEN status = 'owe_in' THEN owe_in_due_date ELSE '9999-12-31' END")
             ->orderByDesc('admission_date')
             ->orderByDesc('id');

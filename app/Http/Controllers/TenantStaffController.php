@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Feature;
 use App\Models\User;
+use App\Services\ImprovmxMailService;
 use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -58,6 +59,16 @@ class TenantStaffController extends Controller
                 $feature->id => ['can_access' => true],
             ]));
         }
+
+        $tenant = $request->user()->tenant;
+        $emailed = app(ImprovmxMailService::class)->sendTenantWelcomeSafely(
+            $user->email,
+            $user->name,
+            $tenant->business_name,
+            $user->email,
+            $data['password'],
+        );
+        $user->setAttribute('welcome_email_sent', $emailed);
 
         return response()->json($user->load(['permissions', 'employee']), 201);
     }

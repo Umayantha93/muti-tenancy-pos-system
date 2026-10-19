@@ -11,12 +11,14 @@ abstract class TestCase extends BaseTestCase
     public static function setUpBeforeClass(): void
     {
         self::forceTestDatabase();
+        self::forceTestMailer();
         parent::setUpBeforeClass();
     }
 
     public function createApplication()
     {
         self::forceTestDatabase();
+        self::forceTestMailer();
 
         return parent::createApplication();
     }
@@ -42,5 +44,12 @@ abstract class TestCase extends BaseTestCase
         putenv('DB_DATABASE=pos_db_test');
         $_ENV['DB_DATABASE'] = 'pos_db_test';
         $_SERVER['DB_DATABASE'] = 'pos_db_test';
+    }
+
+    private static function forceTestMailer(): void
+    {
+        putenv('MAIL_MAILER=array');
+        $_ENV['MAIL_MAILER'] = 'array';
+        $_SERVER['MAIL_MAILER'] = 'array';
     }
 }

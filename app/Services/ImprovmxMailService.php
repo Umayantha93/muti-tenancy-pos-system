@@ -2,17 +2,16 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 
 class ImprovmxMailService
 {
     public function configured(): bool
     {
-        return filled(config('services.improvmx.api_key'))
-            && filled(config('services.improvmx.domain'))
-            && filled(config('services.improvmx.from'));
+        return config('mail.default') !== 'log'
+            && filled(config('mail.from.address'));
     }
 
     /**
@@ -21,29 +20,15 @@ class ImprovmxMailService
     public function send(array $payload): void
     {
         if (! $this->configured()) {
-            throw new RuntimeException('Improvmx mail is not configured.');
+            throw new RuntimeException('Mail is not configured.');
         }
 
-        $domain = config('services.improvmx.domain');
-        $response = Http::withBasicAuth('api', (string) config('services.improvmx.api_key'))
-            ->acceptJson()
-            ->timeout(20)
-            ->post("https://api.improvmx.com/v4/domains/{$domain}/emails/outbound", [
-                'from' => config('services.improvmx.from'),
-                'to' => $payload['to'],
-                'subject' => $payload['subject'],
-                'text' => $payload['text'],
-                'html' => $payload['html'] ?? nl2br(e($payload['text'])),
-            ]);
+        $html = $payload['html'] ?? nl2br(e($payload['text']));
 
-        if (! $response->successful()) {
-            $message = data_get($response->json(), 'error')
-                ?? data_get($response->json(), 'message')
-                ?? $response->body()
-                ?: 'Email could not be sent.';
-
-            throw new RuntimeException(is_string($message) ? $message : 'Email could not be sent.');
-        }
+        Mail::html($html, function ($message) use ($payload) {
+            $message->to($payload['to'])->subject($payload['subject']);
+            $message->getSymfonyMessage()->text($payload['text']);
+        });
     }
 
     public function sendTenantWelcome(
@@ -58,26 +43,24 @@ class ImprovmxMailService
         $text = implode("\n", [
             "Hi {$ownerName},",
             '',
-            "Your business account for {$businessName} has been created.",
+            "Your business account for {$businessName} has been created. Use the details below to sign in, then change the temporary password.",
             '',
-            "Login link: {$loginUrl}",
             "Email: {$loginEmail}",
             "Temporary password: {$plainPassword}",
+            "Sign in: {$loginUrl}",
             '',
-            'Please sign in and change your password after your first login.',
+            'This password is temporary. Change it after your first sign-in.',
             '',
-            '— '.config('app.name', 'Business Operations'),
+            '— IUBits',
         ]);
-
-        $html = '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#20221f">'
-            .'<p>Hi '.e($ownerName).',</p>'
-            .'<p>Your business account for <strong>'.e($businessName).'</strong> has been created.</p>'
-            .'<p><strong>Login link:</strong> <a href="'.e($loginUrl).'">'.e($loginUrl).'</a><br>'
-            .'<strong>Email:</strong> '.e($loginEmail).'<br>'
-            .'<strong>Temporary password:</strong> '.e($plainPassword).'</p>'
-            .'<p>Please sign in and change your password after your first login.</p>'
-            .'<p>— '.e((string) config('app.name', 'Business Operations')).'</p>'
-            .'</div>';
+        $html = view('mail.tenant-welcome', [
+            'subjectLine' => $subject,
+            'ownerName' => $ownerName,
+            'businessName' => $businessName,
+            'loginEmail' => $loginEmail,
+            'plainPassword' => $plainPassword,
+            'loginUrl' => $loginUrl,
+        ])->render();
 
         $this->send([
             'to' => $toEmail,

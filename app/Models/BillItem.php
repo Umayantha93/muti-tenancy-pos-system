@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'quantity',
     'unit_price',
     'discount_percent',
+    'line_discount',
     'purchase_unit_cost',
     'purchase_expense_id',
     'line_total',
@@ -44,6 +45,7 @@ class BillItem extends Model
             'quantity' => 'decimal:2',
             'unit_price' => 'decimal:2',
             'discount_percent' => 'decimal:2',
+            'line_discount' => 'decimal:2',
             'purchase_unit_cost' => 'decimal:2',
             'line_total' => 'decimal:2',
             'commission_amount' => 'decimal:2',
@@ -70,6 +72,17 @@ class BillItem extends Model
         return in_array($this->type, self::COMMISSION_TYPES, true);
     }
 
+    public function sellsBelowCost(): bool
+    {
+        if ($this->purchase_unit_cost === null || in_array($this->type, ['discount', 'customer_part', 'advance'], true)) {
+            return false;
+        }
+
+        $cost = round((float) $this->purchase_unit_cost * (float) $this->quantity, 2);
+
+        return (float) $this->line_total + 0.009 < $cost;
+    }
+
     public function toArray(): array
     {
         $array = parent::toArray();
@@ -79,6 +92,9 @@ class BillItem extends Model
             if (is_string($name) && $name !== '') {
                 $array['technician_name'] = $name;
             }
+        }
+        if ($user && $user->canAccessFeature('line_discounts')) {
+            $array['below_cost'] = $this->sellsBelowCost();
         }
 
         return $array;

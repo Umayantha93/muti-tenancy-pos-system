@@ -1,9 +1,11 @@
 <?php
 
+use Fruitcake\Cors\CorsService;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\EnsureTenantIsActive;
 use App\Http\Middleware\EnsureUserIsActive;
@@ -45,6 +47,16 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+        $exceptions->respond(function (Response $response, \Throwable $exception, Request $request) {
+            if (! $request->is('api/*') && ! $request->is('sanctum/*') && ! $request->is('storage/*')) {
+                return $response;
+            }
+
+            $cors = app(CorsService::class);
+            $cors->setOptions((array) config('cors', []));
+
+            return $cors->addActualRequestHeaders($response, $request);
+        });
         $exceptions->render(function (\Illuminate\Http\Exceptions\PostTooLargeException $exception, Request $request) {
             if ($request->is('api/*')) {
                 return response()->json([
