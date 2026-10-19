@@ -71,6 +71,30 @@ class ImprovmxMailService
         ]);
     }
 
+    public function queueTenantWelcome(
+        string $toEmail,
+        string $ownerName,
+        string $businessName,
+        string $loginEmail,
+        string $plainPassword,
+    ): bool {
+        if (! $this->configured()) {
+            return false;
+        }
+
+        dispatch(function () use ($toEmail, $ownerName, $businessName, $loginEmail, $plainPassword) {
+            app(self::class)->sendTenantWelcomeSafely(
+                $toEmail,
+                $ownerName,
+                $businessName,
+                $loginEmail,
+                $plainPassword,
+            );
+        })->afterResponse();
+
+        return true;
+    }
+
     public function sendTenantWelcomeSafely(
         string $toEmail,
         string $ownerName,

@@ -168,7 +168,7 @@ class SuperAdminTenantController extends Controller
             return $tenant;
         });
 
-        $emailed = app(ImprovmxMailService::class)->sendTenantWelcomeSafely(
+        $emailed = app(ImprovmxMailService::class)->queueTenantWelcome(
             $data['owner_email'],
             $data['owner_name'],
             $tenant->business_name,
@@ -602,7 +602,7 @@ class SuperAdminTenantController extends Controller
         ]);
         $this->audit($request, $isSecondary ? 'tenant.secondary_user_created' : 'tenant.user_created', $tenant, ['user_id' => $user->id]);
 
-        $emailed = app(ImprovmxMailService::class)->sendTenantWelcomeSafely(
+        $emailed = app(ImprovmxMailService::class)->queueTenantWelcome(
             $user->email,
             $user->name,
             $tenant->business_name,
