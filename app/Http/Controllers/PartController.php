@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BillItem;
+use App\Models\Branch;
 use App\Models\BranchStock;
 use App\Models\Expense;
 use App\Models\Part;
@@ -558,21 +559,28 @@ class PartController extends Controller
     public function update(Request $request, Part $part): JsonResponse
     {
         $this->authorizeInventoryEdit();
-        $data = $this->validated($request, $part);
-        $qty = array_key_exists('stock_qty', $data) ? (float) $data['stock_qty'] : null;
-        unset($data['stock_qty']);
-        $priceChanged = array_key_exists('price', $data) && abs((float) $data['price'] - (float) $part->price) > 0.001;
-        $part->update($data);
-        if ($qty !== null) {
-            BranchInventory::setPartQty($part->refresh(), $qty);
-        }
-        if ($priceChanged && $part->pending_price !== null) {
-            $part->forceFill(['pending_price' => null, 'pending_price_at_qty' => null])->save();
-        }
-        $this->storeImages($request, $part);
-        PartBarcode::ensure($part->refresh());
+        $part = DB::transaction(function () use ($request, $part) {
+            $oldQty = BranchInventory::partQty($part->id);
+            $oldName = $part->name;
+            $data = $this->validated($request, $part);
+            $qty = array_key_exists('stock_qty', $data) ? (float) $data['stock_qty'] : null;
+            unset($data['stock_qty']);
+            $priceChanged = array_key_exists('price', $data) && abs((float) $data['price'] - (float) $part->price) > 0.001;
+            $part->update($data);
+            if ($qty !== null) {
+                $this->correctOpeningPurchaseQuantity($part, $oldName, $oldQty, $qty);
+                BranchInventory::setPartQty($part->refresh(), $qty);
+            }
+            if ($priceChanged && $part->pending_price !== null) {
+                $part->forceFill(['pending_price' => null, 'pending_price_at_qty' => null])->save();
+            }
+            $this->storeImages($request, $part);
+            PartBarcode::ensure($part->refresh());
 
-        return response()->json(BranchInventory::overlayPart($part->refresh()));
+            return $part->refresh();
+        });
+
+        return response()->json(BranchInventory::overlayPart($part));
     }
 
     public function ensureBarcode(Part $part): JsonResponse
@@ -1060,6 +1068,217 @@ class PartController extends Controller
         if ($files && ! is_array($files)) {
             $request->files->set('images', [$files]);
         }
+    }
+
+    /**
+     * A quantity edit rewrites the original purchase when that purchase is still
+     * the whole on-hand quantity. Sold stock and later purchases are left alone.
+     */
+    private function correctOpeningPurchaseQuantity(Part $part, string $oldName, float $oldQty, float $newQty): void
+    {
+        if ($oldQty <= 0.0001 || abs($oldQty - $newQty) <= 0.0001) {
+            return;
+        }
+
+        $branchId = BranchContext::id() ?? Branch::defaultIdFor($part->tenant_id);
+        $lines = StockReceiptItem::query()
+            ->with('receipt.expense')
+            ->where('part_id', $part->id)
+            ->when($branchId, fn ($query) => $query->whereHas(
+                'receipt',
+                fn ($receipt) => $receipt->where('branch_id', $branchId)
+            ))
+            ->get();
+
+        if ($lines->count() > 1) {
+            return;
+        }
+
+        if ($lines->count() === 1) {
+            $line = $lines->first();
+            if (abs((float) $line->quantity - $oldQty) > 0.001) {
+                return;
+            }
+            $this->rewriteReceiptLineQuantity($part, $oldName, $line, $oldQty, $newQty);
+
+            return;
+        }
+
+        $this->rewriteOrphanPurchase($part, $oldName, $oldQty, $newQty, $branchId);
+    }
+
+    private function rewriteReceiptLineQuantity(Part $part, string $oldName, StockReceiptItem $line, float $oldQty, float $newQty): void
+    {
+        $receipt = $line->receipt;
+        $expense = $receipt?->expense
+            ?? ($receipt ? Expense::query()->where('stock_receipt_id', $receipt->id)->first() : null);
+        $unitCost = (float) $line->unit_cost;
+        $oldLineTotal = round((float) $line->quantity * $unitCost, 2);
+        $newLineTotal = round(max(0, $newQty) * $unitCost, 2);
+        $newAmount = round((float) ($expense->amount ?? 0) - $oldLineTotal + $newLineTotal, 2);
+        $this->assertExpenseCanShrink($expense, $newAmount);
+
+        if ($newQty <= 0.0001) {
+            $this->removeCorrectedReceiptLine($line, $expense, $oldLineTotal);
+
+            return;
+        }
+
+        $line->update(['quantity' => round($newQty, 3)]);
+        $this->applyExpenseAmount($expense, $newAmount);
+        if ($expense) {
+            $this->retitlePurchase($expense->refresh(), $oldName, $part->name, $oldQty, $newQty);
+        }
+    }
+
+    private function removeCorrectedReceiptLine(StockReceiptItem $line, ?Expense $expense, float $oldLineTotal): void
+    {
+        $receipt = $line->receipt;
+        $line->delete();
+        if (! $receipt) {
+            $this->applyExpenseAmount($expense, round((float) ($expense->amount ?? 0) - $oldLineTotal, 2));
+
+            return;
+        }
+
+        $receipt->unsetRelation('items');
+        if ($receipt->items()->doesntExist()) {
+            $receipt->update(['expense_id' => null]);
+            $this->deleteInventoryExpense($expense);
+            $receipt->delete();
+
+            return;
+        }
+
+        $this->applyExpenseAmount($expense, round((float) ($expense->amount ?? 0) - $oldLineTotal, 2));
+    }
+
+    private function rewriteOrphanPurchase(Part $part, string $oldName, float $oldQty, float $newQty, ?int $branchId): void
+    {
+        $matches = Expense::query()
+            ->where('category', 'inventory')
+            ->whereNull('stock_receipt_id')
+            ->when($branchId, fn ($query) => $query->where('branch_id', $branchId))
+            ->where(function ($query) use ($oldName) {
+                $query->where('description', 'like', $this->stockPurchaseLike($oldName, false))
+                    ->orWhere('description', 'like', $this->stockPurchaseLike($oldName, true));
+            })
+            ->get()
+            ->filter(fn (Expense $expense) => $this->purchaseTitleMatches((string) $expense->description, $oldName, $oldQty));
+
+        if ($matches->count() !== 1) {
+            return;
+        }
+
+        $expense = $matches->first();
+        $unitCost = round((float) $expense->amount / $oldQty, 2);
+        $newAmount = round($unitCost * max(0, $newQty), 2);
+        $this->assertExpenseCanShrink($expense, $newAmount);
+        $this->applyExpenseAmount($expense, $newAmount);
+        if ($newAmount > 0) {
+            $this->retitlePurchase($expense->refresh(), $oldName, $part->name, $oldQty, $newQty);
+        }
+    }
+
+    private function assertExpenseCanShrink(?Expense $expense, float $newAmount): void
+    {
+        if (! $expense || $expense->payment_status === Expense::STATUS_PAID) {
+            return;
+        }
+
+        $locked = round((float) $expense->amount_paid + $expense->pendingChequeTotal(), 2);
+        if ($newAmount + 0.001 < $locked) {
+            throw ValidationException::withMessages([
+                'stock_qty' => ['Payments or cheques on this purchase are larger than the corrected quantity. Clear those first, then correct the quantity.'],
+            ]);
+        }
+    }
+
+    private function applyExpenseAmount(?Expense $expense, float $newAmount): void
+    {
+        if (! $expense) {
+            return;
+        }
+
+        $newAmount = round(max(0, $newAmount), 2);
+        if ($newAmount <= 0) {
+            $receipt = $expense->stock_receipt_id
+                ? StockReceipt::query()->find($expense->stock_receipt_id)
+                : null;
+            $receipt?->update(['expense_id' => null]);
+            $this->deleteInventoryExpense($expense);
+
+            return;
+        }
+
+        if ($expense->payment_status === Expense::STATUS_PAID) {
+            $expense->update([
+                'amount' => $newAmount,
+                'amount_paid' => $newAmount,
+                'settled_at' => $expense->settled_at ?? now(),
+            ]);
+
+            return;
+        }
+
+        $oldAmount = round((float) $expense->amount, 2);
+        if ($newAmount >= $oldAmount) {
+            $expense->update([
+                'amount' => $newAmount,
+                'settled_at' => null,
+            ]);
+
+            return;
+        }
+
+        $this->reduceInventoryExpense($expense, round($oldAmount - $newAmount, 2));
+    }
+
+    private function purchaseTitleMatches(string $description, string $name, float $quantity): bool
+    {
+        $parsed = $this->parsePurchaseTitle($description);
+
+        return $parsed
+            && $parsed['name'] === $name
+            && abs($parsed['quantity'] - $quantity) <= 0.001;
+    }
+
+    /**
+     * @return array{prefix: string, name: string, quantity: float}|null
+     */
+    private function parsePurchaseTitle(string $description): ?array
+    {
+        if (! preg_match('/^(Stock purchase on credit: |Stock purchase: )(.+) × (\d+(?:\.\d+)?)$/', $description, $matches)) {
+            return null;
+        }
+
+        return [
+            'prefix' => $matches[1],
+            'name' => $matches[2],
+            'quantity' => (float) $matches[3],
+        ];
+    }
+
+    private function retitlePurchase(Expense $expense, string $oldName, string $newName, float $oldQty, float $newQty): void
+    {
+        $parsed = $this->parsePurchaseTitle((string) $expense->description);
+        if (! $parsed || $parsed['name'] !== $oldName || abs($parsed['quantity'] - $oldQty) > 0.001) {
+            return;
+        }
+
+        $expense->update([
+            'description' => $parsed['prefix'].$newName.' × '.$this->qtyLabel($newQty),
+        ]);
+    }
+
+    private function qtyLabel(float $quantity): string
+    {
+        $quantity = round($quantity, 3);
+        if (abs($quantity - round($quantity)) < 0.0001) {
+            return (string) (int) round($quantity);
+        }
+
+        return rtrim(rtrim(number_format($quantity, 3, '.', ''), '0'), '.');
     }
 
     /**

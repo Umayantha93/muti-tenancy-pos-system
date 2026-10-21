@@ -15,7 +15,7 @@ class ImprovmxMailService
     }
 
     /**
-     * @param  array{to: string, subject: string, text: string, html?: string, from_name?: string}  $payload
+     * @param  array{to: string, subject: string, text: string, html?: string, reply_to?: string, reply_name?: string}  $payload
      */
     public function send(array $payload): void
     {
@@ -27,8 +27,40 @@ class ImprovmxMailService
 
         Mail::html($html, function ($message) use ($payload) {
             $message->to($payload['to'])->subject($payload['subject']);
+            if (! empty($payload['reply_to'])) {
+                $message->replyTo($payload['reply_to'], $payload['reply_name'] ?? null);
+            }
             $message->getSymfonyMessage()->text($payload['text']);
         });
+    }
+
+    public function sendContactEnquiry(string $name, string $email, ?string $phone, string $message): void
+    {
+        $inbox = (string) config('mail.contact_inbox');
+        $phoneLine = $phone ? "Phone: {$phone}\n" : '';
+        $text = implode("\n", [
+            'New message from the IUBits website.',
+            '',
+            "Name: {$name}",
+            "Email: {$email}",
+            $phoneLine.'Message:',
+            $message,
+        ]);
+        $html = view('mail.contact-enquiry', [
+            'name' => $name,
+            'email' => $email,
+            'phone' => $phone,
+            'enquiry' => $message,
+        ])->render();
+
+        $this->send([
+            'to' => $inbox,
+            'subject' => "Website enquiry from {$name}",
+            'text' => $text,
+            'html' => $html,
+            'reply_to' => $email,
+            'reply_name' => $name,
+        ]);
     }
 
     public function sendTenantWelcome(

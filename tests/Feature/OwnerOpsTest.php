@@ -8,6 +8,7 @@ use App\Models\EmployeeTarget;
 use App\Models\Expense;
 use App\Models\Feature;
 use App\Models\Part;
+use App\Models\StockReceiptItem;
 use App\Models\Tenant;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
@@ -217,6 +218,119 @@ class OwnerOpsTest extends TestCase
         $this->assertFalse($employee->fresh()->active);
         $this->postJson("/api/employees/{$employee->id}/activate")->assertOk()
             ->assertJsonPath('active', true);
+    }
+
+    public function test_correcting_an_opening_quantity_rewrites_the_paid_purchase(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+
+        $part = $this->postJson('/api/parts', [
+            'name' => 'Engine oil',
+            'brand' => 'Castrol',
+            'price' => 2500,
+            'cost_price' => 200,
+            'stock_qty' => 100,
+            'stock_unit' => 'l',
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$part['id'], [
+            'stock_qty' => 10,
+        ])->assertOk()->assertJsonPath('stock_qty', 10);
+
+        $saved = Part::query()->findOrFail($part['id']);
+        $this->assertEquals(10, (float) $saved->stock_qty);
+        $this->assertEquals(200, (float) $saved->cost_price);
+
+        $expense = Expense::query()->where('category', 'inventory')->firstOrFail();
+        $this->assertEquals(2000, (float) $expense->amount);
+        $this->assertEquals(2000, (float) $expense->amount_paid);
+        $this->assertSame('Stock purchase: Engine oil × 10', $expense->description);
+        $this->assertEquals(10, (float) StockReceiptItem::query()->where('part_id', $part['id'])->value('quantity'));
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(2000, $sheet['expenses']);
+    }
+
+    public function test_correcting_an_opening_quantity_rewrites_the_credit_purchase(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+
+        $part = $this->postJson('/api/parts', [
+            'name' => 'Thinner',
+            'brand' => 'Generic',
+            'price' => 900,
+            'cost_price' => 200,
+            'stock_qty' => 100,
+            'stock_unit' => 'l',
+            'payment_status' => 'credit',
+            'due_date' => now()->addDays(14)->toDateString(),
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$part['id'], [
+            'stock_qty' => 10,
+        ])->assertOk();
+
+        $expense = Expense::query()->where('category', 'inventory')->firstOrFail();
+        $this->assertSame(Expense::STATUS_CREDIT, $expense->payment_status);
+        $this->assertEquals(2000, (float) $expense->amount);
+        $this->assertEquals(0, (float) $expense->amount_paid);
+        $this->assertSame('Stock purchase on credit: Thinner × 10', $expense->description);
+
+        $sheet = $this->getJson('/api/balance-sheet?month='.now()->month.'&year='.now()->year)->assertOk()->json();
+        $this->assertEquals(0, $sheet['expenses']);
+        $this->assertEquals(2000, $sheet['inventory_payables']['payables_total']);
+    }
+
+    public function test_quantity_edit_leaves_finance_alone_after_a_second_purchase_or_a_sale(): void
+    {
+        $user = $this->garageUser();
+        Sanctum::actingAs($user);
+
+        $boughtTwice = $this->postJson('/api/parts', [
+            'name' => 'Primer',
+            'brand' => 'Generic',
+            'price' => 1500,
+            'cost_price' => 200,
+            'stock_qty' => 0,
+            'stock_unit' => 'l',
+        ])->assertCreated()->json();
+
+        $this->postJson('/api/parts/'.$boughtTwice['id'].'/restock', [
+            'quantity' => 100,
+            'unit_cost' => 200,
+            'payment_status' => 'paid',
+        ])->assertOk();
+        $this->postJson('/api/parts/'.$boughtTwice['id'].'/restock', [
+            'quantity' => 5,
+            'unit_cost' => 200,
+            'payment_status' => 'paid',
+        ])->assertOk();
+
+        $this->postJson('/api/parts/'.$boughtTwice['id'], [
+            'stock_qty' => 10,
+        ])->assertOk();
+
+        $this->assertEquals(10, (float) Part::query()->findOrFail($boughtTwice['id'])->stock_qty);
+        $this->assertEquals(21000, (float) Expense::query()->where('category', 'inventory')->sum('amount'));
+
+        $sold = $this->postJson('/api/parts', [
+            'name' => 'Clear coat',
+            'brand' => 'Generic',
+            'price' => 1800,
+            'cost_price' => 200,
+            'stock_qty' => 100,
+            'stock_unit' => 'l',
+        ])->assertCreated()->json();
+        Part::query()->findOrFail($sold['id'])->takeStock(20);
+
+        $this->postJson('/api/parts/'.$sold['id'], [
+            'stock_qty' => 10,
+        ])->assertOk();
+
+        $this->assertEquals(10, (float) Part::query()->findOrFail($sold['id'])->stock_qty);
+        $soldExpense = Expense::query()->where('description', 'like', 'Stock purchase: Clear coat%')->firstOrFail();
+        $this->assertEquals(20000, (float) $soldExpense->amount);
+        $this->assertEquals(100, (float) StockReceiptItem::query()->where('part_id', $sold['id'])->value('quantity'));
     }
 
     /**

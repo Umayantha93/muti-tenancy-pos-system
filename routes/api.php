@@ -13,6 +13,7 @@ use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CashUpController;
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
 use App\Http\Controllers\CustomerController;
@@ -51,6 +52,7 @@ use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SuperAdminBillController;
 use App\Http\Controllers\SuperAdminBranchController;
 use App\Http\Controllers\SuperAdminIncomeController;
+use App\Http\Controllers\SuperAdminNotificationController;
 use App\Http\Controllers\SuperAdminInventoryController;
 use App\Http\Controllers\SuperAdminTenantController;
 use App\Http\Controllers\SuperAdminUserController;
@@ -68,6 +70,7 @@ Route::post('/auth/login', [AuthController::class, 'login'])->middleware('thrott
 Route::get('/auth/branding', [AuthController::class, 'branding'])->middleware('throttle:30,1');
 Route::get('/translations', [LocaleController::class, 'show'])->middleware('throttle:60,1');
 Route::post('/attendance/ingest', [AttendanceController::class, 'ingest'])->middleware('throttle:120,1');
+Route::post('/contact', [ContactController::class, 'store'])->middleware('throttle:5,1');
 Route::get('/bills/shared/{token}', [BillShareController::class, 'show'])->middleware('throttle:60,1');
 Route::get('/bills/shared/{token}/photos/{photo}/file', [BillShareController::class, 'photo'])->middleware('throttle:60,1');
 Route::get('/bills/shared/{token}/videos/{video}/file', [BillShareController::class, 'video'])->middleware('throttle:60,1');
@@ -79,6 +82,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
 
     Route::prefix('super-admin')->middleware('role:super_admin')->group(function () {
         Route::get('/dashboard', [SuperAdminTenantController::class, 'dashboard']);
+        Route::get('/notifications', [SuperAdminNotificationController::class, 'index']);
+        Route::post('/notifications/{contactMessage}/open', [SuperAdminNotificationController::class, 'open']);
         Route::get('/me', [SuperAdminUserController::class, 'me']);
         Route::put('/me', [SuperAdminUserController::class, 'updateMe']);
         Route::get('/income', SuperAdminIncomeController::class);
