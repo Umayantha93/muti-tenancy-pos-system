@@ -19,6 +19,7 @@ use App\Services\PartSerials;
 use App\Support\BranchContext;
 use App\Support\BusinessTypes;
 use App\Support\InventoryCosting;
+use App\Support\InventoryExpenseAmounts;
 use App\Support\StockUnit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1116,7 +1117,7 @@ class PartController extends Controller
         $oldLineTotal = round((float) $line->quantity * $unitCost, 2);
         $newLineTotal = round(max(0, $newQty) * $unitCost, 2);
         $newAmount = round((float) ($expense->amount ?? 0) - $oldLineTotal + $newLineTotal, 2);
-        $this->assertExpenseCanShrink($expense, $newAmount);
+        InventoryExpenseAmounts::assertCanApply($expense, $newAmount);
 
         if ($newQty <= 0.0001) {
             $this->removeCorrectedReceiptLine($line, $expense, $oldLineTotal);
@@ -1125,7 +1126,7 @@ class PartController extends Controller
         }
 
         $line->update(['quantity' => round($newQty, 3)]);
-        $this->applyExpenseAmount($expense, $newAmount);
+        InventoryExpenseAmounts::apply($expense, $newAmount);
         if ($expense) {
             $this->retitlePurchase($expense->refresh(), $oldName, $part->name, $oldQty, $newQty);
         }
@@ -1136,7 +1137,7 @@ class PartController extends Controller
         $receipt = $line->receipt;
         $line->delete();
         if (! $receipt) {
-            $this->applyExpenseAmount($expense, round((float) ($expense->amount ?? 0) - $oldLineTotal, 2));
+            InventoryExpenseAmounts::apply($expense, round((float) ($expense->amount ?? 0) - $oldLineTotal, 2));
 
             return;
         }
@@ -1144,13 +1145,13 @@ class PartController extends Controller
         $receipt->unsetRelation('items');
         if ($receipt->items()->doesntExist()) {
             $receipt->update(['expense_id' => null]);
-            $this->deleteInventoryExpense($expense);
+            InventoryExpenseAmounts::delete($expense);
             $receipt->delete();
 
             return;
         }
 
-        $this->applyExpenseAmount($expense, round((float) ($expense->amount ?? 0) - $oldLineTotal, 2));
+        InventoryExpenseAmounts::apply($expense, round((float) ($expense->amount ?? 0) - $oldLineTotal, 2));
     }
 
     private function rewriteOrphanPurchase(Part $part, string $oldName, float $oldQty, float $newQty, ?int $branchId): void
@@ -1173,65 +1174,11 @@ class PartController extends Controller
         $expense = $matches->first();
         $unitCost = round((float) $expense->amount / $oldQty, 2);
         $newAmount = round($unitCost * max(0, $newQty), 2);
-        $this->assertExpenseCanShrink($expense, $newAmount);
-        $this->applyExpenseAmount($expense, $newAmount);
+        InventoryExpenseAmounts::assertCanApply($expense, $newAmount);
+        InventoryExpenseAmounts::apply($expense, $newAmount);
         if ($newAmount > 0) {
             $this->retitlePurchase($expense->refresh(), $oldName, $part->name, $oldQty, $newQty);
         }
-    }
-
-    private function assertExpenseCanShrink(?Expense $expense, float $newAmount): void
-    {
-        if (! $expense || $expense->payment_status === Expense::STATUS_PAID) {
-            return;
-        }
-
-        $locked = round((float) $expense->amount_paid + $expense->pendingChequeTotal(), 2);
-        if ($newAmount + 0.001 < $locked) {
-            throw ValidationException::withMessages([
-                'stock_qty' => ['Payments or cheques on this purchase are larger than the corrected quantity. Clear those first, then correct the quantity.'],
-            ]);
-        }
-    }
-
-    private function applyExpenseAmount(?Expense $expense, float $newAmount): void
-    {
-        if (! $expense) {
-            return;
-        }
-
-        $newAmount = round(max(0, $newAmount), 2);
-        if ($newAmount <= 0) {
-            $receipt = $expense->stock_receipt_id
-                ? StockReceipt::query()->find($expense->stock_receipt_id)
-                : null;
-            $receipt?->update(['expense_id' => null]);
-            $this->deleteInventoryExpense($expense);
-
-            return;
-        }
-
-        if ($expense->payment_status === Expense::STATUS_PAID) {
-            $expense->update([
-                'amount' => $newAmount,
-                'amount_paid' => $newAmount,
-                'settled_at' => $expense->settled_at ?? now(),
-            ]);
-
-            return;
-        }
-
-        $oldAmount = round((float) $expense->amount, 2);
-        if ($newAmount >= $oldAmount) {
-            $expense->update([
-                'amount' => $newAmount,
-                'settled_at' => null,
-            ]);
-
-            return;
-        }
-
-        $this->reduceInventoryExpense($expense, round($oldAmount - $newAmount, 2));
     }
 
     private function purchaseTitleMatches(string $description, string $name, float $quantity): bool
@@ -1311,11 +1258,11 @@ class PartController extends Controller
 
             if ($others->isEmpty()) {
                 $receipt->update(['expense_id' => null]);
-                $this->deleteInventoryExpense($expense);
+                InventoryExpenseAmounts::delete($expense);
                 $receipt->delete();
             } else {
                 StockReceiptItem::query()->whereIn('id', $lines->pluck('id'))->delete();
-                $this->reduceInventoryExpense($expense, $lineTotal);
+                InventoryExpenseAmounts::reduce($expense, $lineTotal);
             }
 
             if ($expense) {
@@ -1333,7 +1280,7 @@ class PartController extends Controller
             ->get();
 
         foreach ($orphans as $expense) {
-            $this->deleteInventoryExpense($expense);
+            InventoryExpenseAmounts::delete($expense);
         }
     }
 
@@ -1342,59 +1289,6 @@ class PartController extends Controller
         $safe = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $name);
 
         return ($credit ? 'Stock purchase on credit: ' : 'Stock purchase: ').$safe.' ×%';
-    }
-
-    private function deleteInventoryExpense(?Expense $expense): void
-    {
-        if (! $expense) {
-            return;
-        }
-
-        $expense->update(['stock_receipt_id' => null]);
-        $expense->delete();
-    }
-
-    private function reduceInventoryExpense(?Expense $expense, float $lineTotal): void
-    {
-        if (! $expense || $lineTotal <= 0) {
-            return;
-        }
-
-        $newAmount = round(max(0, (float) $expense->amount - $lineTotal), 2);
-        if ($newAmount <= 0) {
-            $receipt = $expense->stock_receipt_id
-                ? StockReceipt::query()->find($expense->stock_receipt_id)
-                : null;
-            $receipt?->update(['expense_id' => null]);
-            $this->deleteInventoryExpense($expense);
-
-            return;
-        }
-
-        $newPaid = round(min((float) $expense->amount_paid, $newAmount), 2);
-        $fullyPaid = $newPaid + 0.00001 >= $newAmount;
-        $expense->update([
-            'amount' => $newAmount,
-            'amount_paid' => $newPaid,
-            'payment_status' => $fullyPaid ? Expense::STATUS_PAID : Expense::STATUS_CREDIT,
-            'settled_at' => $fullyPaid ? ($expense->settled_at ?? now()) : null,
-        ]);
-
-        $paid = 0.0;
-        foreach ($expense->settlements()->orderBy('id')->get() as $settlement) {
-            if ($paid >= $newPaid) {
-                $settlement->delete();
-
-                continue;
-            }
-            $next = round($paid + (float) $settlement->amount, 2);
-            if ($next > $newPaid) {
-                $settlement->update(['amount' => round($newPaid - $paid, 2)]);
-                $paid = $newPaid;
-            } else {
-                $paid = $next;
-            }
-        }
     }
 
     private function recordPurchaseExpense(

@@ -556,6 +556,102 @@ class ImplementationPlanTest extends TestCase
         $this->assertSame('INV-2', $sheet['inventory_payables']['items'][0]['invoice_number']);
     }
 
+    public function test_grn_line_quantity_and_cost_rewrite_stock_and_finance(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Engine oil', 'brand' => 'Castrol', 'type' => 'fluid',
+            'price' => 2500, 'cost_price' => 0, 'stock_qty' => 0, 'stock_unit' => 'l',
+        ]);
+
+        $received = $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'INV-100',
+            'payment_status' => 'paid',
+            'items' => [['part_id' => $part->id, 'quantity' => 100, 'unit_cost' => 200]],
+        ])->assertOk()->json();
+        $receiptId = $received['receipt']['id'];
+        $lineId = $received['receipt']['items'][0]['id'];
+
+        $this->putJson("/api/stock-receipts/{$receiptId}", [
+            'invoice_number' => 'INV-100',
+            'payment_status' => 'paid',
+            'items' => [['id' => $lineId, 'quantity' => 10, 'unit_cost' => 200]],
+        ])->assertOk()
+            ->assertJsonPath('total', 2000)
+            ->assertJsonPath('items.0.quantity', 10);
+
+        $this->assertEquals(10, (float) $part->fresh()->stock_qty);
+        $this->assertEquals(200, (float) $part->fresh()->cost_price);
+        $expense = Expense::query()->where('category', 'inventory')->firstOrFail();
+        $this->assertEquals(2000, (float) $expense->amount);
+        $this->assertEquals(2000, (float) $expense->amount_paid);
+
+        $this->putJson("/api/stock-receipts/{$receiptId}", [
+            'invoice_number' => 'INV-100',
+            'payment_status' => 'paid',
+            'items' => [['id' => $lineId, 'quantity' => 10, 'unit_cost' => 250]],
+        ])->assertOk()->assertJsonPath('total', 2500);
+
+        $this->assertEquals(250, (float) $part->fresh()->cost_price);
+        $this->assertEquals(2500, (float) $expense->fresh()->amount);
+        $this->assertEquals(10, (float) $part->fresh()->stock_qty);
+    }
+
+    public function test_grn_quantity_cut_is_refused_when_stock_was_sold(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Thinner', 'brand' => 'Generic', 'type' => 'fluid',
+            'price' => 900, 'cost_price' => 0, 'stock_qty' => 0, 'stock_unit' => 'l',
+        ]);
+        $received = $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'INV-SOLD',
+            'payment_status' => 'paid',
+            'items' => [['part_id' => $part->id, 'quantity' => 10, 'unit_cost' => 200]],
+        ])->assertOk()->json();
+        $part->fresh()->takeStock(8);
+
+        $this->putJson('/api/stock-receipts/'.$received['receipt']['id'], [
+            'invoice_number' => 'INV-SOLD',
+            'payment_status' => 'paid',
+            'items' => [['id' => $received['receipt']['items'][0]['id'], 'quantity' => 1, 'unit_cost' => 200]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('items');
+
+        $this->assertEquals(2, (float) $part->fresh()->stock_qty);
+        $this->assertEquals(2000, (float) Expense::query()->where('category', 'inventory')->value('amount'));
+    }
+
+    public function test_grn_cost_cut_is_refused_when_payments_exceed_the_new_total(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Primer', 'brand' => 'Generic', 'type' => 'fluid',
+            'price' => 900, 'cost_price' => 0, 'stock_qty' => 0, 'stock_unit' => 'l',
+        ]);
+        $received = $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'INV-CREDIT',
+            'payment_status' => 'credit',
+            'due_date' => now()->addDays(14)->toDateString(),
+            'items' => [['part_id' => $part->id, 'quantity' => 10, 'unit_cost' => 200]],
+        ])->assertOk()->json();
+        $expense = Expense::query()->where('category', 'inventory')->firstOrFail();
+        $this->postJson("/api/expenses/{$expense->id}/settle", [
+            'amount' => 1500,
+            'settled_on' => now()->toDateString(),
+        ])->assertOk();
+
+        $this->putJson('/api/stock-receipts/'.$received['receipt']['id'], [
+            'invoice_number' => 'INV-CREDIT',
+            'payment_status' => 'credit',
+            'due_date' => now()->addDays(14)->toDateString(),
+            'items' => [['id' => $received['receipt']['items'][0]['id'], 'quantity' => 10, 'unit_cost' => 100]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('items');
+
+        $this->assertEquals(2000, (float) $expense->fresh()->amount);
+        $this->assertEquals(10, (float) $part->fresh()->stock_qty);
+        $this->assertEquals(200, (float) $part->fresh()->cost_price);
+    }
+
     public function test_job_card_vehicle_number_can_be_corrected(): void
     {
         Sanctum::actingAs($this->garageUser());
