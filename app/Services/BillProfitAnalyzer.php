@@ -57,7 +57,7 @@ class BillProfitAnalyzer
             $refundedQty = (float) ($itemRefund['qty'] ?? 0);
 
             $lineCogs = round($unitCost * max(0.0, $quantity - $restockQty), 2);
-            $free = (bool) $bill->is_free;
+            $free = (bool) $bill->is_free || (bool) $item->is_free;
             $lineRevenue = ($free || $isDiscount) ? 0.0 : max(0.0, round((float) $item->line_total - $lineRefundRevenue, 2));
             if ($isDiscount && ! $free) {
                 $discounts += (float) $item->line_total;
@@ -128,7 +128,7 @@ class BillProfitAnalyzer
                 $discounts += (float) $item->line_total;
                 continue;
             }
-            $revenue = $bill->is_free ? 0.0 : (float) $item->line_total;
+            $revenue = $bill->is_free || $item->is_free ? 0.0 : (float) $item->line_total;
             $cogs = $item->type === 'part'
                 ? (float) ($item->purchase_unit_cost ?? $item->part?->cost_price ?? 0) * (float) $item->quantity
                 : 0.0;

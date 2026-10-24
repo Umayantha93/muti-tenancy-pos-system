@@ -87,7 +87,7 @@ class BillItemController extends Controller
         if (($data['type'] ?? '') === 'discount' || ! empty($data['discount_type_id'])) {
             $chargeSubtotal = (float) $bill->items()
                 ->get()
-                ->filter(fn (BillItem $item) => in_array(BusinessTypes::billItemKind($item->type), ['charge', 'stock'], true))
+                ->filter(fn (BillItem $item) => in_array(BusinessTypes::billItemKind($item->type), ['charge', 'stock'], true) && ! $item->is_free)
                 ->sum(fn (BillItem $item) => (float) $item->line_total);
             $data = DiscountType::applyToItemPayload($data, (int) $request->user()->tenant_id, $chargeSubtotal);
         }
@@ -215,11 +215,33 @@ class BillItemController extends Controller
             'quantity' => ['sometimes', 'numeric', 'gt:0'],
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
             'line_discount' => ['sometimes', 'numeric', 'min:0'],
+            'is_free' => ['sometimes', 'boolean'],
             'employee_id' => ['sometimes', 'nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
         ]);
 
         if (array_key_exists('employee_id', $data) && ! array_key_exists('quantity', $data) && ! array_key_exists('unit_price', $data) && ! array_key_exists('line_discount', $data)) {
             $this->assignLineTechnician($bill, $item, $data['employee_id'] ?? null);
+
+            return response()->json([
+                'item' => $item->fresh(),
+                'bill' => $bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position,commission_percent']),
+            ]);
+        }
+
+        if (
+            array_key_exists('is_free', $data)
+            && ! array_key_exists('quantity', $data)
+            && ! array_key_exists('unit_price', $data)
+            && ! array_key_exists('line_discount', $data)
+        ) {
+            abort_unless($request->user()->canAccessFeature('free_service'), 403, 'Free lines are not enabled for this account.');
+            abort_if(in_array($item->type, ['discount', 'customer_part', 'advance'], true), 422, 'This line cannot be free.');
+            abort_if((float) $bill->amount_paid > 0, 422, 'Remove the payment before changing a free line.');
+
+            DB::transaction(function () use ($data, $bill, $item, $calculator) {
+                $item->update(['is_free' => (bool) $data['is_free']]);
+                $calculator->recalculate($bill);
+            });
 
             return response()->json([
                 'item' => $item->fresh(),
