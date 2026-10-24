@@ -829,11 +829,17 @@ class BillController extends Controller
 
     private function isPaidBill(Bill $bill): bool
     {
-        if ($bill->is_free && (float) $bill->balance_due <= 0) {
+        if ((float) $bill->balance_due > 0.009) {
+            return false;
+        }
+        if ($bill->is_free || (float) $bill->amount_paid > 0) {
             return true;
         }
 
-        return (float) $bill->amount_paid > 0 && (float) $bill->balance_due <= 0;
+        $charges = $bill->items()->whereIn('type', BusinessTypes::chargeItemTypes());
+
+        return (clone $charges)->where('is_free', true)->exists()
+            && ! (clone $charges)->where('is_free', false)->where('line_total', '>', 0)->exists();
     }
 
     private function paymentMoment(string $date): Carbon

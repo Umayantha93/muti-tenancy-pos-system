@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Bill;
+use App\Models\Employee;
 use App\Models\Feature;
 use App\Models\JobCardAlert;
 use App\Models\Part;
@@ -92,6 +93,44 @@ class ServiceJobCardTest extends TestCase
 
         Sanctum::actingAs($porter);
         $this->getJson('/api/job-alerts')->assertForbidden();
+    }
+
+    public function test_admit_staff_can_assign_workers_when_opening_a_job(): void
+    {
+        $owner = $this->garageUser('business_owner');
+        $admit = Feature::where('key', 'admit_vehicle')->firstOrFail();
+        $porter = User::factory()->create([
+            'tenant_id' => $owner->tenant_id,
+            'role' => 'staff',
+            'status' => 'active',
+        ]);
+        $porter->permissions()->sync([$admit->id => ['can_access' => true]]);
+
+        Sanctum::actingAs($owner);
+        $worker = Employee::create([
+            'name' => 'Kasun Mechanic',
+            'nic' => fake()->unique()->numerify('##########V'),
+            'position' => 'Mechanic',
+            'base_salary' => 50000,
+        ]);
+
+        Sanctum::actingAs($porter);
+        $this->getJson('/api/employees')->assertForbidden();
+        $options = $this->getJson('/api/employees/options')->assertOk()->json('data');
+        $row = collect($options)->firstWhere('id', $worker->id);
+        $this->assertSame('Kasun Mechanic', $row['name']);
+        $this->assertSame('Mechanic', $row['position']);
+        $this->assertArrayNotHasKey('base_salary', $row);
+
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Nimal Perera',
+            'customer_phone' => '0771234567',
+            'number_plate' => 'CAB-'.fake()->unique()->numerify('####'),
+            'job_kind' => 'repair',
+            'employee_ids' => [$worker->id],
+        ])->assertCreated()->json('id');
+
+        $this->assertTrue(Bill::find($billId)->employees()->whereKey($worker->id)->exists());
     }
 
     public function test_service_job_can_store_next_service_mileage(): void

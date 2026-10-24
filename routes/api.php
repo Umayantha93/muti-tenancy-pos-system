@@ -339,6 +339,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::delete('/vehicles/{vehicle}', [VehicleController::class, 'destroy'])->middleware('feature:admit_vehicle');
         });
 
+        Route::get('/employees/options', [EmployeeController::class, 'options'])
+            ->middleware('feature:admit_vehicle,employees_management,attendance,billing');
         Route::middleware('feature:employees_management,attendance')->group(function () {
             Route::get('/employees', [EmployeeController::class, 'index']);
             Route::get('/employees/{employee}', [EmployeeController::class, 'show']);
