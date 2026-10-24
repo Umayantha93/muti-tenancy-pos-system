@@ -13,6 +13,7 @@ use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CashUpController;
+use App\Http\Controllers\CommissionController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\CottageRoomController;
 use App\Http\Controllers\CottageStayController;
@@ -350,9 +351,13 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
         Route::middleware('feature:attendance')->group(function () {
             Route::get('/attendance', [AttendanceController::class, 'index']);
+            Route::get('/attendance/pay', [AttendanceController::class, 'paySheet']);
+            Route::put('/attendance/pay', [AttendanceController::class, 'savePay']);
             Route::post('/attendance', [AttendanceController::class, 'store']);
             Route::post('/attendance/punch', [AttendanceController::class, 'punch']);
         });
+        Route::get('/commissions/month', [CommissionController::class, 'month'])->middleware('feature:job_commissions');
+        Route::get('/commissions/month/{employee}', [CommissionController::class, 'days'])->middleware('feature:job_commissions');
         Route::get('/commissions/day', [PayrollController::class, 'commissionBoard'])->middleware('feature:job_commissions');
         Route::middleware('feature:payroll')->group(function () {
             Route::get('/payroll', [PayrollController::class, 'index']);

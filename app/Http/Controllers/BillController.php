@@ -11,6 +11,7 @@ use App\Models\EmployeePayment;
 use App\Models\Part;
 use App\Models\Vehicle;
 use App\Services\BillCalculator;
+use App\Services\Commission\CommissionSchemes;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
 use App\Support\JobCardAlerts;
@@ -499,6 +500,11 @@ class BillController extends Controller
     public function deductCommission(Request $request, Bill $bill, Employee $employee): JsonResponse
     {
         abort_unless($request->user()->canAccessFeature('job_commissions'), 403, 'Job commission is not enabled for this account.');
+        abort_unless(
+            CommissionSchemes::for($request->user()->tenant)->supportsJobDeduction(),
+            422,
+            'This commission is calculated for the month from paid jobs. It is not deducted on the job card.',
+        );
 
         $assigned = $bill->employees()->where('employees.id', $employee->id)->first();
         abort_unless($assigned, 422, 'Assign this employee to the job card first.');

@@ -596,6 +596,7 @@ class JobCardPayrollTest extends TestCase
             'owner_email' => fake()->unique()->safeEmail(),
             'status' => 'active',
         ]);
+        $tenant->update(['commission_type' => 'line_percent']);
         $tenant->features()->sync($features->mapWithKeys(fn (Feature $feature) => [$feature->id => ['is_enabled' => true]]));
 
         return User::factory()->create([

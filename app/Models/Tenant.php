@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Commission\CommissionSchemes;
 use App\Support\BusinessTypes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([
     'business_name',
     'business_type',
+    'commission_type',
     'owner_name',
     'owner_phone',
     'owner_phones',
@@ -43,7 +45,7 @@ class Tenant extends Model
 {
     use SoftDeletes;
 
-    protected $appends = ['logo_url', 'payment_due_soon', 'demo_days_left', 'is_demo', 'bill_number_locked', 'next_bill_number'];
+    protected $appends = ['logo_url', 'payment_due_soon', 'demo_days_left', 'is_demo', 'bill_number_locked', 'next_bill_number', 'commission_rules'];
 
     protected $hidden = ['dual_financial_view_enabled'];
 
@@ -143,6 +145,11 @@ class Tenant extends Model
         $this->setAttribute('setup_fee_settled', $total > 0 && $balance <= 0);
 
         return $this;
+    }
+
+    protected function commissionRules(): Attribute
+    {
+        return Attribute::get(fn () => CommissionSchemes::rulesFor($this));
     }
 
     protected function logoUrl(): Attribute
