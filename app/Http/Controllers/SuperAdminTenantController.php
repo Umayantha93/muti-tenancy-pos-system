@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Models\TenantFeePayment;
 use App\Models\TenantSetupFeePayment;
 use App\Models\User;
+use App\Services\Commission\CommissionSchemes;
 use App\Services\ImprovmxMailService;
 use App\Support\BusinessTypes;
 use App\Support\PaintStockDefaults;
@@ -59,6 +60,7 @@ class SuperAdminTenantController extends Controller
                     return $feature;
                 }),
             'matrix' => BusinessTypes::featureMatrix(),
+            'commission_types' => CommissionSchemes::catalog(),
         ]);
     }
 
@@ -118,6 +120,7 @@ class SuperAdminTenantController extends Controller
             'features.*' => ['string', 'exists:features,key'],
             'demo_access' => ['sometimes', 'boolean'],
             'demo_days' => ['nullable', 'integer', 'min:1', 'max:90'],
+            'commission_type' => ['nullable', Rule::in(CommissionSchemes::keys())],
         ]);
         $data['features'] = $features ?: ($data['features'] ?? null);
         $data['plan'] = $data['plan'] ?? BusinessTypes::defaultPlan($data['business_type']);
@@ -550,12 +553,18 @@ class SuperAdminTenantController extends Controller
             'optional' => BusinessTypes::optionalFeatures($tenant->business_type),
             'nested' => BusinessTypes::nestedUnder(),
             'business_type' => $tenant->business_type,
+            'commission_type' => $tenant->commission_type ?: CommissionSchemes::LABOR_EXCESS,
+            'commission_types' => CommissionSchemes::catalog(),
         ]);
     }
 
     public function updateFeatures(Request $request, Tenant $tenant): JsonResponse
     {
-        $data = $request->validate(['features' => ['required', 'array'], 'features.*' => ['boolean']]);
+        $data = $request->validate([
+            'features' => ['required', 'array'],
+            'features.*' => ['boolean'],
+            'commission_type' => ['nullable', Rule::in(CommissionSchemes::keys())],
+        ]);
         $allowed = BusinessTypes::featuresForType($tenant->business_type);
         $requested = collect($data['features'])->filter()->keys()->all();
         $normalized = BusinessTypes::normalizePlan($tenant->business_type, $requested);
@@ -563,6 +572,9 @@ class SuperAdminTenantController extends Controller
         $tenant->features()->sync($features->mapWithKeys(fn (Feature $feature) => [
             $feature->id => ['is_enabled' => in_array($feature->key, $normalized, true)],
         ]));
+        if (! empty($data['commission_type'])) {
+            $tenant->update(['commission_type' => $data['commission_type']]);
+        }
         $this->audit($request, 'tenant.features_updated', $tenant, $data['features']);
 
         return $this->features($request, $tenant);
