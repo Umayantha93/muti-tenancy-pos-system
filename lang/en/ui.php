@@ -578,6 +578,7 @@ return [
         'assigned_employees' => 'Assigned employees',
         'line_technician' => 'Technician',
         'free_service' => 'Free service',
+        'line_free' => 'Free',
         'free' => 'Free',
         'free_failed' => 'Could not change free service.',
         'free_reason' => 'Reason',

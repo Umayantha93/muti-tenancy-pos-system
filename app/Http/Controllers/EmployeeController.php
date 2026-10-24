@@ -9,6 +9,16 @@ use Illuminate\Validation\Rule;
 
 class EmployeeController extends Controller
 {
+    public function options(): JsonResponse
+    {
+        return response()->json([
+            'data' => Employee::query()
+                ->where('active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'position']),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         return $this->moneyJson(Employee::query()

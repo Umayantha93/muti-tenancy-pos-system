@@ -10,7 +10,10 @@ class BillCalculator
 {
     public function recalculate(Bill $bill): Bill
     {
-        $charges = (float) $bill->items()->whereIn('type', BusinessTypes::chargeItemTypes())->sum('line_total');
+        $charges = (float) $bill->items()
+            ->whereIn('type', BusinessTypes::chargeItemTypes())
+            ->where('is_free', false)
+            ->sum('line_total');
         $discounts = (float) $bill->items()->whereIn('type', BusinessTypes::discountItemTypes())->sum('line_total');
         $advances = (float) $bill->items()->where('type', 'advance')->sum('line_total');
         $payments = (float) $bill->payments()->countingTowardPaid()->sum('amount');

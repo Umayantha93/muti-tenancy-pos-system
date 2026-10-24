@@ -429,22 +429,28 @@ class JobCardPayrollTest extends TestCase
         $this->assertSame(4, (int) $part->stock_qty);
 
         Bill::query()->findOrFail($billId)->forceFill(['vat_rate' => 18, 'sscl_rate' => 2.5])->save();
-        $priced = $this->putJson("/api/bills/{$billId}/free", ['is_free' => false])->assertOk()->json();
+        app(\App\Services\BillCalculator::class)->recalculate(Bill::query()->findOrFail($billId));
+        $priced = $this->getJson("/api/bills/{$billId}")->assertOk()->json();
         $this->assertGreaterThan(0, (float) $priced['vat_amount']);
         $this->assertGreaterThan(0, (float) $priced['balance_due']);
-        $subtotal = $priced['subtotal'];
 
-        $this->putJson("/api/bills/{$billId}/free", ['is_free' => true])->assertStatus(422);
-        $free = $this->putJson("/api/bills/{$billId}/free", [
-            'is_free' => true,
-            'reason' => 'Warranty from the manufacturer',
-        ])->assertOk()->json();
-        $this->assertTrue($free['is_free']);
-        $this->assertSame('Warranty from the manufacturer', $free['free_reason']);
+        $wash = collect($priced['items'])->firstWhere('description', 'Body wash');
+        $oneFree = $this->putJson("/api/bills/{$billId}/items/{$wash['id']}", ['is_free' => true])->assertOk()->json('bill');
+        $this->assertEquals(16000, $oneFree['subtotal']);
+        $this->assertTrue(collect($oneFree['items'])->firstWhere('description', 'Body wash')['is_free']);
+        $this->assertEquals(2000, collect($oneFree['items'])->firstWhere('description', 'Body wash')['line_total']);
+
+        foreach ($oneFree['items'] as $line) {
+            if ($line['type'] === 'discount') {
+                continue;
+            }
+            $this->putJson("/api/bills/{$billId}/items/{$line['id']}", ['is_free' => true])->assertOk();
+        }
+        $free = $this->getJson("/api/bills/{$billId}")->assertOk()->json();
         $this->assertEquals(0, $free['balance_due']);
         $this->assertEquals(0, $free['vat_amount']);
         $this->assertEquals(0, $free['sscl_amount']);
-        $this->assertEquals($subtotal, $free['subtotal']);
+        $this->assertEquals(0, $free['subtotal']);
         $part->refresh();
         $this->assertSame(4, (int) $part->stock_qty);
 
@@ -459,24 +465,23 @@ class JobCardPayrollTest extends TestCase
 
         $closed = $this->postJson("/api/bills/{$billId}/close")->assertOk()->json();
         $this->assertSame('closed', $closed['status']);
-        $this->assertTrue($closed['is_free']);
-        $this->assertSame('Warranty from the manufacturer', $closed['free_reason']);
         $this->assertEquals(0, $closed['balance_due']);
-        $this->getJson('/api/bills/shared/'.$closed['share_token'])
-            ->assertOk()
-            ->assertJsonPath('free_reason', 'Warranty from the manufacturer');
-        $this->putJson("/api/bills/{$billId}/free", ['is_free' => false])->assertStatus(422);
+        $shared = $this->getJson('/api/bills/shared/'.$closed['share_token'])->assertOk()->json('items');
+        $sharedWash = collect($shared)->firstWhere('description', 'Body wash');
+        $this->assertTrue($sharedWash['is_free']);
+        $this->assertEquals(0, $sharedWash['line_total']);
+        $this->putJson("/api/bills/{$billId}/items/{$wash['id']}", ['is_free' => false])->assertStatus(422);
 
         $paidId = $this->postJson('/api/bills', [
             'number_plate' => 'PAY-'.fake()->unique()->numerify('####'),
             'admission_date' => now()->toDateString(),
             'job_kind' => 'repair',
         ])->assertCreated()->json('id');
-        $this->postJson("/api/bills/{$paidId}/items", [
+        $paidItem = $this->postJson("/api/bills/{$paidId}/items", [
             'type' => 'labor', 'description' => 'Paid labor', 'quantity' => 1, 'unit_price' => 1000,
-        ])->assertCreated();
+        ])->assertCreated()->json('item.id');
         $this->postJson("/api/bills/{$paidId}/payments", ['amount' => 1000, 'method' => 'cash'])->assertCreated();
-        $this->putJson("/api/bills/{$paidId}/free", ['is_free' => true])->assertStatus(422);
+        $this->putJson("/api/bills/{$paidId}/items/{$paidItem}", ['is_free' => true])->assertStatus(422);
     }
 
     public function test_line_technician_name_is_on_the_bill_only_when_the_feature_is_on(): void

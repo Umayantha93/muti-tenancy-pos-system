@@ -578,6 +578,7 @@ return [
         'assigned_employees' => 'පැවරූ සේවකයන්',
         'line_technician' => 'කාර්මිකයා',
         'free_service' => 'නොමිලේ සේවාව',
+        'line_free' => 'නොමිලේ',
         'free' => 'නොමිලේ',
         'free_failed' => 'නොමිලේ සේවාව වෙනස් කළ නොහැකි විය.',
         'free_reason' => 'හේතුව',

@@ -22,7 +22,7 @@ class BillShareController extends Controller
             'customer' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name', 'phone', 'address']),
             'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
             'items' => fn ($query) => $query->withoutGlobalScopes()->select([
-                'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_discount', 'line_total',
+                'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_discount', 'line_total', 'is_free',
                 'panel_group_id', 'panel_name', 'employee_id', 'warranty_months', 'warranty_starts_on', 'warranty_until',
             ]),
             'payments' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bill_id', 'amount', 'method', 'paid_at']),
@@ -147,7 +147,7 @@ class BillShareController extends Controller
                 }
                 $seen[$groupId] = true;
                 $members = $items->where('panel_group_id', $groupId);
-                $total = round((float) $members->sum(fn ($line) => (float) $line->line_total), 2);
+                $total = round((float) $members->sum(fn ($line) => $line->is_free ? 0 : (float) $line->line_total), 2);
                 $first = $members->first();
                 $row = [
                     'id' => $first->id,
@@ -198,7 +198,8 @@ class BillShareController extends Controller
             'quantity' => $hideHours ? null : $item->quantity,
             'unit_price' => $hideRate ? null : $item->unit_price,
             'line_discount' => $hideAmounts ? null : $item->line_discount,
-            'line_total' => $hideAmounts ? null : $item->line_total,
+            'is_free' => (bool) $item->is_free,
+            'line_total' => $hideAmounts ? null : ($item->is_free ? '0.00' : $item->line_total),
             'hide_hours' => $hideHours,
             'hide_amounts' => $hideAmounts,
             'warranty_months' => $item->warranty_months,
