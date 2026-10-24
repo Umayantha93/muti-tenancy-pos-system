@@ -54,11 +54,27 @@ class EmployeeController extends Controller
 
     private function validated(Request $request, ?Employee $employee = null): array
     {
+        if ($request->exists('amount')) {
+            $payType = $request->input('pay_type', $employee?->pay_type ?? 'monthly');
+            if ($payType === 'daily') {
+                $request->merge([
+                    'daily_rate' => $request->input('amount'),
+                    'base_salary' => 0,
+                ]);
+            } else {
+                $request->merge([
+                    'base_salary' => $request->input('amount'),
+                    'daily_rate' => null,
+                ]);
+            }
+        }
+
         $data = $request->validate([
             'name' => [$employee ? 'sometimes' : 'required', 'string', 'max:255'],
             'nic' => [$employee ? 'sometimes' : 'required', 'string', 'max:20', Rule::unique('employees')->where('tenant_id', $request->user()->tenant_id)->ignore($employee)],
             'phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'position' => ['nullable', 'string', 'max:100'],
+            'amount' => ['nullable', 'numeric', 'min:0'],
             'base_salary' => ['nullable', 'numeric', 'min:0'],
             'pay_type' => ['nullable', Rule::in(['monthly', 'daily'])],
             'daily_rate' => ['nullable', 'numeric', 'gt:0', 'required_if:pay_type,daily'],
@@ -77,14 +93,15 @@ class EmployeeController extends Controller
             'allowances.*.min_days' => ['nullable', 'integer', 'min:0', 'max:31'],
         ]);
 
+        unset($data['amount']);
         if (! isset($data['pay_type']) || $data['pay_type'] === null || $data['pay_type'] === '') {
             $data['pay_type'] = $employee?->pay_type ?? 'monthly';
         }
         if (array_key_exists('base_salary', $data) && $data['base_salary'] === null) {
             $data['base_salary'] = 0;
         }
-        if (($data['pay_type'] ?? 'monthly') !== 'daily') {
-            $data['daily_rate'] = $data['daily_rate'] ?? $employee?->daily_rate;
+        if ($data['pay_type'] !== 'daily' && ! array_key_exists('daily_rate', $data)) {
+            $data['daily_rate'] = $employee?->daily_rate;
         }
 
         return $data;
