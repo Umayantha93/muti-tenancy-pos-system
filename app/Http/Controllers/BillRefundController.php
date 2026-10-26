@@ -64,6 +64,20 @@ class BillRefundController extends Controller
                 ->get()
                 ->keyBy('bill_item_id');
 
+            $chargeTotal = (float) BillItem::query()
+                ->where('bill_id', $locked->id)
+                ->where('is_free', false)
+                ->whereIn('type', BusinessTypes::chargeItemTypes())
+                ->sum('line_total');
+            $discountTotal = (float) BillItem::query()
+                ->where('bill_id', $locked->id)
+                ->whereIn('type', BusinessTypes::discountItemTypes())
+                ->sum('line_total');
+            $taxable = max(0, round($chargeTotal - $discountTotal, 2));
+            $netBill = $locked->is_free
+                ? 0.0
+                : round($taxable + (float) $locked->vat_amount + (float) $locked->sscl_amount, 2);
+
             $lines = [];
             $total = 0.0;
 
@@ -111,14 +125,20 @@ class BillRefundController extends Controller
                     ]);
                 }
 
-                $unitPrice = (float) $item->unit_price;
-                $amount = round($quantity * $unitPrice, 2);
+                $fullAmount = 0.0;
+                if (! $item->is_free && $chargeTotal > 0 && (float) $item->quantity > 0) {
+                    $fullAmount = round(((float) $item->line_total / $chargeTotal) * $netBill, 2);
+                }
+                $priorAmount = round((float) ($alreadyRefunded->get($itemId)?->amount ?? 0), 2);
+                $amount = $quantity >= $remainingQty - 0.00001
+                    ? round($fullAmount - $priorAmount, 2)
+                    : round($fullAmount * ($quantity / (float) $item->quantity), 2);
+                $amount = max(0, $amount);
                 $total = round($total + $amount, 2);
 
                 $lines[] = [
                     'item' => $item,
                     'quantity' => $quantity,
-                    'unit_price' => $unitPrice,
                     'amount' => $amount,
                     'disposition' => $disposition,
                 ];
@@ -127,6 +147,18 @@ class BillRefundController extends Controller
             $refundableCash = round((float) $locked->amount_paid - (float) $locked->amount_refunded, 2);
             if ($total <= 0) {
                 throw ValidationException::withMessages(['items' => ['Refund total must be greater than zero.']]);
+            }
+            if ($total > $refundableCash + 0.00001) {
+                $overflow = round($total - $refundableCash, 2);
+                if ($overflow <= 0.05) {
+                    for ($i = count($lines) - 1; $i >= 0; $i--) {
+                        if ($lines[$i]['amount'] + 0.00001 >= $overflow) {
+                            $lines[$i]['amount'] = round($lines[$i]['amount'] - $overflow, 2);
+                            $total = $refundableCash;
+                            break;
+                        }
+                    }
+                }
             }
             if ($total > $refundableCash + 0.00001) {
                 throw ValidationException::withMessages([
@@ -151,7 +183,7 @@ class BillRefundController extends Controller
                     'bill_refund_id' => $refund->id,
                     'bill_item_id' => $item->id,
                     'quantity' => $line['quantity'],
-                    'unit_price' => $line['unit_price'],
+                    'unit_price' => $line['quantity'] > 0 ? round($line['amount'] / $line['quantity'], 2) : 0,
                     'amount' => $line['amount'],
                     'disposition' => $line['disposition'],
                 ]);
