@@ -70,6 +70,39 @@ class BillCreditAndProfitsTest extends TestCase
         $this->assertSame($due, $bill->owe_in_due_date?->toDateString());
     }
 
+    public function test_owe_in_accepts_a_discount_and_still_rejects_other_lines(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $billId = $this->openJob()->json('id');
+        $laborId = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor', 'description' => 'Service', 'quantity' => 1, 'unit_price' => 5000,
+        ])->assertCreated()->json('item.id');
+
+        $this->postJson("/api/bills/{$billId}/owe-in", [
+            'due_date' => now()->addDays(5)->toDateString(),
+        ])->assertOk();
+
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor', 'description' => 'Extra', 'quantity' => 1, 'unit_price' => 500,
+        ])->assertStatus(422);
+
+        $discountId = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'discount', 'description' => 'Loyalty', 'unit_price' => 600,
+        ])->assertCreated()
+            ->assertJsonPath('bill.status', 'owe_in')
+            ->assertJsonPath('bill.balance_due', '4400.00')
+            ->json('item.id');
+
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'discount', 'description' => 'Too much', 'unit_price' => 5000,
+        ])->assertStatus(422);
+
+        $this->deleteJson("/api/bills/{$billId}/items/{$laborId}")->assertStatus(422);
+        $this->deleteJson("/api/bills/{$billId}/items/{$discountId}")
+            ->assertOk()
+            ->assertJsonPath('bill.balance_due', '5000.00');
+    }
+
     public function test_job_cards_list_puts_urgent_owe_in_first_then_open_then_closed(): void
     {
         $user = $this->garageUser();
@@ -130,7 +163,9 @@ class BillCreditAndProfitsTest extends TestCase
 
         $this->assertEquals(0, $sheet['expenses']);
         $this->assertEquals(310000, $sheet['inventory_payables']['payables_total']);
-        $this->assertTrue(collect($sheet['accounts'])->contains(fn ($row) => $row['type'] === 'payable'));
+        $this->assertFalse(collect($sheet['accounts'])->contains(
+            fn ($row) => str_contains((string) $row['description'], 'Brake Pads')
+        ));
 
         $expenseId = Expense::credit()->first()->id;
         $this->postJson("/api/expenses/{$expenseId}/settle")->assertOk();
@@ -140,6 +175,9 @@ class BillCreditAndProfitsTest extends TestCase
             ->json();
         $this->assertEquals(310000, $settled['expenses']);
         $this->assertEquals(0, $settled['inventory_payables']['payables_total']);
+        $this->assertTrue(collect($settled['accounts'])->contains(
+            fn ($row) => $row['type'] === 'expense' && str_contains((string) $row['description'], 'Brake Pads')
+        ));
     }
 
     public function test_bill_profits_report_includes_revenue_cogs_and_credit_bills(): void

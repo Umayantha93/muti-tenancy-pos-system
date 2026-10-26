@@ -613,33 +613,6 @@ class BalanceSheetController extends Controller
                 ]);
             });
 
-        Expense::query()
-            ->credit()
-            ->with('supplier:id,name')
-            ->tap(fn ($query) => BranchQuery::constrain($query))
-            ->whereYear('expense_date', $year)
-            ->whereMonth('expense_date', $month)
-            ->orderBy('expense_date')
-            ->get()
-            ->each(function (Expense $expense) use ($rows, $view) {
-                $remaining = $view->active()
-                    ? $view->scaleExpense($expense->remainingAmount())
-                    : $expense->remainingAmount();
-
-                $rows->push([
-                    'date' => $expense->expense_date?->toDateString() ?? $expense->expense_date,
-                    'sort_at' => ($expense->expense_date?->format('Y-m-d') ?? '').' 12:30:00',
-                    'description' => $expense->description.' · supplier credit (not in profit until paid)',
-                    'reference' => $expense->due_date ? 'Due '.$expense->due_date->toDateString() : null,
-                    'vehicle' => null,
-                    'details' => $this->expenseDetails($expense),
-                    'category' => 'Inventory payable',
-                    'type' => 'payable',
-                    'debit' => $remaining,
-                    'credit' => 0.0,
-                ]);
-            });
-
         $analyzer = app(BillProfitAnalyzer::class);
         BranchQuery::constrain(Bill::query())
             ->with(['items.part', 'refunds.items', 'vehicle:id,number_plate,make,model', 'customer:id,name'])

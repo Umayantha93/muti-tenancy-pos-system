@@ -593,7 +593,7 @@ return [
         'closed_actions' => 'Only refund, SMS, watermark, and print remain available.',
         'owe_banner' => 'This :kind is on owe in.',
         'owe_until' => 'This :kind is on owe in until :date. Items are locked; payments can still be recorded.',
-        'owe_items_locked' => 'Items are locked; payments can still be recorded.',
+        'owe_items_locked' => 'Items are locked. A discount can still be added, and payments can still be recorded.',
         'bill_items' => 'Bill items',
         'rate' => 'Rate',
         'panel' => 'Panel',

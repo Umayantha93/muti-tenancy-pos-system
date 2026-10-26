@@ -27,9 +27,12 @@ class BillItemController extends Controller
 {
     public function store(Request $request, Bill $bill, BillCalculator $calculator): JsonResponse
     {
-        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
-            ? 'Owe-in bills cannot be edited. Record a payment instead.'
-            : 'Closed bills cannot be edited.');
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
+        abort_if(
+            $bill->isOweIn() && $request->input('type') !== 'discount',
+            422,
+            'Owe-in bills cannot be edited. Record a payment or add a discount.'
+        );
 
         $businessType = $request->user()->tenant?->business_type ?? BusinessTypes::GARAGE;
         $allowed = BusinessTypes::allowedBillItemTypes($businessType);
@@ -95,6 +98,14 @@ class BillItemController extends Controller
 
         $item = DB::transaction(function () use ($data, $bill, $calculator, $request) {
             $item = $this->createLine($bill, $data, $request);
+            if ($bill->isOweIn() && $item->type === 'discount') {
+                $max = $this->maxOweInDiscount($bill);
+                if ((float) $item->line_total - $max > 0.009) {
+                    throw ValidationException::withMessages([
+                        'unit_price' => ['Discount cannot be more than the amount still owed ('.number_format($max, 2, '.', '').').'],
+                    ]);
+                }
+            }
             $calculator->recalculate($bill);
 
             return $item;
@@ -284,9 +295,12 @@ class BillItemController extends Controller
     public function destroy(Bill $bill, BillItem $item, BillCalculator $calculator): JsonResponse
     {
         abort_unless($item->bill_id === $bill->id, 404);
-        abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
-            ? 'Owe-in bills cannot be edited. Record a payment instead.'
-            : 'Closed bills cannot be edited.');
+        abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
+        abort_if(
+            $bill->isOweIn() && $item->type !== 'discount',
+            422,
+            'Owe-in bills cannot be edited. Record a payment or add a discount.'
+        );
         abort_if($item->commission_amount !== null, 422, 'This line is already included in a deducted commission.');
 
         DB::transaction(function () use ($bill, $item, $calculator) {
@@ -459,6 +473,17 @@ class BillItemController extends Controller
             'line_discount' => $discount,
             'line_total' => round($gross - $discount, 2),
         ];
+    }
+
+    private function maxOweInDiscount(Bill $bill): float
+    {
+        $rate = ((float) $bill->vat_rate + (float) $bill->sscl_rate) / 100;
+        $balance = (float) $bill->balance_due;
+        if ($rate <= 0) {
+            return round($balance, 2);
+        }
+
+        return round($balance / (1 + $rate), 2);
     }
 
     private function cappedDiscount(float $gross, float $discount): float
