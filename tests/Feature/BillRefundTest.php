@@ -82,6 +82,40 @@ class BillRefundTest extends TestCase
         $this->assertSame('refunded', $bill->resolvedRefundStatus());
     }
 
+    public function test_discounted_closed_bill_refunds_the_amount_the_customer_paid(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $billId = $this->openJob()->json('id');
+        $itemId = $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor', 'description' => 'VEEDOL CI4 15W40 - 6L PACK', 'quantity' => 6, 'unit_price' => 2350,
+        ])->assertCreated()->json('item.id');
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'discount', 'description' => 'DISCOUNT', 'unit_price' => 600,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/payments", ['amount' => 13500, 'method' => 'cash'])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/close")->assertOk();
+
+        $this->postJson("/api/bills/{$billId}/refunds", [
+            'refunded_at' => now()->toDateString(),
+            'reason' => 'Customer returned one pack',
+            'method' => 'cash',
+            'items' => [
+                ['bill_item_id' => $itemId, 'quantity' => 1, 'disposition' => 'none'],
+            ],
+        ])->assertCreated()->assertJsonPath('amount', '2250.00');
+
+        $this->postJson("/api/bills/{$billId}/refunds", [
+            'refunded_at' => now()->toDateString(),
+            'reason' => 'Customer returned the rest',
+            'method' => 'cash',
+            'items' => [
+                ['bill_item_id' => $itemId, 'quantity' => 5, 'disposition' => 'none'],
+            ],
+        ])->assertCreated()->assertJsonPath('amount', '11250.00');
+
+        $this->assertSame('13500.00', Bill::findOrFail($billId)->amount_refunded);
+    }
+
     public function test_cannot_refund_more_than_remaining_quantity_or_cash(): void
     {
         Sanctum::actingAs($this->garageUser());
