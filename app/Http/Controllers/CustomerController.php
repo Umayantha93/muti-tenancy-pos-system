@@ -19,6 +19,7 @@ class CustomerController extends Controller
                 ->where('name', 'like', '%'.$request->string('search').'%')
                 ->orWhere('phone', 'like', '%'.$request->string('search').'%')))
             ->when($request->filled('phone'), fn ($query) => $query->where('phone', 'like', '%'.$request->string('phone').'%'))
+            ->when($request->filled('name'), fn ($query) => $query->where('name', 'like', '%'.$request->string('name').'%'))
             ->latest()
             ->paginate($request->integer('per_page', 20));
 
