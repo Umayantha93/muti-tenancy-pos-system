@@ -434,7 +434,14 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             ...$this->driverRules(),
+            'customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer_phone' => ['sometimes', 'nullable', 'regex:/^[0-9+() -]{7,20}$/'],
+            'customer_address' => ['sometimes', 'nullable', 'string', 'max:255'],
             'number_plate' => ['sometimes', 'required', 'string', 'max:30'],
+            'chassis_number' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'make' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'model' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'year' => ['sometimes', 'nullable', 'integer', 'between:1900,'.(now()->year + 1)],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
@@ -459,7 +466,11 @@ class BillController extends Controller
             }
         }
 
-        $staffOnly = collect($data)->except(['notes', 'internal_notes', 'additional_note_color', 'hide_amounts', 'driver_name', 'driver_phone', 'number_plate'])->isEmpty();
+        $staffOnly = collect($data)->except([
+            'notes', 'internal_notes', 'additional_note_color', 'hide_amounts',
+            'driver_name', 'driver_phone', 'customer_name', 'customer_phone', 'customer_address',
+            'number_plate', 'chassis_number', 'make', 'model', 'year',
+        ])->isEmpty();
         if ($bill->isClosed()) {
             abort(422, 'Closed bills cannot be edited.');
         }
@@ -473,10 +484,31 @@ class BillController extends Controller
         if (($data['status'] ?? null) === 'owe_in') {
             abort(422, 'Use the Owe In action to mark a bill on credit.');
         }
-        if (array_key_exists('number_plate', $data)) {
-            $this->correctVehicleNumber($bill, (string) $data['number_plate']);
-            unset($data['number_plate']);
+        $this->keepExistingDetail($data, 'driver_name', $bill->driver_name, 'The driver name cannot be removed.');
+        $this->keepExistingDetail($data, 'driver_phone', $bill->driver_phone, 'The driver phone cannot be removed.');
+        $this->keepExistingDetail($data, 'mileage', $bill->mileage, 'The mileage cannot be removed.');
+        $this->keepExistingDetail($data, 'next_service_mileage', $bill->next_service_mileage, 'The next service km cannot be removed.');
+        $this->keepExistingDetail($data, 'next_service_due_on', $bill->next_service_due_on, 'The next service date cannot be removed.');
+        if (collect(['customer_name', 'customer_phone', 'customer_address'])->contains(fn (string $key) => array_key_exists($key, $data))) {
+            $this->correctCustomer($bill, $data);
         }
+        $hasVehicleIdentity = collect(['chassis_number', 'make', 'model', 'year'])
+            ->contains(fn (string $key) => array_key_exists($key, $data));
+        if ($hasVehicleIdentity) {
+            $this->correctVehicleIdentity($bill, $data);
+        } elseif (array_key_exists('number_plate', $data)) {
+            $this->correctVehicleNumber($bill, (string) $data['number_plate']);
+        }
+        unset(
+            $data['number_plate'],
+            $data['chassis_number'],
+            $data['make'],
+            $data['model'],
+            $data['year'],
+            $data['customer_name'],
+            $data['customer_phone'],
+            $data['customer_address'],
+        );
         $bill->update([...$data, 'updated_by' => $request->user()->id]);
         if ($employeeIds !== null) {
             $this->syncBillEmployees($bill, $employeeIds);
@@ -762,6 +794,115 @@ class BillController extends Controller
         }
 
         $bill->vehicle->update(['number_plate' => $plate]);
+    }
+
+    /**
+     * Correct the vehicle already on this job: plate, chassis, make, model, and year.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function correctVehicleIdentity(Bill $bill, array $data): void
+    {
+        abort_unless($bill->vehicle, 422, 'This job has no vehicle to change.');
+        $vehicle = $bill->vehicle;
+        $updates = [];
+
+        if (array_key_exists('number_plate', $data)) {
+            $plate = strtoupper(trim((string) $data['number_plate']));
+            abort_if($plate === '', 422, 'Enter the vehicle number.');
+            $updates['number_plate'] = $plate;
+        }
+        if (array_key_exists('chassis_number', $data)) {
+            $chassis = strtoupper(trim((string) ($data['chassis_number'] ?? '')));
+            $chassis = $chassis !== '' ? $chassis : null;
+            $this->refuseCleared($vehicle->chassis_number, $chassis, 'The chassis number cannot be removed.');
+            if ($chassis) {
+                $taken = Vehicle::query()->where('chassis_number', $chassis)->whereKeyNot($vehicle->id)->exists();
+                abort_if($taken, 422, 'That chassis number is already on another vehicle.');
+            }
+            $updates['chassis_number'] = $chassis;
+        }
+        if (array_key_exists('make', $data)) {
+            $make = $this->nullableText($data['make']);
+            $this->refuseCleared($vehicle->make, $make, 'The make cannot be removed.');
+            $updates['make'] = $make;
+        }
+        if (array_key_exists('model', $data)) {
+            $model = $this->nullableText($data['model']);
+            $this->refuseCleared($vehicle->model, $model, 'The model cannot be removed.');
+            $updates['model'] = $model;
+        }
+        if (array_key_exists('year', $data)) {
+            $year = $data['year'] === null || $data['year'] === '' ? null : (int) $data['year'];
+            $this->refuseCleared($vehicle->year, $year, 'The vehicle year cannot be removed.');
+            $updates['year'] = $year;
+        }
+        if ($updates !== []) {
+            $vehicle->update($updates);
+        }
+    }
+
+    private function nullableText(mixed $value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+
+        return $text !== '' ? $text : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function correctCustomer(Bill $bill, array $data): void
+    {
+        $customer = $bill->customer;
+        abort_unless($customer, 422, 'This job has no customer to change.');
+        $updates = [];
+        if (array_key_exists('customer_name', $data)) {
+            $name = trim((string) ($data['customer_name'] ?? ''));
+            $this->refuseCleared($customer->name, $name !== '' ? $name : null, 'The customer name cannot be removed.');
+            if ($name !== '') {
+                $updates['name'] = $name;
+            }
+        }
+        if (array_key_exists('customer_phone', $data)) {
+            $phone = trim((string) ($data['customer_phone'] ?? ''));
+            $this->refuseCleared($customer->phone, $phone !== '' ? $phone : null, 'The customer phone cannot be removed.');
+            if ($phone !== '' && $phone !== (string) $customer->phone) {
+                $taken = Customer::query()->where('phone', $phone)->whereKeyNot($customer->id)->exists();
+                abort_if($taken, 422, 'That phone is already used by another customer.');
+            }
+            $updates['phone'] = $phone !== '' ? $phone : $customer->phone;
+        }
+        if (array_key_exists('customer_address', $data)) {
+            $address = $this->nullableText($data['customer_address']);
+            $this->refuseCleared($customer->address, $address, 'The customer address cannot be removed.');
+            $updates['address'] = $address ?? $customer->address;
+        }
+        if ($updates !== []) {
+            $customer->update($updates);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function keepExistingDetail(array $data, string $key, mixed $current, string $message): void
+    {
+        if (! array_key_exists($key, $data)) {
+            return;
+        }
+        $next = $data[$key];
+        if (is_string($next)) {
+            $next = trim($next) !== '' ? trim($next) : null;
+        }
+        $this->refuseCleared($current, $next, $message);
+    }
+
+    private function refuseCleared(mixed $current, mixed $next, string $message): void
+    {
+        $had = trim((string) ($current ?? '')) !== '';
+        $has = trim((string) ($next ?? '')) !== '';
+        abort_if($had && ! $has, 422, $message);
     }
 
     private function driverRules(): array

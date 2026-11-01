@@ -166,6 +166,7 @@ return [
         'from' => 'From',
         'to' => 'To',
         'date' => 'Date',
+        'edit' => 'Edit',
         'customer' => 'Customer',
         'phone' => 'Phone',
         'amount' => 'Amount',

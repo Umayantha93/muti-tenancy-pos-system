@@ -668,6 +668,90 @@ class ImplementationPlanTest extends TestCase
         $this->assertSame('CAB-2222', Bill::query()->find($billId)->vehicle->number_plate);
     }
 
+    public function test_job_card_vehicle_details_can_be_corrected(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $billId = $this->postJson('/api/bills', [
+            'customer_name' => 'Kamal',
+            'customer_phone' => '0771002000',
+            'number_plate' => 'LL-6683',
+            'make' => 'Isuzu',
+            'model' => 'Lorry',
+            'year' => 2015,
+        ])->assertCreated()->json('id');
+
+        $this->putJson("/api/bills/{$billId}", [
+            'number_plate' => 'll 6683',
+            'chassis_number' => 'ch-100',
+            'make' => 'ISUZU',
+            'model' => '18.5 FLAT FORM',
+            'year' => 2016,
+            'mileage' => 343065,
+        ])->assertOk()
+            ->assertJsonPath('vehicle.number_plate', 'LL 6683')
+            ->assertJsonPath('vehicle.chassis_number', 'CH-100')
+            ->assertJsonPath('vehicle.make', 'ISUZU')
+            ->assertJsonPath('vehicle.model', '18.5 FLAT FORM')
+            ->assertJsonPath('vehicle.year', 2016)
+            ->assertJsonPath('mileage', 343065);
+
+        $this->postJson('/api/bills', [
+            'customer_name' => 'Other',
+            'customer_phone' => '0771002001',
+            'number_plate' => 'CAB-9000',
+            'chassis_number' => 'TAKEN-1',
+        ])->assertCreated();
+
+        $this->putJson("/api/bills/{$billId}", [
+            'chassis_number' => 'taken-1',
+        ])->assertUnprocessable()
+            ->assertJsonPath('message', 'That chassis number is already on another vehicle.');
+
+        $this->putJson("/api/bills/{$billId}", [
+            'make' => '',
+            'model' => '',
+            'year' => null,
+            'chassis_number' => '',
+        ])->assertUnprocessable()
+            ->assertJsonPath('message', 'The chassis number cannot be removed.');
+    }
+
+    public function test_grn_report_pdf_uses_entered_date_not_due_date(): void
+    {
+        Sanctum::actingAs($this->garageUser());
+        $part = Part::create([
+            'name' => 'Filter', 'brand' => 'Bosch', 'type' => 'filter',
+            'price' => 1000, 'cost_price' => 400, 'stock_qty' => 0,
+        ]);
+        $today = now()->toDateString();
+        $enteredEarlier = now()->subMonth()->toDateString();
+
+        $earlierId = $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'OLD-INV',
+            'payment_status' => 'credit',
+            'due_date' => $today,
+            'received_at' => $enteredEarlier,
+            'items' => [['part_id' => $part->id, 'quantity' => 1, 'unit_cost' => 100]],
+        ])->assertOk()->json('receipt.id');
+
+        $currentId = $this->postJson('/api/parts/restock/bulk', [
+            'invoice_number' => 'NEW-INV',
+            'payment_status' => 'credit',
+            'due_date' => now()->addMonth()->toDateString(),
+            'received_at' => $today,
+            'items' => [['part_id' => $part->id, 'quantity' => 2, 'unit_cost' => 50]],
+        ])->assertOk()->json('receipt.id');
+
+        $ids = StockReceipt::query()->enteredBetween($today, $today)->pluck('id');
+        $this->assertTrue($ids->contains($currentId));
+        $this->assertFalse($ids->contains($earlierId));
+
+        $pdf = $this->get("/api/stock-receipts/report?from={$today}&to={$today}")->assertOk();
+        $this->assertSame('application/pdf', $pdf->headers->get('Content-Type'));
+        $this->assertStringStartsWith('%PDF', $pdf->getContent());
+        $this->assertStringContainsString('grn-report-', (string) $pdf->headers->get('Content-Disposition'));
+    }
+
     public function test_reports_endpoint_returns_payload_when_feature_enabled(): void
     {
         Sanctum::actingAs($this->garageUser());

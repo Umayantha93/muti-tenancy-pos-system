@@ -12,8 +12,11 @@ use App\Services\BranchInventory;
 use App\Support\InventoryCosting;
 use App\Support\InventoryExpenseAmounts;
 use App\Support\StockUnit;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -134,7 +137,124 @@ class StockReceiptController extends Controller
             'items.part:id,name,sku,barcode,stock_unit',
         ]);
 
-        return $this->moneyJson([
+        return $this->moneyJson($this->receiptPayload($stockReceipt));
+    }
+
+    public function report(Request $request): Response
+    {
+        $data = $request->validate([
+            'from' => ['required', 'date'],
+            'to' => ['required', 'date', 'after_or_equal:from'],
+        ]);
+        $from = \Illuminate\Support\Carbon::parse($data['from'])->toDateString();
+        $to = \Illuminate\Support\Carbon::parse($data['to'])->toDateString();
+
+        $receipts = StockReceipt::query()
+            ->with([
+                'supplier:id,name',
+                'items.part:id,name,sku',
+                'items.product:id,name',
+            ])
+            ->enteredBetween($from, $to)
+            ->orderBy('received_at')
+            ->orderBy('id')
+            ->get();
+
+        $business = $request->user()->tenant?->business_name ?? 'Business';
+        $shop = $request->user()->role === 'staff' ? \App\Support\BranchContext::branch()?->name : null;
+        $filename = sprintf('grn-report-%s-to-%s.pdf', $from, $to);
+
+        $options = new Options;
+        $options->set('defaultFont', 'DejaVu Sans');
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($this->reportHtml($receipts, $business, $shop, $from, $to), 'UTF-8');
+        $dompdf->setPaper('A4', 'landscape');
+        $dompdf->render();
+
+        return response($dompdf->output(), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, StockReceipt>  $receipts
+     */
+    private function reportHtml($receipts, string $business, ?string $shop, string $from, string $to): string
+    {
+        $e = fn ($value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+        $money = fn ($value): string => number_format((float) $value, 2);
+        $qty = function ($value): string {
+            $formatted = number_format((float) $value, 3, '.', '');
+
+            return rtrim(rtrim($formatted, '0'), '.') ?: '0';
+        };
+        $period = \Illuminate\Support\Carbon::parse($from)->format('j M Y').' – '.\Illuminate\Support\Carbon::parse($to)->format('j M Y');
+
+        $html = '<html><head><meta charset="utf-8"><style>
+            body { font-family: "DejaVu Sans", sans-serif; font-size: 10px; color: #20221f; }
+            h1 { font-size: 16px; margin: 0; }
+            h2 { font-size: 12px; margin: 14px 0 2px; }
+            p.sub { margin: 2px 0 6px; color: #4f544e; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+            th, td { border: 1px solid #d7d3c8; padding: 4px 6px; vertical-align: top; }
+            th { background: #167c73; color: #fff; text-align: left; font-size: 9px; text-transform: uppercase; }
+            td.num, th.num { text-align: right; white-space: nowrap; }
+            tr.total td { font-weight: bold; background: #f3f0e8; }
+        </style></head><body>';
+        $html .= '<h1>'.$e($business).'</h1>';
+        $html .= '<p class="sub">GRN report · entered '.$e($period).($shop ? ' · '.$e($shop) : '').'<br>Each invoice is its own table. Dates are the day the GRN was entered, not the payment due date.</p>';
+
+        $grand = 0.0;
+        if ($receipts->isEmpty()) {
+            $html .= '<p class="sub">No GRNs were entered in this period.</p>';
+        }
+        foreach ($receipts as $receipt) {
+            $lines = $receipt->items;
+            $receiptTotal = round((float) $lines->sum(
+                fn (StockReceiptItem $item) => (float) $item->quantity * (float) $item->unit_cost
+            ), 2);
+            $grand += $receiptTotal;
+            $entered = $receipt->received_at?->toDateString() ?? $receipt->created_at?->toDateString();
+            $enteredLabel = $entered ? \Illuminate\Support\Carbon::parse($entered)->format('j M Y') : '—';
+            $invoice = $receipt->invoice_number ?: '—';
+            $payment = $receipt->payment_status === 'credit' ? 'Credit' : 'Paid';
+            $due = $receipt->due_date?->toDateString() ?: '—';
+            $html .= '<h2>Invoice '.$e($invoice).' · '.$e($enteredLabel).'</h2>';
+            $html .= '<p class="sub">'.$e($receipt->receipt_number)
+                .' · '.($receipt->supplier?->name ? $e($receipt->supplier->name) : 'No supplier')
+                .' · '.$e($payment)
+                .' · Due '.$e($due)
+                .'</p>';
+            $html .= '<table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Amount</th></tr></thead><tbody>';
+            if ($lines->isEmpty()) {
+                $html .= '<tr><td colspan="4">No lines on this invoice.</td></tr>';
+            }
+            foreach ($lines as $item) {
+                $name = $item->part?->name ?? $item->product?->name ?? 'Deleted item';
+                if ($item->part?->sku) {
+                    $name .= ' ('.$item->part->sku.')';
+                }
+                $lineAmount = (float) $item->quantity * (float) $item->unit_cost;
+                $html .= '<tr><td>'.$e($name).'</td><td class="num">'.$e($qty($item->quantity)).'</td><td class="num">'.$e($money($item->unit_cost)).'</td><td class="num">'.$e($money($lineAmount)).'</td></tr>';
+            }
+            $html .= '<tr class="total"><td colspan="3">Invoice total</td><td class="num">LKR '.$money($receiptTotal).'</td></tr>';
+            $html .= '</tbody></table>';
+        }
+        if ($receipts->isNotEmpty()) {
+            $html .= '<table><tr class="total"><td>All invoices</td><td class="num">LKR '.$money($grand).'</td></tr></table>';
+        }
+        $html .= '</body></html>';
+
+        return $html;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function receiptPayload(StockReceipt $stockReceipt): array
+    {
+        return [
             'id' => $stockReceipt->id,
             'receipt_number' => $stockReceipt->receipt_number,
             'invoice_number' => $stockReceipt->invoice_number,
@@ -155,7 +275,7 @@ class StockReceiptController extends Controller
                 'unit_cost' => $item->unit_cost,
                 'line_total' => round((float) $item->quantity * (float) $item->unit_cost, 2),
             ])->values(),
-        ]);
+        ];
     }
 
     /**
