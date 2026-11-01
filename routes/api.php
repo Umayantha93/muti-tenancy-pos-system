@@ -243,6 +243,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/parts', [PartController::class, 'store']);
             Route::get('/parts/import/template', [PartController::class, 'importTemplate']);
             Route::post('/parts/import', [PartController::class, 'import']);
+            Route::get('/stock-receipts/report', [StockReceiptController::class, 'report']);
             Route::get('/stock-receipts', [StockReceiptController::class, 'index']);
             Route::put('/stock-receipts/{stock_receipt}', [StockReceiptController::class, 'update']);
             Route::get('/parts/{part}', [PartController::class, 'show']);
