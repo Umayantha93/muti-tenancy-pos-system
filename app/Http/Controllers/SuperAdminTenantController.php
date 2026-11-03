@@ -187,7 +187,7 @@ class SuperAdminTenantController extends Controller
 
     public function show(Tenant $tenant): JsonResponse
     {
-        $tenant->makeVisible(['dual_financial_view_enabled']);
+        $tenant->makeVisible(['dual_financial_view_enabled', 'show_overdue_fee_banner']);
         $payload = $tenant->load(['features', 'users'])->loadCount('users');
         $payload->users->each(fn (User $user) => $user->makeVisible(['is_secondary_view']));
         $payload->setAttribute(
@@ -278,14 +278,61 @@ class SuperAdminTenantController extends Controller
         return response()->json($tenant->refresh()->loadSum('setupFeePayments', 'amount')->withSetupFeeTotals()->makeVisible(['dual_financial_view_enabled']));
     }
 
-    public function feePayments(Tenant $tenant): JsonResponse
+    public function feePayments(Request $request, Tenant $tenant): JsonResponse
     {
+        $year = (int) ($request->query('year') ?: now()->year);
+        abort_unless($year >= 2000 && $year <= 2100, 422, 'Year is out of range.');
+
         $payments = $tenant->feePayments()
             ->with('marker:id,name,email')
             ->orderByDesc('year')
             ->orderByDesc('month')
-            ->get()
-            ->map(fn (TenantFeePayment $payment) => [
+            ->get();
+
+        $forYear = $payments->where('year', $year)->keyBy(fn (TenantFeePayment $payment) => (int) $payment->month);
+        $started = $tenant->created_at?->copy()->startOfMonth();
+        $current = now()->copy()->startOfMonth();
+        $months = [];
+        for ($month = 1; $month <= 12; $month++) {
+            $start = now()->copy()->setDate($year, $month, 1)->startOfMonth();
+            $payment = $forYear->get($month);
+            if ($started && $start->lt($started)) {
+                $status = 'before';
+            } elseif ($start->gt($current)) {
+                $status = 'upcoming';
+            } else {
+                $status = $payment ? 'paid' : 'unpaid';
+            }
+            $months[] = [
+                'year' => $year,
+                'month' => $month,
+                'period' => sprintf('%04d-%02d', $year, $month),
+                'status' => $status,
+                'amount' => $payment?->amount ?? ($status === 'unpaid' ? $tenant->plan_amount : null),
+                'paid_at' => $payment?->paid_at,
+                'notes' => $payment?->notes,
+                'marked_by' => $payment?->marker?->only(['id', 'name', 'email']),
+            ];
+        }
+
+        $previous = now()->copy()->subMonthNoOverflow();
+        $previousStart = $previous->copy()->startOfMonth();
+        $lastPayment = $payments->first(fn (TenantFeePayment $payment) => (int) $payment->year === (int) $previous->year && (int) $payment->month === (int) $previous->month);
+
+        return response()->json([
+            'year' => $year,
+            'current_month_paid' => $payments->contains(fn (TenantFeePayment $payment) => (int) $payment->year === (int) now()->year && (int) $payment->month === (int) now()->month),
+            'show_overdue_fee_banner' => (bool) $tenant->show_overdue_fee_banner,
+            'last_month' => [
+                'year' => (int) $previous->year,
+                'month' => (int) $previous->month,
+                'period' => $previous->format('Y-m'),
+                'applies' => $tenant->payment_plan === 'monthly' && ($started === null || $previousStart->greaterThanOrEqualTo($started)),
+                'paid' => $lastPayment !== null,
+                'amount' => $lastPayment?->amount ?? $tenant->plan_amount,
+            ],
+            'months' => $months,
+            'payments' => $payments->map(fn (TenantFeePayment $payment) => [
                 'id' => $payment->id,
                 'year' => $payment->year,
                 'month' => $payment->month,
@@ -293,15 +340,8 @@ class SuperAdminTenantController extends Controller
                 'amount' => $payment->amount,
                 'paid_at' => $payment->paid_at,
                 'notes' => $payment->notes,
-                'marked_by' => $payment->marker?->only(['id', 'name', 'email']),
-            ]);
-
-        return response()->json([
-            'current_month_paid' => $tenant->feePayments()
-                ->where('year', now()->year)
-                ->where('month', now()->month)
-                ->exists(),
-            'payments' => $payments,
+                'marked_by' => $payment?->marker?->only(['id', 'name', 'email']),
+            ])->values(),
         ]);
     }
 
@@ -310,6 +350,10 @@ class SuperAdminTenantController extends Controller
         abort_unless($tenant->payment_plan === 'monthly', 422, 'Fee payments apply only to monthly plans.');
         abort_unless($month >= 1 && $month <= 12, 422, 'Month must be between 1 and 12.');
         abort_unless($year >= 2000 && $year <= 2100, 422, 'Year is out of range.');
+        $periodStart = now()->copy()->setDate($year, $month, 1)->startOfMonth();
+        abort_if($periodStart->gt(now()->startOfMonth()), 422, 'A future month cannot be marked yet.');
+        $started = $tenant->created_at?->copy()->startOfMonth();
+        abort_if($started && $periodStart->lt($started), 422, 'This business was not on the plan for that month.');
 
         $data = $request->validate([
             'paid' => ['required', 'boolean'],
@@ -349,7 +393,45 @@ class SuperAdminTenantController extends Controller
             ]);
         }
 
-        return $this->feePayments($tenant);
+        $previous = now()->copy()->subMonthNoOverflow();
+        if ($data['paid'] && (int) $year === (int) $previous->year && (int) $month === (int) $previous->month && $tenant->show_overdue_fee_banner) {
+            $tenant->update(['show_overdue_fee_banner' => false]);
+        }
+
+        return $this->feePayments($request, $tenant->refresh());
+    }
+
+    public function updateFeeBanner(Request $request, Tenant $tenant): JsonResponse
+    {
+        abort_unless($tenant->payment_plan === 'monthly', 422, 'The last-month banner applies only to monthly plans.');
+        abort_if($tenant->plan_amount === null, 422, 'Set a plan amount before showing the due banner.');
+
+        $data = $request->validate([
+            'show' => ['required', 'boolean'],
+        ]);
+
+        if ($data['show']) {
+            $previous = now()->copy()->subMonthNoOverflow();
+            $started = $tenant->created_at?->copy()->startOfMonth();
+            abort_if(
+                $started && $previous->copy()->startOfMonth()->lt($started),
+                422,
+                'This business has no previous month fee yet.'
+            );
+            $paid = $tenant->feePayments()
+                ->where('year', $previous->year)
+                ->where('month', $previous->month)
+                ->exists();
+            abort_if($paid, 422, 'Last month is already paid.');
+        }
+
+        $tenant->update(['show_overdue_fee_banner' => $data['show']]);
+        $this->audit($request, $data['show'] ? 'tenant.fee_banner_shown' : 'tenant.fee_banner_hidden', $tenant, [
+            'year' => (int) now()->copy()->subMonthNoOverflow()->year,
+            'month' => (int) now()->copy()->subMonthNoOverflow()->month,
+        ]);
+
+        return $this->feePayments($request, $tenant->refresh());
     }
 
     public function setupFeePayments(Tenant $tenant): JsonResponse

@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'plan',
     'payment_plan',
     'plan_amount',
+    'show_overdue_fee_banner',
     'setup_fee_amount',
     'logo',
     'bill_prefix',
@@ -45,9 +46,11 @@ class Tenant extends Model
 {
     use SoftDeletes;
 
-    protected $appends = ['logo_url', 'payment_due_soon', 'demo_days_left', 'is_demo', 'bill_number_locked', 'next_bill_number', 'commission_rules'];
+    protected $appends = ['logo_url', 'payment_due_soon', 'payment_due_kind', 'payment_due_year', 'payment_due_month', 'demo_days_left', 'is_demo', 'bill_number_locked', 'next_bill_number', 'commission_rules'];
 
-    protected $hidden = ['dual_financial_view_enabled'];
+    protected $hidden = ['dual_financial_view_enabled', 'show_overdue_fee_banner'];
+
+    private ?array $feeReminderMemo = null;
 
     protected function casts(): array
     {
@@ -55,6 +58,7 @@ class Tenant extends Model
             'contact_phones' => 'array',
             'owner_phones' => 'array',
             'plan_amount' => 'decimal:2',
+            'show_overdue_fee_banner' => 'boolean',
             'setup_fee_amount' => 'decimal:2',
             'dual_financial_view_enabled' => 'boolean',
             'vat_registered' => 'boolean',
@@ -221,20 +225,85 @@ class Tenant extends Model
 
     protected function paymentDueSoon(): Attribute
     {
-        return Attribute::get(function () {
-            if ($this->payment_plan !== 'monthly' || $this->plan_amount === null) {
-                return false;
-            }
-            $today = now()->day;
-            $lastDay = now()->daysInMonth;
-            if ($today <= ($lastDay - 5)) {
-                return false;
-            }
+        return Attribute::get(fn () => $this->feeReminder()['show']);
+    }
 
-            return ! $this->feePayments()
-                ->where('year', now()->year)
-                ->where('month', now()->month)
-                ->exists();
-        });
+    protected function paymentDueKind(): Attribute
+    {
+        return Attribute::get(fn () => $this->feeReminder()['kind']);
+    }
+
+    protected function paymentDueYear(): Attribute
+    {
+        return Attribute::get(fn () => $this->feeReminder()['year']);
+    }
+
+    protected function paymentDueMonth(): Attribute
+    {
+        return Attribute::get(fn () => $this->feeReminder()['month']);
+    }
+
+    /**
+     * Month-end reminder shows itself in the last five days.
+     * A new month stays quiet unless a super admin turns the last-month banner on.
+     *
+     * @return array{show: bool, kind: ?string, year: ?int, month: ?int}
+     */
+    public function feeReminder(): array
+    {
+        if ($this->feeReminderMemo !== null) {
+            return $this->feeReminderMemo;
+        }
+
+        $empty = ['show' => false, 'kind' => null, 'year' => null, 'month' => null];
+        if ($this->payment_plan !== 'monthly' || $this->plan_amount === null) {
+            return $this->feeReminderMemo = $empty;
+        }
+
+        $now = now();
+        $inWindow = $now->day > ($now->daysInMonth - 5);
+        $previous = $now->copy()->subMonthNoOverflow();
+        $started = $this->created_at?->copy()->startOfMonth();
+        $previousApplies = $started === null || $previous->copy()->startOfMonth()->greaterThanOrEqualTo($started);
+        $showOverdue = (bool) $this->show_overdue_fee_banner && $previousApplies;
+
+        if (! $inWindow && ! $showOverdue) {
+            return $this->feeReminderMemo = $empty;
+        }
+
+        $paid = $this->feePayments()
+            ->where(function ($query) use ($inWindow, $showOverdue, $now, $previous) {
+                if ($inWindow) {
+                    $query->orWhere(fn ($inner) => $inner->where('year', $now->year)->where('month', $now->month));
+                }
+                if ($showOverdue) {
+                    $query->orWhere(fn ($inner) => $inner->where('year', $previous->year)->where('month', $previous->month));
+                }
+            })
+            ->get(['year', 'month']);
+
+        $isPaid = function (int $year, int $month) use ($paid): bool {
+            return $paid->contains(fn ($payment) => (int) $payment->year === $year && (int) $payment->month === $month);
+        };
+
+        if ($inWindow && ! $isPaid((int) $now->year, (int) $now->month)) {
+            return $this->feeReminderMemo = [
+                'show' => true,
+                'kind' => 'month_end',
+                'year' => (int) $now->year,
+                'month' => (int) $now->month,
+            ];
+        }
+
+        if ($showOverdue && ! $isPaid((int) $previous->year, (int) $previous->month)) {
+            return $this->feeReminderMemo = [
+                'show' => true,
+                'kind' => 'overdue',
+                'year' => (int) $previous->year,
+                'month' => (int) $previous->month,
+            ];
+        }
+
+        return $this->feeReminderMemo = $empty;
     }
 }

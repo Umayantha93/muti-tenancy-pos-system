@@ -8,6 +8,7 @@ use App\Models\BillPayment;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\RetailSale;
+use App\Services\BillCalculator;
 use App\Services\BranchInventory;
 use App\Support\BranchQuery;
 use App\Support\BusinessTypes;
@@ -35,7 +36,9 @@ class RetailSaleController extends Controller
             'customer_name' => ['nullable', 'string', 'max:255'],
             'customer_phone' => ['nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'notes' => ['nullable', 'string'],
-            'payment_method' => ['nullable', 'string', 'max:50'],
+            'discount' => ['nullable', 'numeric', 'min:0'],
+            'vip' => ['sometimes', 'boolean'],
+            'payment_method' => ['nullable', Rule::in(['cash', 'card', 'qr', 'credit', 'bank_transfer'])],
             'payment_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', Rule::exists('products', 'id')->where('tenant_id', $request->user()->tenant_id)],
@@ -56,6 +59,10 @@ class RetailSaleController extends Controller
                     ['phone' => '0000000000'],
                     ['name' => 'Walk-in customer'],
                 );
+            }
+
+            if (array_key_exists('vip', $data)) {
+                $customer->update(['is_vip' => (bool) $data['vip']]);
             }
 
             $sale = RetailSale::create([
@@ -96,32 +103,40 @@ class RetailSaleController extends Controller
                     'description' => trim($product->name.' '.$product->size.' '.$product->color),
                     'quantity' => $qty,
                     'unit_price' => $product->price,
+                    'purchase_unit_cost' => $product->cost_price,
                     'line_total' => $lineTotal,
                 ]);
                 $product->takeStock($needed);
                 $subtotal += $lineTotal;
             }
 
-            $bill->update([
-                'subtotal' => $subtotal,
-                'balance_due' => $subtotal,
-            ]);
+            $discount = round(min($subtotal, max(0, (float) ($data['discount'] ?? 0))), 2);
+            if ($discount > 0) {
+                BillItem::create([
+                    'bill_id' => $bill->id,
+                    'type' => 'discount',
+                    'description' => 'Discount',
+                    'quantity' => 1,
+                    'unit_price' => $discount,
+                    'line_total' => $discount,
+                ]);
+            }
 
-            $payAmount = isset($data['payment_amount']) ? (float) $data['payment_amount'] : $subtotal;
+            $calculator = app(BillCalculator::class);
+            $calculator->recalculate($bill);
+            $method = $data['payment_method'] ?? 'cash';
+            $payAmount = $method === 'credit'
+                ? 0.0
+                : (isset($data['payment_amount']) ? (float) $data['payment_amount'] : (float) $bill->balance_due);
             if ($payAmount > 0) {
                 BillPayment::create([
                     'bill_id' => $bill->id,
                     'amount' => $payAmount,
-                    'method' => $data['payment_method'] ?? 'cash',
+                    'method' => $method,
                     'paid_at' => now(),
                     'received_by' => $request->user()->id,
                 ]);
-                $bill->update([
-                    'amount_paid' => $payAmount,
-                    'balance_due' => max(0, $subtotal - $payAmount),
-                    'customer_balance' => max(0, $payAmount - $subtotal),
-                    'status' => $payAmount >= $subtotal ? 'paid' : 'partially_paid',
-                ]);
+                $calculator->recalculate($bill);
             }
 
             $sale->update(['bill_id' => $bill->id]);

@@ -37,6 +37,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'photo_bookings', 'name' => 'Bookings', 'description' => 'Photography session bookings', 'group' => 'Service Intake', 'sort_order' => 17],
             ['key' => 'photo_packages', 'name' => 'Packages', 'description' => 'Photography packages and pricing', 'group' => 'Service Intake', 'sort_order' => 18],
             ['key' => 'retail_pos', 'name' => 'Point of sale', 'description' => 'Quick clothing sales at the counter', 'group' => 'Service Intake', 'sort_order' => 19],
+            ['key' => 'customer_display', 'name' => 'Customer display', 'description' => 'Second screen that shows the current clothing sale to the customer. An empty sale shows the shop logo. Off until super-admin enables it.', 'group' => 'Service Intake', 'sort_order' => 29],
             ['key' => 'cottage_stays', 'name' => 'Stays', 'description' => 'Cottage bookings and check-in', 'group' => 'Service Intake', 'sort_order' => 21],
             ['key' => 'customers', 'name' => 'Customers', 'description' => 'Customer directory and history', 'group' => 'Service Intake', 'sort_order' => 20],
             ['key' => 'billing', 'name' => 'Billing', 'description' => 'Orders, charges, and payments', 'group' => 'Service Intake', 'sort_order' => 30],
@@ -64,6 +65,7 @@ class FeatureSeeder extends Seeder
             ['key' => 'service_ops_report', 'name' => 'Service operations report', 'description' => 'Count billed garage service addons (sold qty vs inside full service) with revenue. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 91],
             ['key' => 'expense_job_split', 'name' => 'Repair / service expenses', 'description' => 'Every new expense must be tagged Repair or Service, and Finance shows the two totals separately. Garage only. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 92],
             ['key' => 'finance_report_export', 'name' => 'Finance report download', 'description' => 'Download the monthly Finance report as Excel or PDF — daily table only, or full with every day\'s detail lines. Garage only. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 93],
+            ['key' => 'owe_in_register', 'name' => 'Owe-in register', 'description' => 'On Finance, list customers who still owe, filter that total by due date, and download a PDF with name, phone, vehicle, and amount. Garage only. Off until super-admin enables it.', 'group' => 'Finance', 'sort_order' => 94],
         ];
     }
 }
