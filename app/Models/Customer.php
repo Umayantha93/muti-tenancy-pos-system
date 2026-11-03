@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'phone', 'address', 'sms_opt_in'])]
+#[Fillable(['name', 'phone', 'address', 'sms_opt_in', 'is_vip'])]
 class Customer extends Model
 {
     use BelongsToTenant;
@@ -16,6 +16,7 @@ class Customer extends Model
     {
         return [
             'sms_opt_in' => 'boolean',
+            'is_vip' => 'boolean',
         ];
     }
 
