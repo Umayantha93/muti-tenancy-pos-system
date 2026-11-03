@@ -244,8 +244,8 @@ class Tenant extends Model
     }
 
     /**
-     * Month-end reminder shows itself in the last five days.
-     * A new month stays quiet unless a super admin turns the last-month banner on.
+     * Last month's unpaid fee stays on the banner until it is marked paid.
+     * The month-end reminder only appears in the last five days once that fee is settled.
      *
      * @return array{show: bool, kind: ?string, year: ?int, month: ?int}
      */
@@ -265,18 +265,17 @@ class Tenant extends Model
         $previous = $now->copy()->subMonthNoOverflow();
         $started = $this->created_at?->copy()->startOfMonth();
         $previousApplies = $started === null || $previous->copy()->startOfMonth()->greaterThanOrEqualTo($started);
-        $showOverdue = (bool) $this->show_overdue_fee_banner && $previousApplies;
 
-        if (! $inWindow && ! $showOverdue) {
+        if (! $inWindow && ! $previousApplies) {
             return $this->feeReminderMemo = $empty;
         }
 
         $paid = $this->feePayments()
-            ->where(function ($query) use ($inWindow, $showOverdue, $now, $previous) {
+            ->where(function ($query) use ($inWindow, $previousApplies, $now, $previous) {
                 if ($inWindow) {
                     $query->orWhere(fn ($inner) => $inner->where('year', $now->year)->where('month', $now->month));
                 }
-                if ($showOverdue) {
+                if ($previousApplies) {
                     $query->orWhere(fn ($inner) => $inner->where('year', $previous->year)->where('month', $previous->month));
                 }
             })
@@ -286,21 +285,21 @@ class Tenant extends Model
             return $paid->contains(fn ($payment) => (int) $payment->year === $year && (int) $payment->month === $month);
         };
 
+        if ($previousApplies && ! $isPaid((int) $previous->year, (int) $previous->month)) {
+            return $this->feeReminderMemo = [
+                'show' => true,
+                'kind' => 'overdue',
+                'year' => (int) $previous->year,
+                'month' => (int) $previous->month,
+            ];
+        }
+
         if ($inWindow && ! $isPaid((int) $now->year, (int) $now->month)) {
             return $this->feeReminderMemo = [
                 'show' => true,
                 'kind' => 'month_end',
                 'year' => (int) $now->year,
                 'month' => (int) $now->month,
-            ];
-        }
-
-        if ($showOverdue && ! $isPaid((int) $previous->year, (int) $previous->month)) {
-            return $this->feeReminderMemo = [
-                'show' => true,
-                'kind' => 'overdue',
-                'year' => (int) $previous->year,
-                'month' => (int) $previous->month,
             ];
         }
 
