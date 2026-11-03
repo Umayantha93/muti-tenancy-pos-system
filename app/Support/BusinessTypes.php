@@ -58,13 +58,13 @@ class BusinessTypes
                 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos', 'job_commissions',
                 'free_service', 'show_bill_technicians',
                 'service_reminders', 'service_ops_report', 'station_consumables',
-                'expense_job_split', 'finance_report_export',
+                'expense_job_split', 'finance_report_export', 'owe_in_register',
             ]),
             self::TYRE => $garageFamily,
             self::DEVICE_REPAIR => array_merge($garageFamily, ['serial_inventory']),
             self::PAINT => $garageFamily,
             self::PHOTOGRAPHY => array_merge(['photo_bookings', 'photo_packages'], $shared),
-            self::CLOTHING => $retailFamily,
+            self::CLOTHING => array_merge($retailFamily, ['customer_display']),
             self::SALON => array_merge(['photo_bookings', 'photo_packages', 'retail_pos', 'product_catalog'], $shared),
             self::COTTAGE => array_merge(['cottage_rooms', 'cottage_stays'], $shared),
             self::STORE => $storeFamily,
@@ -91,11 +91,12 @@ class BusinessTypes
                 'free_service', 'show_bill_technicians', 'line_discounts',
                 'admit_combined', 'admit_photos',
                 'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
-                'expense_job_split', 'finance_report_export',
+                'expense_job_split', 'finance_report_export', 'owe_in_register',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
             ],
             self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up', 'line_discounts', ...$whatsapp],
             self::DEVICE_REPAIR => [...$bay, ...$inventoryExtras, 'serial_inventory', 'cash_up', 'line_discounts', ...$whatsapp],
+            self::CLOTHING => ['customer_display', 'cash_up', 'line_discounts', ...$whatsapp],
             default => ['cash_up', 'line_discounts', ...$whatsapp],
         };
     }
@@ -393,8 +394,10 @@ class BusinessTypes
             'serial_inventory' => 'parts_inventory',
             'inventory_edit' => 'parts_inventory',
             'bill_whatsapp' => 'billing',
+            'customer_display' => 'retail_pos',
             'expense_job_split' => 'balance_sheet',
             'finance_report_export' => 'balance_sheet',
+            'owe_in_register' => 'balance_sheet',
         ];
     }
 
@@ -420,7 +423,8 @@ class BusinessTypes
             'inventory_edit' => ['parts_inventory'],
             'station_consumables' => ['parts_inventory'],
             'bill_whatsapp' => ['billing'],
-            'expense_job_split', 'finance_report_export' => ['balance_sheet'],
+            'customer_display' => ['retail_pos'],
+            'expense_job_split', 'finance_report_export', 'owe_in_register' => ['balance_sheet'],
             default => [],
         };
     }
@@ -473,11 +477,14 @@ class BusinessTypes
         } elseif (in_array('inventory_edit', $allowed, true)) {
             $set['inventory_edit'] = true;
         }
+        if (! isset($set['retail_pos'])) {
+            unset($set['customer_display']);
+        }
         if (! isset($set['billing'])) {
             unset($set['bill_whatsapp'], $set['bill_sms'], $set['service_reminders'], $set['job_photos'], $set['job_videos'], $set['job_commissions'], $set['free_service'], $set['show_bill_technicians'], $set['line_discounts']);
         }
         if (! isset($set['balance_sheet'])) {
-            unset($set['expense_job_split'], $set['finance_report_export']);
+            unset($set['expense_job_split'], $set['finance_report_export'], $set['owe_in_register']);
         }
 
         if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])

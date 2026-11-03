@@ -20,7 +20,7 @@ class BillPaymentController extends Controller
             'amount' => ['required', 'numeric', 'gt:0'],
             'method' => ['required', Rule::in(BillPayment::METHODS)],
             'reference' => ['nullable', 'string', 'max:100'],
-            'paid_at' => ['nullable', 'date'],
+            'paid_at' => ['nullable', 'date', 'before_or_equal:today'],
             'cheque_number' => ['nullable', 'string', 'max:80'],
             'cheque_date' => ['nullable', 'date'],
         ]);
@@ -46,7 +46,9 @@ class BillPaymentController extends Controller
                 'cleared_on' => null,
                 'paid_at' => $isCheque
                     ? ($data['cheque_date'] ?? now())
-                    : ($data['paid_at'] ?? now()),
+                    : (! empty($data['paid_at'])
+                        ? \Illuminate\Support\Carbon::parse($data['paid_at'])->startOfDay()->addHours(12)
+                        : now()),
                 'received_by' => $request->user()->id,
             ]);
             $calculator->recalculate($bill);

@@ -13,6 +13,7 @@ use App\Http\Controllers\BillShareController;
 use App\Http\Controllers\BillSmsController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CashUpController;
+use App\Http\Controllers\ClothingController;
 use App\Http\Controllers\CommissionController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\CottageRoomController;
@@ -33,6 +34,7 @@ use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\MeController;
+use App\Http\Controllers\OweInReportController;
 use App\Http\Controllers\PartCategoryController;
 use App\Http\Controllers\PartController;
 use App\Http\Controllers\PartSaleController;
@@ -107,6 +109,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         Route::put('/tenants/{tenant}/dual-financial-view', [SuperAdminTenantController::class, 'updateDualFinancialView']);
         Route::get('/tenants/{tenant}/fee-payments', [SuperAdminTenantController::class, 'feePayments']);
         Route::put('/tenants/{tenant}/fee-payments/{year}/{month}', [SuperAdminTenantController::class, 'updateFeePayment']);
+        Route::put('/tenants/{tenant}/fee-banner', [SuperAdminTenantController::class, 'updateFeeBanner']);
         Route::get('/tenants/{tenant}/setup-fee-payments', [SuperAdminTenantController::class, 'setupFeePayments']);
         Route::post('/tenants/{tenant}/setup-fee-payments', [SuperAdminTenantController::class, 'storeSetupFeePayment']);
         Route::delete('/tenants/{tenant}/setup-fee-payments/{setupFeePayment}', [SuperAdminTenantController::class, 'destroySetupFeePayment']);
@@ -291,6 +294,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/retail-sales', [RetailSaleController::class, 'index']);
             Route::post('/retail-sales', [RetailSaleController::class, 'store']);
             Route::get('/retail-sales/{sale}', [RetailSaleController::class, 'show']);
+            Route::get('/clothing/insights', [ClothingController::class, 'insights']);
+        });
+
+        Route::middleware('feature:customer_display')->group(function () {
+            Route::get('/clothing/display', [ClothingController::class, 'showDisplay']);
+            Route::put('/clothing/display', [ClothingController::class, 'updateDisplay']);
         });
 
         Route::middleware('feature:cottage_rooms')->group(function () {
@@ -424,6 +433,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/expenses/{expense}/settle', [ExpenseController::class, 'settle']);
             Route::get('/balance-sheet', BalanceSheetController::class);
             Route::get('/balance-sheet/export', FinanceReportController::class)->middleware('feature:finance_report_export');
+            Route::get('/finance/owe-in', [OweInReportController::class, 'index'])->middleware('feature:owe_in_register');
+            Route::get('/finance/owe-in/pdf', [OweInReportController::class, 'pdf'])->middleware('feature:owe_in_register');
         });
     });
 });

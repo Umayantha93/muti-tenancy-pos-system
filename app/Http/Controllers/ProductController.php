@@ -20,7 +20,12 @@ class ProductController extends Controller
         $products = Product::query()
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = '%'.$request->string('search').'%';
-                $q->where(fn ($n) => $n->where('name', 'like', $search)->orWhere('sku', 'like', $search)->orWhere('category', 'like', $search));
+                $q->where(fn ($n) => $n->where('name', 'like', $search)
+                    ->orWhere('sku', 'like', $search)
+                    ->orWhere('barcode', 'like', $search)
+                    ->orWhere('category', 'like', $search)
+                    ->orWhere('color', 'like', $search)
+                    ->orWhere('size', 'like', $search));
             })
             ->when($request->boolean('active_only'), fn ($q) => $q->where('active', true))
             ->latest()
@@ -33,12 +38,17 @@ class ProductController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($request->input('barcode') === '') {
+            $request->merge(['barcode' => null]);
+        }
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'sku' => ['nullable', 'string', 'max:100'],
+            'barcode' => ['nullable', 'string', 'max:100', Rule::unique('products', 'barcode')->where('tenant_id', $request->user()->tenant_id)],
             'category' => ['nullable', 'string', 'max:100'],
             'size' => ['nullable', 'string', 'max:50'],
             'color' => ['nullable', 'string', 'max:50'],
+            'badge' => ['nullable', 'string', 'max:30'],
             'price' => ['required', 'numeric', 'min:0'],
             'cost_price' => ['nullable', 'numeric', 'min:0'],
             'stock_qty' => ['nullable', 'integer', 'min:0'],
@@ -56,12 +66,17 @@ class ProductController extends Controller
 
     public function update(Request $request, Product $product): JsonResponse
     {
+        if ($request->input('barcode') === '') {
+            $request->merge(['barcode' => null]);
+        }
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'sku' => ['nullable', 'string', 'max:100'],
+            'barcode' => ['nullable', 'string', 'max:100', Rule::unique('products', 'barcode')->where('tenant_id', $request->user()->tenant_id)->ignore($product->id)],
             'category' => ['nullable', 'string', 'max:100'],
             'size' => ['nullable', 'string', 'max:50'],
             'color' => ['nullable', 'string', 'max:50'],
+            'badge' => ['nullable', 'string', 'max:30'],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'cost_price' => ['nullable', 'numeric', 'min:0'],
             'stock_qty' => ['nullable', 'integer', 'min:0'],

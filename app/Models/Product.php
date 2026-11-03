@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'sku', 'category', 'size', 'color', 'price', 'cost_price', 'stock_qty', 'images', 'description', 'active'])]
+#[Fillable(['name', 'sku', 'barcode', 'category', 'size', 'color', 'badge', 'price', 'cost_price', 'stock_qty', 'images', 'description', 'active'])]
 class Product extends Model
 {
     use BelongsToTenant;
@@ -51,7 +51,13 @@ class Product extends Model
     protected function imageUrls(): Attribute
     {
         return Attribute::get(fn () => collect($this->images ?? [])
-            ->map(fn (string $path) => 'storage/'.$path)
+            ->map(function (string $path) {
+                if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                    return $path;
+                }
+
+                return 'storage/'.$path;
+            })
             ->values()
             ->all());
     }

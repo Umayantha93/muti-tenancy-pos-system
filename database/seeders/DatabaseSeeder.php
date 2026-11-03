@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             PosDemoDataSeeder::class,
             MyDearShopDemoSeeder::class,
             PaintShopDemoSeeder::class,
+            ClothingDemoSeeder::class,
         ]);
     }
 }

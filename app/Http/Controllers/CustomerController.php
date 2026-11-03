@@ -179,6 +179,7 @@ class CustomerController extends Controller
             'phone' => [$update ? 'sometimes' : 'required', 'regex:/^[0-9+() -]{7,20}$/'],
             'address' => ['nullable', 'string', 'max:255'],
             'sms_opt_in' => ['sometimes', 'boolean'],
+            'is_vip' => ['sometimes', 'boolean'],
         ]);
 
         if (array_key_exists('name', $data) && trim((string) $data['name']) === '') {
