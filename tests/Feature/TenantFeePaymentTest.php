@@ -136,7 +136,7 @@ class TenantFeePaymentTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_new_month_hides_the_banner_until_super_admin_shows_last_month_due(): void
+    public function test_unpaid_last_month_shows_the_banner_until_it_is_marked_paid(): void
     {
         Carbon::setTestNow(Carbon::create(2026, 9, 2, 12, 0, 0));
 
@@ -146,42 +146,41 @@ class TenantFeePaymentTest extends TestCase
 
         $this->getJson('/api/user')
             ->assertOk()
-            ->assertJsonPath('user.tenant.payment_due_soon', false)
-            ->assertJsonPath('user.tenant.payment_due_kind', null);
-
-        $admin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
-        Sanctum::actingAs($admin);
-
-        $this->putJson("/api/super-admin/tenants/{$tenant->id}/fee-banner", ['show' => true])
-            ->assertOk()
-            ->assertJsonPath('show_overdue_fee_banner', true)
-            ->assertJsonPath('last_month.period', '2026-08')
-            ->assertJsonPath('last_month.paid', false)
-            ->assertJsonPath('months.7.status', 'unpaid');
-
-        Sanctum::actingAs($owner);
-        $this->getJson('/api/user')
-            ->assertOk()
             ->assertJsonPath('user.tenant.payment_due_soon', true)
             ->assertJsonPath('user.tenant.payment_due_kind', 'overdue')
             ->assertJsonPath('user.tenant.payment_due_year', 2026)
             ->assertJsonPath('user.tenant.payment_due_month', 8);
 
+        $admin = User::factory()->create(['tenant_id' => null, 'role' => 'super_admin', 'status' => 'active']);
         Sanctum::actingAs($admin);
+
+        $this->getJson("/api/super-admin/tenants/{$tenant->id}/fee-payments")
+            ->assertOk()
+            ->assertJsonPath('last_month.period', '2026-08')
+            ->assertJsonPath('last_month.paid', false)
+            ->assertJsonPath('months.7.status', 'unpaid');
+
         $this->putJson("/api/super-admin/tenants/{$tenant->id}/fee-payments/2026/8", ['paid' => true])
             ->assertOk()
-            ->assertJsonPath('show_overdue_fee_banner', false)
             ->assertJsonPath('months.7.status', 'paid');
 
         Sanctum::actingAs($owner);
         $this->getJson('/api/user')
             ->assertOk()
-            ->assertJsonPath('user.tenant.payment_due_soon', false);
+            ->assertJsonPath('user.tenant.payment_due_soon', false)
+            ->assertJsonPath('user.tenant.payment_due_kind', null);
 
         Sanctum::actingAs($admin);
-        $this->putJson("/api/super-admin/tenants/{$tenant->id}/fee-banner", ['show' => true])
-            ->assertStatus(422);
+        $this->putJson("/api/super-admin/tenants/{$tenant->id}/fee-payments/2026/8", ['paid' => false])
+            ->assertOk();
 
+        Sanctum::actingAs($owner);
+        $this->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('user.tenant.payment_due_soon', true)
+            ->assertJsonPath('user.tenant.payment_due_kind', 'overdue');
+
+        Sanctum::actingAs($admin);
         $this->putJson("/api/super-admin/tenants/{$tenant->id}/fee-payments/2026/10", ['paid' => true])
             ->assertStatus(422);
 

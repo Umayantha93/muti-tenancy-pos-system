@@ -58,11 +58,11 @@ class BusinessTypes
                 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos', 'job_commissions',
                 'free_service', 'show_bill_technicians',
                 'service_reminders', 'service_ops_report', 'station_consumables',
-                'expense_job_split', 'finance_report_export', 'owe_in_register',
+                'expense_job_split', 'finance_report_export', 'owe_in_register', 'job_progress',
             ]),
             self::TYRE => $garageFamily,
             self::DEVICE_REPAIR => array_merge($garageFamily, ['serial_inventory']),
-            self::PAINT => $garageFamily,
+            self::PAINT => array_merge($garageFamily, ['job_progress']),
             self::PHOTOGRAPHY => array_merge(['photo_bookings', 'photo_packages'], $shared),
             self::CLOTHING => array_merge($retailFamily, ['customer_display']),
             self::SALON => array_merge(['photo_bookings', 'photo_packages', 'retail_pos', 'product_catalog'], $shared),
@@ -91,10 +91,11 @@ class BusinessTypes
                 'free_service', 'show_bill_technicians', 'line_discounts',
                 'admit_combined', 'admit_photos',
                 'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
-                'expense_job_split', 'finance_report_export', 'owe_in_register',
+                'expense_job_split', 'finance_report_export', 'owe_in_register', 'job_progress',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
             ],
-            self::TYRE, self::PAINT => [...$bay, ...$inventoryExtras, 'cash_up', 'line_discounts', ...$whatsapp],
+            self::TYRE => [...$bay, ...$inventoryExtras, 'cash_up', 'line_discounts', ...$whatsapp],
+            self::PAINT => ['job_progress', ...$bay, ...$inventoryExtras, 'cash_up', 'line_discounts', ...$whatsapp],
             self::DEVICE_REPAIR => [...$bay, ...$inventoryExtras, 'serial_inventory', 'cash_up', 'line_discounts', ...$whatsapp],
             self::CLOTHING => ['customer_display', 'cash_up', 'line_discounts', ...$whatsapp],
             default => ['cash_up', 'line_discounts', ...$whatsapp],
@@ -384,6 +385,7 @@ class BusinessTypes
             'job_board' => 'admit_vehicle',
             'owner_bill_sms' => 'admit_vehicle',
             'job_photos' => 'billing',
+            'job_progress' => 'billing',
             'job_videos' => 'billing',
             'bill_sms' => 'billing',
             'service_reminders' => 'billing',
@@ -416,7 +418,7 @@ class BusinessTypes
         return match ($key) {
             'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'admit_photos' => ['admit_vehicle'],
             'admit_combined' => ['admit_vehicle', 'admit_repair', 'admit_service'],
-            'job_photos', 'job_videos', 'bill_sms', 'job_commissions', 'free_service', 'show_bill_technicians', 'line_discounts' => ['billing'],
+            'job_photos', 'job_videos', 'job_progress', 'bill_sms', 'job_commissions', 'free_service', 'show_bill_technicians', 'line_discounts' => ['billing'],
             'service_reminders' => ['billing', 'bill_sms', 'admit_service'],
             'service_ops_report' => ['admit_service'],
             'serial_inventory' => ['parts_inventory'],
@@ -481,7 +483,7 @@ class BusinessTypes
             unset($set['customer_display']);
         }
         if (! isset($set['billing'])) {
-            unset($set['bill_whatsapp'], $set['bill_sms'], $set['service_reminders'], $set['job_photos'], $set['job_videos'], $set['job_commissions'], $set['free_service'], $set['show_bill_technicians'], $set['line_discounts']);
+            unset($set['bill_whatsapp'], $set['bill_sms'], $set['service_reminders'], $set['job_photos'], $set['job_videos'], $set['job_progress'], $set['job_commissions'], $set['free_service'], $set['show_bill_technicians'], $set['line_discounts']);
         }
         if (! isset($set['balance_sheet'])) {
             unset($set['expense_job_split'], $set['finance_report_export'], $set['owe_in_register']);

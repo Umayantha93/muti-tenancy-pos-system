@@ -30,6 +30,7 @@ use App\Http\Controllers\JobAlertController;
 use App\Http\Controllers\JobBoardController;
 use App\Http\Controllers\JobBookingController;
 use App\Http\Controllers\JobPhotoController;
+use App\Http\Controllers\JobProgressController;
 use App\Http\Controllers\JobVideoController;
 use App\Http\Controllers\LaborCatalogController;
 use App\Http\Controllers\LocaleController;
@@ -74,6 +75,8 @@ Route::get('/auth/branding', [AuthController::class, 'branding'])->middleware('t
 Route::get('/translations', [LocaleController::class, 'show'])->middleware('throttle:60,1');
 Route::post('/attendance/ingest', [AttendanceController::class, 'ingest'])->middleware('throttle:120,1');
 Route::post('/contact', [ContactController::class, 'store'])->middleware('throttle:5,1');
+Route::get('/bills/shared/{token}/progress', [JobProgressController::class, 'shared'])->middleware('throttle:60,1');
+Route::get('/bills/shared/{token}/progress-photos/{progressPhoto}/file', [JobProgressController::class, 'sharedPhoto'])->middleware('throttle:60,1');
 Route::get('/bills/shared/{token}', [BillShareController::class, 'show'])->middleware('throttle:60,1');
 Route::get('/bills/shared/{token}/photos/{photo}/file', [BillShareController::class, 'photo'])->middleware('throttle:60,1');
 Route::get('/bills/shared/{token}/videos/{video}/file', [BillShareController::class, 'video'])->middleware('throttle:60,1');
@@ -222,6 +225,12 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::post('/bills/{bill}/videos', [JobVideoController::class, 'store']);
             Route::get('/bills/{bill}/videos/{video}/file', [JobVideoController::class, 'file']);
             Route::delete('/bills/{bill}/videos/{video}', [JobVideoController::class, 'destroy']);
+        });
+        Route::middleware('feature:job_progress')->group(function () {
+            Route::get('/bills/{bill}/progress', [JobProgressController::class, 'show']);
+            Route::put('/bills/{bill}/progress', [JobProgressController::class, 'update']);
+            Route::post('/bills/{bill}/progress/photos', [JobProgressController::class, 'storePhoto']);
+            Route::delete('/bills/{bill}/progress/photos/{progressPhoto}', [JobProgressController::class, 'destroyPhoto']);
         });
         Route::middleware('feature:job_photos,admit_photos')->group(function () {
             Route::get('/bills/{bill}/photos', [JobPhotoController::class, 'index']);
