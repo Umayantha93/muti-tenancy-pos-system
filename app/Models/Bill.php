@@ -38,6 +38,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'job_kind',
     'service_vehicle_class_id',
     'floor_status',
+    'progress_step',
     'hide_amounts',
     'is_free',
     'free_reason',
@@ -197,6 +198,11 @@ class Bill extends Model
     public function photos(): HasMany
     {
         return $this->hasMany(BillPhoto::class)->latest();
+    }
+
+    public function progressPhotos(): HasMany
+    {
+        return $this->hasMany(JobProgressPhoto::class)->orderBy('id');
     }
 
     public function acceptsRefunds(): bool

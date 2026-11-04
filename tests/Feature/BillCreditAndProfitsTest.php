@@ -213,6 +213,45 @@ class BillCreditAndProfitsTest extends TestCase
         $this->assertSame('credit', $detail['payment_status']);
         $this->assertEquals(800, $detail['cogs']);
         $this->assertEquals(2200, $detail['profit']);
+        $this->assertEquals(1000, $report['work_revenue']);
+        $this->assertEquals(1000, $report['work_profit']);
+        $this->assertEquals(2000, $report['goods_revenue']);
+        $this->assertEquals(800, $report['goods_cogs']);
+        $this->assertEquals(1200, $report['goods_profit']);
+        $this->assertEquals(2200, round($report['work_profit'] + $report['goods_profit'], 2));
+        $this->assertEquals(1000, $detail['work_profit']);
+        $this->assertEquals(1200, $detail['goods_profit']);
+    }
+
+    public function test_services_and_goods_share_a_discount_and_ignore_customer_parts(): void
+    {
+        Sanctum::actingAs($this->garageUser(['bill_profits']));
+        $part = Part::create([
+            'name' => 'Pads', 'brand' => 'Bosch', 'type' => 'brake',
+            'price' => 2000, 'cost_price' => 800, 'stock_qty' => 5,
+        ]);
+        $billId = $this->openJob()->json('id');
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'labor', 'description' => 'Fit', 'quantity' => 1, 'unit_price' => 1000,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'part', 'part_id' => $part->id, 'quantity' => 1,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'customer_part', 'description' => 'Customer battery', 'quantity' => 1,
+        ])->assertCreated();
+        $this->postJson("/api/bills/{$billId}/items", [
+            'type' => 'discount', 'description' => 'Loyalty', 'quantity' => 1, 'unit_price' => 300,
+        ])->assertCreated();
+
+        $detail = $this->getJson("/api/bill-profits/{$billId}")->assertOk()->json();
+        $this->assertEquals(2700, $detail['revenue']);
+        $this->assertEquals(800, $detail['cogs']);
+        $this->assertEquals(900, $detail['work_profit']);
+        $this->assertEquals(1800, $detail['goods_revenue']);
+        $this->assertEquals(800, $detail['goods_cogs']);
+        $this->assertEquals(1000, $detail['goods_profit']);
+        $this->assertEquals(1900, round($detail['work_profit'] + $detail['goods_profit'], 2));
     }
 
     public function test_staff_without_bill_profits_cannot_view_report(): void

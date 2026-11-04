@@ -76,6 +76,7 @@ class BillProfitController extends Controller
                 $carry['total_revenue'] += $summary['revenue'];
                 $carry['total_cogs'] += $summary['cogs'];
                 $carry['gross_profit'] += $summary['profit'];
+                $this->addActivity($carry, $summary);
                 foreach (['service', 'repair'] as $bucket) {
                     $carry["{$bucket}_revenue"] += $split[$bucket]['revenue'];
                     $carry["{$bucket}_cogs"] += $split[$bucket]['cogs'];
@@ -97,6 +98,11 @@ class BillProfitController extends Controller
                 $carry['total_revenue'] += $part['revenue'];
                 $carry['total_cogs'] += $part['cogs'];
                 $carry['gross_profit'] += $part['profit'];
+                $this->addActivity($carry, $analyzer->allocateActivity(
+                    $analyzer->activitySplit($bill, $jobKind),
+                    $part['revenue'],
+                    $part['cogs'],
+                ));
                 $carry["{$jobKind}_revenue"] += $part['revenue'];
                 $carry["{$jobKind}_cogs"] += $part['cogs'];
                 $carry["{$jobKind}_gross_profit"] += $part['profit'];
@@ -113,6 +119,7 @@ class BillProfitController extends Controller
             $carry['total_revenue'] += $summary['revenue'];
             $carry['total_cogs'] += $summary['cogs'];
             $carry['gross_profit'] += $summary['profit'];
+            $this->addActivity($carry, $summary);
             $carry["{$kind}_revenue"] += $summary['revenue'];
             $carry["{$kind}_cogs"] += $summary['cogs'];
             $carry["{$kind}_gross_profit"] += $summary['profit'];
@@ -141,16 +148,26 @@ class BillProfitController extends Controller
             'parts_sale_cogs' => 0.0,
             'parts_sale_gross_profit' => 0.0,
             'parts_sale_count' => 0,
+            'work_revenue' => 0.0,
+            'work_cogs' => 0.0,
+            'work_profit' => 0.0,
+            'goods_revenue' => 0.0,
+            'goods_cogs' => 0.0,
+            'goods_profit' => 0.0,
             'credit_count' => 0,
             'credit_generated' => 0.0,
             'credit_collected' => 0.0,
             'credit_pending' => 0.0,
         ]);
 
-        foreach (['total', 'service', 'repair', 'parts_sale'] as $prefix) {
+        foreach (['total', 'service', 'repair', 'parts_sale', 'work', 'goods'] as $prefix) {
             $totals["{$prefix}_revenue"] = round($totals["{$prefix}_revenue"], 2);
             $totals["{$prefix}_cogs"] = round($totals["{$prefix}_cogs"], 2);
-            $profitKey = $prefix === 'total' ? 'gross_profit' : "{$prefix}_gross_profit";
+            $profitKey = match ($prefix) {
+                'total' => 'gross_profit',
+                'work', 'goods' => "{$prefix}_profit",
+                default => "{$prefix}_gross_profit",
+            };
             $totals[$profitKey] = round($totals[$profitKey], 2);
         }
         $totals['margin'] = $totals['total_revenue'] > 0
@@ -164,6 +181,12 @@ class BillProfitController extends Controller
             : 0.0;
         $totals['parts_sale_margin'] = $totals['parts_sale_revenue'] > 0
             ? round(($totals['parts_sale_gross_profit'] / $totals['parts_sale_revenue']) * 100, 1)
+            : 0.0;
+        $totals['work_margin'] = $totals['work_revenue'] > 0
+            ? round(($totals['work_profit'] / $totals['work_revenue']) * 100, 1)
+            : 0.0;
+        $totals['goods_margin'] = $totals['goods_revenue'] > 0
+            ? round(($totals['goods_profit'] / $totals['goods_revenue']) * 100, 1)
             : 0.0;
         $totals['credit_generated'] = round($totals['credit_generated'], 2);
         $totals['credit_collected'] = round($totals['credit_collected'], 2);
@@ -202,5 +225,18 @@ class BillProfitController extends Controller
             'total_deductions' => $bill->total_deductions,
             ...$summary,
         ]);
+    }
+
+    /**
+     * @param  array<string, float|int>  $carry
+     * @param  array<string, float|int>  $split
+     */
+    private function addActivity(array &$carry, array $split): void
+    {
+        foreach (['work', 'goods'] as $side) {
+            $carry["{$side}_revenue"] += $split["{$side}_revenue"];
+            $carry["{$side}_cogs"] += $split["{$side}_cogs"];
+            $carry["{$side}_profit"] += $split["{$side}_profit"];
+        }
     }
 }
