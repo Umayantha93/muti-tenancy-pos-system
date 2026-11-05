@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Bill;
+use App\Models\BillItem;
 use App\Models\Tenant;
 use App\Support\BusinessTypes;
 
@@ -22,7 +23,8 @@ class BillCalculator
         $vatRate = (float) ($bill->vat_rate ?? 0);
         $ssclRate = (float) ($bill->sscl_rate ?? 0);
         $free = (bool) $bill->is_free;
-        $vatAmount = $free ? 0.0 : round($taxable * ($vatRate / 100), 2);
+        $lineVat = $free ? 0.0 : round((float) $bill->items()->get()->sum(fn (BillItem $item) => $item->vatTaken()), 2);
+        $vatAmount = $free ? 0.0 : round($taxable * ($vatRate / 100), 2) + $lineVat;
         $ssclAmount = $free ? 0.0 : round($taxable * ($ssclRate / 100), 2);
         $netBill = $free ? 0.0 : $taxable + $vatAmount + $ssclAmount;
         $balanceDue = max(0, $netBill - $amountPaid);

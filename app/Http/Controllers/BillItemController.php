@@ -51,6 +51,7 @@ class BillItemController extends Controller
             'labor_item_id' => ['nullable', Rule::exists('labor_items', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'employee_id' => ['nullable', 'integer', Rule::exists('employees', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'line_vat' => ['nullable', 'numeric', 'min:0'],
             'line_discount' => ['nullable', 'numeric', 'min:0'],
             'warranty_months' => ['nullable', 'integer', 'min:0', 'max:120'],
             'warranty_starts_on' => ['nullable', 'date'],
@@ -218,6 +219,11 @@ class BillItemController extends Controller
     public function update(Request $request, Bill $bill, BillItem $item, BillCalculator $calculator): JsonResponse
     {
         abort_unless($item->bill_id === $bill->id, 404);
+        if ($this->isVatOnlyUpdate($request)) {
+            abort_if($bill->isClosed(), 422, 'Closed bills cannot be edited.');
+
+            return $this->saveLineVat($request, $bill, $item, $calculator);
+        }
         abort_if($bill->isLockedForEdits(), 422, $bill->isOweIn()
             ? 'Owe-in bills cannot be edited. Record a payment instead.'
             : 'Closed bills cannot be edited.');
@@ -456,23 +462,78 @@ class BillItemController extends Controller
     }
 
     /**
-     * @return array{quantity: float, unit_price: float, line_discount: float, line_total: float}
+     * @return array{quantity: float, unit_price: float, line_vat: float, line_discount: float, line_total: float}
      */
-    private function pricedLine(BillItem $item, float $quantity, float $unitPrice, ?float $lineDiscount = null): array
+    private function pricedLine(BillItem $item, float $quantity, float $unitPrice, ?float $lineDiscount = null, ?float $lineVat = null): array
     {
         $gross = round($unitPrice * $quantity, 2);
         $percent = (float) ($item->discount_percent ?? 0);
         if ($percent > 0) {
             $gross = round($gross * (1 - ($percent / 100)), 2);
         }
-        $discount = $this->cappedDiscount($gross, $lineDiscount ?? (float) $item->line_discount);
+        $vatAmount = $this->cappedDiscount($gross, $lineVat ?? (float) ($item->line_vat ?? 0), 'VAT');
+        $net = round($gross - $vatAmount, 2);
+        $discount = $this->cappedDiscount($net, $lineDiscount ?? (float) $item->line_discount);
 
         return [
             'quantity' => $quantity,
             'unit_price' => $unitPrice,
+            'line_vat' => $vatAmount,
             'line_discount' => $discount,
-            'line_total' => round($gross - $discount, 2),
+            'line_total' => round($net - $discount, 2),
         ];
+    }
+
+    private function isVatOnlyUpdate(Request $request): bool
+    {
+        return $request->exists('line_vat')
+            && ! $request->exists('quantity')
+            && ! $request->exists('unit_price')
+            && ! $request->exists('line_discount')
+            && ! $request->exists('employee_id')
+            && ! $request->exists('is_free');
+    }
+
+    private function saveLineVat(Request $request, Bill $bill, BillItem $item, BillCalculator $calculator): JsonResponse
+    {
+        abort_unless($request->user()?->canAccessFeature('line_vat'), 403, 'Line VAT is not enabled for this account.');
+        abort_if(in_array($item->type, ['discount', 'customer_part', 'advance'], true), 422, 'This line cannot take VAT.');
+
+        $data = $request->validate([
+            'line_vat' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        DB::transaction(function () use ($data, $bill, $item, $calculator) {
+            $item->update($this->pricedLine(
+                $item,
+                (float) $item->quantity,
+                (float) $item->unit_price,
+                null,
+                (float) $data['line_vat'],
+            ));
+            $calculator->recalculate($bill);
+        });
+
+        return response()->json([
+            'item' => $item->fresh(),
+            'bill' => $bill->fresh()->load(['customer', 'vehicle', 'items.part', 'payments', 'employees:id,name,position,commission_percent']),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function lineVatAmount(array $data, Request $request, float $gross): float
+    {
+        if (! isset($data['line_vat']) || $data['line_vat'] === null || $data['line_vat'] === '') {
+            return 0.0;
+        }
+        if (in_array($data['type'] ?? '', ['discount', 'customer_part', 'advance'], true)) {
+            abort(422, 'This line cannot take VAT.');
+        }
+        abort_unless($request->user()?->canAccessFeature('line_vat'), 403, 'Line VAT is not enabled for this account.');
+
+        return $this->cappedDiscount($gross, (float) $data['line_vat'], 'VAT');
     }
 
     private function maxOweInDiscount(Bill $bill): float
@@ -486,13 +547,13 @@ class BillItemController extends Controller
         return round($balance / (1 + $rate), 2);
     }
 
-    private function cappedDiscount(float $gross, float $discount): float
+    private function cappedDiscount(float $gross, float $discount, string $label = 'Discount'): float
     {
         if ($discount < 0) {
-            abort(422, 'Discount cannot be negative.');
+            abort(422, $label.' cannot be negative.');
         }
         if ($discount - $gross > 0.009) {
-            abort(422, 'Discount cannot be more than the line.');
+            abort(422, $label.' cannot be more than the line.');
         }
 
         return round($discount, 2);
@@ -612,6 +673,8 @@ class BillItemController extends Controller
             if ($discountPercent !== null && $discountPercent > 0) {
                 $lineTotal = round($lineTotal * (1 - ($discountPercent / 100)), 2);
             }
+            $vatAmount = $this->lineVatAmount($data, $request, $lineTotal);
+            $lineTotal = round($lineTotal - $vatAmount, 2);
             $lineDiscount = $this->lineDiscountAmount($data, $request, $lineTotal);
             $lineTotal = round($lineTotal - $lineDiscount, 2);
             $created = $bill->items()->create([
@@ -628,6 +691,7 @@ class BillItemController extends Controller
                 'quantity' => $layerQty,
                 'unit_price' => $unitPrice,
                 'discount_percent' => $discountPercent,
+                'line_vat' => $vatAmount,
                 'line_discount' => $lineDiscount,
                 'purchase_unit_cost' => $purchaseUnitCost,
                 'purchase_expense_id' => $expense?->id,

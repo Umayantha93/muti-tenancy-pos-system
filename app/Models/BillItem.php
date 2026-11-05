@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'quantity',
     'unit_price',
     'discount_percent',
+    'line_vat',
     'line_discount',
     'purchase_unit_cost',
     'purchase_expense_id',
@@ -46,6 +47,7 @@ class BillItem extends Model
             'quantity' => 'decimal:2',
             'unit_price' => 'decimal:2',
             'discount_percent' => 'decimal:2',
+            'line_vat' => 'decimal:2',
             'line_discount' => 'decimal:2',
             'purchase_unit_cost' => 'decimal:2',
             'line_total' => 'decimal:2',
@@ -72,6 +74,18 @@ class BillItem extends Model
     public function earnsCommission(): bool
     {
         return in_array($this->type, self::COMMISSION_TYPES, true);
+    }
+
+    /**
+     * VAT amount taken out of this line's rate and added to the bill total.
+     */
+    public function vatTaken(): float
+    {
+        if ($this->is_free || in_array($this->type, ['discount', 'customer_part', 'advance'], true)) {
+            return 0.0;
+        }
+
+        return round(max(0, (float) ($this->line_vat ?? 0)), 2);
     }
 
     public function sellsBelowCost(): bool
