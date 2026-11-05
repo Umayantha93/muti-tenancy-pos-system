@@ -92,7 +92,12 @@ class AttendanceController extends Controller
             ],
         );
 
-        return response()->json($this->payRow($employee, $sheet->refresh()));
+        $sheet = $sheet->refresh();
+        if ($employee->pay_type === 'daily') {
+            EmployeeMonthPay::postPayroll($employee, (int) $data['year'], (int) $data['month'], $sheet, $request->user()->id);
+        }
+
+        return response()->json($this->payRow($employee, $sheet));
     }
 
     public function store(Request $request): JsonResponse

@@ -914,7 +914,7 @@ return [
         'empty' => 'No technician has commission lines for this day.',
         'load_failed' => 'Could not load commissions.',
         'month_eyebrow' => 'Monthly commission',
-        'month_intro' => 'Paid jobs only. Repair labor counts in full. Service labor counts at half — a Rs. 1,000 body wash adds Rs. 500. Monthly staff use their amount as the salary. Daily staff use the days and half days entered on Attendance, plus additions and minus deductions. If counted labor is above that salary, the employee receives 10% of the difference. Otherwise there is no commission.',
+        'month_intro' => 'Paid jobs only. Repair labor counts in full. Service labor counts at half — a Rs. 1,000 body wash adds Rs. 500. Monthly staff use their amount. Daily staff use only the days and half days entered on Attendance. Additions and deductions are not part of this comparison. If counted labor is above that pay, the employee receives 10% of the difference. Otherwise there is no commission.',
         'month' => 'Month',
         'team_member' => 'Team member',
         'salary' => 'Salary',

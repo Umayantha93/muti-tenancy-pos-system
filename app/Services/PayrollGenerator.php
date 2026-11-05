@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Services\Commission\LaborExcessCommission;
 use App\Models\Employee;
 use App\Models\EmployeeLeave;
+use App\Models\EmployeePayMonth;
 use App\Models\EmployeeTarget;
 use App\Models\Payroll;
 use Carbon\Carbon;
@@ -29,7 +31,7 @@ class PayrollGenerator
     {
         $employees = Employee::where('active', true)
             ->where(function ($query) {
-                $query->where('pay_type', 'monthly')->orWhereNull('pay_type');
+                $query->whereIn('pay_type', ['monthly', 'daily'])->orWhereNull('pay_type');
             })
             ->when($employeeId, fn ($query) => $query->whereKey($employeeId))
             ->with([
@@ -69,23 +71,55 @@ class PayrollGenerator
             ->get();
 
         $payrolls = DB::transaction(function () use ($employees, $month, $year, $workdays, $request, $bonuses, $deductions, $leaves, $personalTargets, $teamTargets) {
-            return $employees->map(function (Employee $employee) use ($month, $year, $workdays, $request, $bonuses, $deductions, $leaves, $personalTargets, $teamTargets) {
+            $sheets = EmployeePayMonth::query()
+                ->where('year', $year)
+                ->where('month', $month)
+                ->whereIn('employee_id', $employees->pluck('id'))
+                ->get()
+                ->keyBy('employee_id');
+
+            return $employees->map(function (Employee $employee) use ($month, $year, $workdays, $request, $bonuses, $deductions, $leaves, $personalTargets, $teamTargets, $sheets) {
+                if ($employee->pay_type === 'daily') {
+                    return EmployeeMonthPay::postPayroll(
+                        $employee,
+                        $year,
+                        $month,
+                        $sheets->get($employee->id),
+                        $request->user()->id,
+                    );
+                }
+
                 $daysPresent = $employee->attendance->count();
                 $hoursWorked = (float) $employee->attendance->sum('hours_worked');
                 $overtimeHours = (float) $employee->attendance->sum('overtime_hours');
                 $overtimePay = round($overtimeHours * (float) $employee->overtime_hourly_rate, 2);
-                $allowances = $this->allowancesFor($employee, $daysPresent);
+                $sheet = $sheets->get($employee->id);
+                $additionLines = EmployeeMonthPay::namedLines($sheet?->additions);
+                $ruleAllowance = $this->allowancesFor($employee, $daysPresent);
+                if ($ruleAllowance > 0) {
+                    $additionLines[] = ['name' => 'Attendance allowance', 'amount' => $ruleAllowance];
+                }
+                $allowances = EmployeeMonthPay::total($additionLines);
                 $unpaidLeaveDays = $this->unpaidLeaveDays($leaves->get($employee->id, collect()), $month, $year);
                 $dailyRate = $workdays > 0 ? ((float) $employee->base_salary / $workdays) : 0;
                 $unpaidDeduction = round($dailyRate * $unpaidLeaveDays, 2);
                 $bonus = (float) ($bonuses[$employee->id] ?? 0);
+                $deductionLines = EmployeeMonthPay::namedLines($sheet?->deductions);
+                if ($unpaidDeduction > 0) {
+                    $deductionLines[] = ['name' => 'Unpaid leave', 'amount' => $unpaidDeduction];
+                }
                 $extraDeductions = (float) ($deductions[$employee->id] ?? 0);
+                if ($extraDeductions > 0) {
+                    $deductionLines[] = ['name' => 'Other deduction', 'amount' => $extraDeductions];
+                }
+                $deductionTotal = EmployeeMonthPay::total($deductionLines);
                 $incentive = $this->targetIncentive($personalTargets->get($employee->id, collect()), $teamTargets);
-                $gross = round((float) $employee->base_salary + $overtimePay + $allowances + $bonus + $incentive, 2);
+                $commission = round((float) (app(LaborExcessCommission::class)->days($employee, $year, $month)['commission'] ?? 0), 2);
+                $gross = round((float) $employee->base_salary + $overtimePay + $allowances + $bonus + $incentive + $commission, 2);
                 $epfEmployee = $employee->epf_enabled ? round($gross * self::EPF_EMPLOYEE_RATE, 2) : 0.0;
                 $epfEmployer = $employee->epf_enabled ? round($gross * self::EPF_EMPLOYER_RATE, 2) : 0.0;
                 $etfEmployer = $employee->epf_enabled ? round($gross * self::ETF_EMPLOYER_RATE, 2) : 0.0;
-                $net = max(0, $gross - $epfEmployee - $unpaidDeduction - $extraDeductions);
+                $net = max(0, $gross - $epfEmployee - $deductionTotal);
 
                 $payroll = Payroll::updateOrCreate(
                     ['employee_id' => $employee->id, 'month' => $month, 'year' => $year],
@@ -97,6 +131,7 @@ class PayrollGenerator
                         'base_salary' => $employee->base_salary,
                         'overtime_pay' => $overtimePay,
                         'allowances_total' => $allowances,
+                        'addition_lines' => $additionLines,
                         'target_incentive' => $incentive,
                         'gross_pay' => $gross,
                         'epf_employee' => $epfEmployee,
@@ -104,7 +139,9 @@ class PayrollGenerator
                         'etf_employer' => $etfEmployer,
                         'unpaid_leave_days' => $unpaidLeaveDays,
                         'bonus' => $bonus,
-                        'deductions' => round($unpaidDeduction + $extraDeductions, 2),
+                        'commission' => $commission,
+                        'deductions' => $deductionTotal,
+                        'deduction_lines' => $deductionLines,
                         'net_salary' => $net,
                         'generated_at' => now(),
                         'generated_by' => $request->user()->id,
