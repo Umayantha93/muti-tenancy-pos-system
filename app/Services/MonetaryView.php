@@ -29,6 +29,7 @@ class MonetaryView
         'unit_price',
         'line_total',
         'line_discount',
+        'line_vat',
         'amount',
         'price',
         'cost_price',
@@ -275,7 +276,7 @@ class MonetaryView
             }
 
             if (in_array((string) $key, self::MONEY_KEYS, true)) {
-                $factor = ($isLaborItem && in_array((string) $key, ['unit_price', 'line_total', 'line_discount'], true))
+                $factor = ($isLaborItem && in_array((string) $key, ['unit_price', 'line_total', 'line_discount', 'line_vat'], true))
                     ? self::LABOR_FACTOR
                     : self::FACTOR;
                 $data[$key] = $this->amount($value, $factor);
