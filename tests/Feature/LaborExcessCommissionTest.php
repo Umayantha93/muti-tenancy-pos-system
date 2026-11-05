@@ -269,12 +269,22 @@ class LaborExcessCommissionTest extends TestCase
             'deductions' => [['name' => 'Advance', 'amount' => 200]],
         ])->assertOk()->assertJsonPath('salary', 21300);
 
+        $posted = \App\Models\Payroll::query()->where('employee_id', $daily['id'])->first();
+        $this->assertNotNull($posted);
+        $this->assertSame('21000.00', (string) $posted->base_salary);
+        $this->assertSame('2900.00', (string) $posted->commission);
+        $this->assertSame('24200.00', (string) $posted->net_salary);
+        $this->assertSame('Bonus', $posted->addition_lines[0]['name']);
+        $this->assertEquals(500, $posted->addition_lines[0]['amount']);
+        $this->assertSame('Advance', $posted->deduction_lines[0]['name']);
+        $this->assertEquals(200, $posted->deduction_lines[0]['amount']);
+
         $after = collect($this->getJson('/api/commissions/month?month='.$month)->assertOk()->json('employees'))
             ->firstWhere('id', $daily['id']);
         $this->assertTrue($after['salary_ready']);
-        $this->assertEquals(21300, $after['salary']);
-        $this->assertEquals(28700, $after['excess']);
-        $this->assertEquals(2870, $after['commission']);
+        $this->assertEquals(21000, $after['salary']);
+        $this->assertEquals(29000, $after['excess']);
+        $this->assertEquals(2900, $after['commission']);
 
         $monthJob = $this->job('repair', [$monthly['id']], $today);
         $this->postJson("/api/bills/{$monthJob}/items", [
@@ -294,8 +304,8 @@ class LaborExcessCommissionTest extends TestCase
 
         $monthRow = collect($this->getJson('/api/commissions/month?month='.$month)->assertOk()->json('employees'))
             ->firstWhere('id', $monthly['id']);
-        $this->assertEquals(45000, $monthRow['salary']);
-        $this->assertEquals(3500, $monthRow['commission']);
+        $this->assertEquals(50000, $monthRow['salary']);
+        $this->assertEquals(3000, $monthRow['commission']);
     }
 
     private function employee(string $name, float $salary): Employee

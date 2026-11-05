@@ -43,6 +43,7 @@ class MonetaryView
         'epf_payable',
         'etf_payable',
         'bonus',
+        'commission',
         'deductions',
         'net_salary',
         'vat_amount',
