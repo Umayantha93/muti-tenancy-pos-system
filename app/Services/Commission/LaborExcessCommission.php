@@ -12,10 +12,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
- * Paid labor is compared with the monthly salary.
+ * Paid labor is compared with the pay from working dates only.
+ * Additions and deductions stay off this comparison and are applied on payroll.
  * Repair labor counts in full. Service labor counts at half.
- * The employee receives 10% of the amount above salary.
- * Labor at or below salary pays no commission.
+ * The employee receives 10% of the amount above that date pay.
+ * Labor at or below that pay earns no commission.
  */
 class LaborExcessCommission implements CommissionScheme
 {
@@ -37,7 +38,7 @@ class LaborExcessCommission implements CommissionScheme
 
     public function summary(): string
     {
-        return 'Service labor counts at '.self::SERVICE_SHARE.'%. Repair labor counts at '.self::REPAIR_SHARE.'%. Monthly pay uses the amount as the salary. Daily pay uses the days and half days entered on Attendance, times the amount, plus additions and minus deductions. If counted labor is above that salary, the employee receives '.self::EXCESS_PERCENT.'% of the difference. If it is not above the salary, there is no commission. Only paid jobs are included.';
+        return 'Service labor counts at '.self::SERVICE_SHARE.'%. Repair labor counts at '.self::REPAIR_SHARE.'%. Monthly pay uses the amount as the salary. Daily pay uses only the days and half days entered on Attendance, times the amount. Additions and deductions are not included. If counted labor is above that pay, the employee receives '.self::EXCESS_PERCENT.'% of the difference. If it is not above that pay, there is no commission. Only paid jobs are included.';
     }
 
     public function rules(): array
