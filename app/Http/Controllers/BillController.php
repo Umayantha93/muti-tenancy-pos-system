@@ -69,11 +69,6 @@ class BillController extends Controller
             })
             ->when(! empty($data['date_from']), fn ($query) => $query->whereDate('admission_date', '>=', $data['date_from']))
             ->when(! empty($data['date_to']), fn ($query) => $query->whereDate('admission_date', '<=', $data['date_to']))
-            ->when(
-                $request->boolean('half_view')
-                    && BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? '')) === BusinessTypes::CLOTHING,
-                fn ($query) => $query->whereRaw($query->qualifyColumn('id').' % 2 = 0')
-            )
             ->queued()
             ->tap(fn ($query) => BranchQuery::constrain($query))
             ->paginate($data['per_page'] ?? 15);

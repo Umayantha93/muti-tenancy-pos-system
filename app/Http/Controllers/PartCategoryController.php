@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Part;
 use App\Models\PartCategory;
+use App\Models\Product;
 use App\Models\PartSubcategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,15 +27,20 @@ class PartCategoryController extends Controller
             ];
         }
 
-        $used = Part::query()->select('type', 'subcategory')->where('type', '!=', '')->distinct()->get();
+        $used = Part::query()->select('type', 'subcategory')->where('type', '!=', '')->distinct()->get()
+            ->map(fn (Part $part) => ['category' => $part->type, 'subcategory' => $part->subcategory])
+            ->concat(
+                Product::query()->select('category', 'subcategory')->where('category', '!=', '')->whereNotNull('category')->distinct()->get()
+                    ->map(fn (Product $product) => ['category' => $product->category, 'subcategory' => $product->subcategory])
+            );
         foreach ($used as $part) {
-            $name = trim((string) $part->type);
+            $name = trim((string) $part['category']);
             if ($name === '') {
                 continue;
             }
             $key = mb_strtolower($name);
             $byName[$key] ??= ['id' => null, 'name' => $name, 'subcategories' => []];
-            $sub = trim((string) $part->subcategory);
+            $sub = trim((string) ($part['subcategory'] ?? ''));
             if ($sub === '') {
                 continue;
             }

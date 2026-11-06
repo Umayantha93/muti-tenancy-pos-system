@@ -145,17 +145,18 @@ class ClothingDemoSeeder extends Seeder
     private function seedProducts(): array
     {
         $apparel = ['XS', 'S', 'M', 'L', 'XL'];
+        $jeans = ['28', '30', '32', '34', '36', '38', '40', '42'];
         $shoes = ['EU 39', 'EU 40', 'EU 41', 'EU 42', 'EU 43'];
         $styles = [
             ['Men', 'Classic Cotton Oxford Shirt', 'BESTSELLER', 'Navy', 4990, 2100, $apparel],
             ['Men', 'Slim Chambray Shirt', null, 'Blue', 4590, 1900, $apparel],
-            ['Men', 'Grey Selvedge Jeans', 'TRENDING', 'Grey', 8990, 4200, $apparel],
+            ['Men', 'Grey Selvedge Jeans', 'TRENDING', 'Grey', 8990, 4200, $jeans],
             ['Men', 'Merino Crew Knit', null, 'Charcoal', 7490, 3100, $apparel],
             ['Men', 'Linen Camp Collar Shirt', 'TRENDING', 'Sand', 6290, 2400, $apparel],
             ['Men', 'Tailored Chino Trouser', null, 'Stone', 6990, 2800, $apparel],
             ['Men', 'Heavyweight Hoodie', 'BESTSELLER', 'Black', 5490, 2200, $apparel],
             ['Men', 'Wool Overshirt', null, 'Olive', 9990, 4600, $apparel],
-            ['Women', 'High-Waist Slim Denim Jeans', 'TRENDING', 'Indigo', 6950, 2900, $apparel],
+            ['Women', 'High-Waist Slim Denim Jeans', 'TRENDING', 'Indigo', 6950, 2900, $jeans],
             ['Women', 'Floral Print Summer Dress', 'SALE', 'Red', 7990, 2600, $apparel],
             ['Women', 'Silk Bias Slip Dress', null, 'Champagne', 12990, 5400, $apparel],
             ['Women', 'Cotton Poplin Blouse', null, 'White', 4290, 1600, $apparel],

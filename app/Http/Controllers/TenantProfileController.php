@@ -32,6 +32,7 @@ class TenantProfileController extends Controller
             'logo' => ['nullable', 'image', 'max:5120'],
             'bill_prefix' => ['nullable', 'string', 'max:12'],
             'lock_bill_numbers' => ['sometimes', 'boolean'],
+            'half_view' => ['sometimes', 'boolean'],
         ]);
 
         if ($request->hasFile('logo')) {
@@ -43,6 +44,14 @@ class TenantProfileController extends Controller
 
         $lockRequested = $request->boolean('lock_bill_numbers');
         unset($data['lock_bill_numbers']);
+        $type = BusinessTypes::normalizeLegacy((string) $tenant->business_type);
+        $halfOn = array_key_exists('half_view', $data) ? (bool) $data['half_view'] : (bool) $tenant->half_view;
+
+        if (array_key_exists('half_view', $data) && $type !== BusinessTypes::CLOTHING) {
+            throw ValidationException::withMessages([
+                'half_view' => 'Half is only for clothing shops.',
+            ]);
+        }
 
         if ($tenant->bill_number_locked_at) {
             unset($data['bill_prefix']);
@@ -51,10 +60,16 @@ class TenantProfileController extends Controller
             $data['bill_prefix'] = $normalized !== '' ? substr($normalized, 0, 12) : null;
         }
 
+        if ($type === BusinessTypes::CLOTHING && $halfOn && ($lockRequested || $this->billPrefixIsChanging($tenant, $data))) {
+            throw ValidationException::withMessages([
+                'bill_prefix' => 'Bill numbers stay as they are while Half is on. Turn Half off to change them.',
+            ]);
+        }
+
         if ($lockRequested) {
-            if (! in_array($tenant->business_type, [BusinessTypes::GARAGE, BusinessTypes::PAINT], true)) {
+            if (! in_array($type, [BusinessTypes::GARAGE, BusinessTypes::PAINT, BusinessTypes::CLOTHING], true)) {
                 throw ValidationException::withMessages([
-                    'bill_prefix' => 'Short bill numbers are available for garage and paint shops.',
+                    'bill_prefix' => 'Short bill numbers are available for garage, paint, and clothing shops.',
                 ]);
             }
             if ($tenant->bill_number_locked_at) {
@@ -78,5 +93,17 @@ class TenantProfileController extends Controller
         $tenant->update($data);
 
         return response()->json($tenant->refresh());
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function billPrefixIsChanging(\App\Models\Tenant $tenant, array $data): bool
+    {
+        if (! array_key_exists('bill_prefix', $data)) {
+            return false;
+        }
+
+        return $data['bill_prefix'] !== $tenant->normalizedBillPrefix();
     }
 }
