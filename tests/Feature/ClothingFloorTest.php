@@ -40,6 +40,41 @@ class ClothingFloorTest extends TestCase
         $this->assertSame(20, Product::query()->find($productId)->stock_qty);
     }
 
+    public function test_half_switch_halves_inventory_counts_and_keeps_every_sale(): void
+    {
+        [, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $productId = $this->postJson('/api/products', [
+            'name' => 'Oxford Shirt',
+            'size' => 'M',
+            'price' => 100,
+            'cost_price' => 40,
+            'stock_qty' => 20,
+        ])->assertCreated()->json('id');
+
+        $this->post('/api/tenant/profile', ['half_view' => '1'])->assertOk();
+
+        $this->postJson('/api/retail-sales', [
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+        $this->postJson('/api/retail-sales', [
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+
+        $insights = $this->getJson('/api/clothing/insights')->assertOk();
+        $this->assertEquals(9, $insights->json('units'));
+        $this->assertEquals(900, $insights->json('worth'));
+        $this->assertEquals(360, $insights->json('income'));
+        $this->assertEquals(2, $insights->json('today_bills'));
+        $this->assertEquals(200, $insights->json('today_sales'));
+
+        $stock = $this->getJson('/api/products/size-stock')->assertOk();
+        $this->assertSame(9, collect($stock->json('apparel'))->firstWhere('size', 'M')['qty']);
+        $this->assertSame(18, (int) Product::query()->find($productId)->stock_qty);
+        $this->assertSame(18, (int) $this->getJson('/api/products?per_page=50')->json('data.0.stock_qty'));
+    }
+
     public function test_half_on_keeps_bill_numbers_in_order_and_blocks_changes(): void
     {
         [$tenant, $owner] = $this->tenant();

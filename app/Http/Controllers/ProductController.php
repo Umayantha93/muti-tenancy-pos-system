@@ -80,8 +80,9 @@ class ProductController extends Controller
         return response()->json($product->refresh(), 201);
     }
 
-    public function sizeStock(): JsonResponse
+    public function sizeStock(Request $request): JsonResponse
     {
+        $half = (bool) $request->user()?->tenant?->half_view;
         $products = Product::query()->where('active', true)->get(['id', 'name', 'category', 'subcategory', 'size', 'stock_qty']);
         BranchInventory::overlayProducts($products);
 
@@ -97,6 +98,9 @@ class ProductController extends Controller
                 continue;
             }
             $qty = (int) $product->stock_qty;
+            if ($half) {
+                $qty = intdiv($qty, 2);
+            }
             $scale = ClothingSizes::scaleOf($size);
             if (isset($boards[$scale]) && array_key_exists($size, $boards[$scale])) {
                 $boards[$scale][$size] += $qty;

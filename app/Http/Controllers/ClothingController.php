@@ -19,7 +19,8 @@ class ClothingController extends Controller
     {
         $this->assertClothing($request);
 
-        $half = $request->boolean('half_view');
+        $halfStock = $request->boolean('half_view') || (bool) $request->user()->tenant?->half_view;
+        $halfBills = $request->boolean('half_view');
         $products = Product::query()->where('active', true)->get(['id', 'price', 'cost_price', 'stock_qty']);
         BranchInventory::overlayProducts($products);
 
@@ -28,7 +29,7 @@ class ClothingController extends Controller
         $units = 0;
         foreach ($products as $product) {
             $qty = (int) $product->stock_qty;
-            if ($half) {
+            if ($halfStock) {
                 $qty = intdiv($qty, 2);
             }
             $units += $qty;
@@ -39,7 +40,7 @@ class ClothingController extends Controller
         $bills = Bill::query()
             ->where('source_type', RetailSale::class)
             ->whereDate('admission_date', today())
-            ->when($half, fn ($query) => $query->whereRaw($query->qualifyColumn('id').' % 2 = 0'))
+            ->when($halfBills, fn ($query) => $query->whereRaw($query->qualifyColumn('id').' % 2 = 0'))
             ->with('items:id,bill_id,type,quantity,line_total,purchase_unit_cost')
             ->get(['id', 'subtotal', 'total_deductions', 'vat_amount', 'sscl_amount']);
 
