@@ -41,6 +41,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'bill_prefix',
     'bill_sequence',
     'bill_number_locked_at',
+    'half_view',
 ])]
 class Tenant extends Model
 {
@@ -67,6 +68,7 @@ class Tenant extends Model
             'sscl_rate' => 'decimal:2',
             'demo_ends_at' => 'datetime',
             'bill_number_locked_at' => 'datetime',
+            'half_view' => 'boolean',
             'bill_sequence' => 'integer',
         ];
     }
