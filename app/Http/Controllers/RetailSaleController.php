@@ -40,12 +40,14 @@ class RetailSaleController extends Controller
             'vip' => ['sometimes', 'boolean'],
             'payment_method' => ['nullable', Rule::in(['cash', 'card', 'qr', 'credit', 'bank_transfer'])],
             'payment_amount' => ['nullable', 'numeric', 'min:0'],
+            'cash_tendered' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', Rule::exists('products', 'id')->where('tenant_id', $request->user()->tenant_id)],
             'items.*.quantity' => ['required', 'numeric', 'min:0.01'],
         ]);
 
-        $sale = DB::transaction(function () use ($data, $request) {
+        $change = 0.0;
+        $sale = DB::transaction(function () use ($data, $request, &$change) {
             if (! empty($data['customer_phone'])) {
                 $customer = Customer::firstOrCreate(
                     ['phone' => $data['customer_phone']],
@@ -73,8 +75,10 @@ class RetailSaleController extends Controller
             ]);
 
             $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? BusinessTypes::CLOTHING));
+            $billNumber = $request->user()->tenant?->claimNextBillNumber()
+                ?? BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6));
             $bill = Bill::create([
-                'bill_number' => BusinessTypes::billPrefix($type).'-'.now()->format('Ymd').'-'.strtoupper(str()->random(6)),
+                'bill_number' => $billNumber,
                 'customer_id' => $customer->id,
                 'admission_date' => today(),
                 'notes' => $data['notes'] ?? null,
@@ -125,9 +129,17 @@ class RetailSaleController extends Controller
             $calculator = app(BillCalculator::class);
             $calculator->recalculate($bill);
             $method = $data['payment_method'] ?? 'cash';
+            $due = round((float) $bill->balance_due, 2);
+            if ($method === 'cash' && isset($data['cash_tendered'])) {
+                $tendered = round((float) $data['cash_tendered'], 2);
+                if ($tendered + 0.009 < $due) {
+                    abort(response()->json(['message' => 'Cash received is less than the amount due.'], 422));
+                }
+                $change = round($tendered - $due, 2);
+            }
             $payAmount = $method === 'credit'
                 ? 0.0
-                : (isset($data['payment_amount']) ? (float) $data['payment_amount'] : (float) $bill->balance_due);
+                : (isset($data['payment_amount']) ? min((float) $data['payment_amount'], $due) : $due);
             if ($payAmount > 0) {
                 BillPayment::create([
                     'bill_id' => $bill->id,
@@ -143,6 +155,7 @@ class RetailSaleController extends Controller
 
             return $sale->load(['customer', 'bill.items', 'bill.payments']);
         });
+        $sale->setAttribute('change', $change);
 
         return response()->json($sale, 201);
     }

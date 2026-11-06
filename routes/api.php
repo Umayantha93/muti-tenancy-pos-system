@@ -291,10 +291,19 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
         });
 
         Route::middleware('feature:product_catalog')->group(function () {
+            Route::get('/product-categories', [PartCategoryController::class, 'index']);
+            Route::post('/product-categories', [PartCategoryController::class, 'store']);
+            Route::post('/product-categories/{part_category}/subcategories', [PartCategoryController::class, 'storeSubcategory']);
+            Route::get('/products/size-stock', [ProductController::class, 'sizeStock']);
+            Route::get('/products/import/template', [ProductController::class, 'importTemplate']);
+            Route::post('/products/import', [ProductController::class, 'import']);
+            Route::post('/products/restock/bulk', [ProductController::class, 'restockBulk']);
             Route::get('/products', [ProductController::class, 'index']);
-            Route::get('/products/{product}', [ProductController::class, 'show']);
             Route::post('/products', [ProductController::class, 'store']);
+            Route::get('/products/{product}', [ProductController::class, 'show']);
             Route::put('/products/{product}', [ProductController::class, 'update']);
+            Route::post('/products/{product}', [ProductController::class, 'update']);
+            Route::post('/products/{product}/image', [ProductController::class, 'image']);
             Route::delete('/products/{product}', [ProductController::class, 'destroy']);
             Route::post('/products/{product}/restock', [ProductController::class, 'restock']);
         });

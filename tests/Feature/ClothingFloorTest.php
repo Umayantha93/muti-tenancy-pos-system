@@ -40,10 +40,50 @@ class ClothingFloorTest extends TestCase
         $this->assertSame(20, Product::query()->find($productId)->stock_qty);
     }
 
-    public function test_half_view_lists_about_half_the_bills(): void
+    public function test_half_switch_halves_inventory_counts_and_keeps_every_sale(): void
     {
         [, $owner] = $this->tenant();
         Sanctum::actingAs($owner);
+
+        $productId = $this->postJson('/api/products', [
+            'name' => 'Oxford Shirt',
+            'size' => 'M',
+            'price' => 100,
+            'cost_price' => 40,
+            'stock_qty' => 20,
+        ])->assertCreated()->json('id');
+
+        $this->post('/api/tenant/profile', ['half_view' => '1'])->assertOk();
+
+        $this->postJson('/api/retail-sales', [
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+        $this->postJson('/api/retail-sales', [
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+
+        $insights = $this->getJson('/api/clothing/insights')->assertOk();
+        $this->assertEquals(9, $insights->json('units'));
+        $this->assertEquals(900, $insights->json('worth'));
+        $this->assertEquals(360, $insights->json('income'));
+        $this->assertEquals(2, $insights->json('today_bills'));
+        $this->assertEquals(200, $insights->json('today_sales'));
+
+        $stock = $this->getJson('/api/products/size-stock')->assertOk();
+        $this->assertSame(9, collect($stock->json('apparel'))->firstWhere('size', 'M')['qty']);
+        $this->assertSame(18, (int) Product::query()->find($productId)->stock_qty);
+        $this->assertSame(18, (int) $this->getJson('/api/products?per_page=50')->json('data.0.stock_qty'));
+    }
+
+    public function test_half_on_keeps_bill_numbers_in_order_and_blocks_changes(): void
+    {
+        [$tenant, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $this->post('/api/tenant/profile', [
+            'bill_prefix' => 'CL',
+            'lock_bill_numbers' => '1',
+        ])->assertOk();
 
         $productId = $this->postJson('/api/products', [
             'name' => 'Oxford Shirt',
@@ -52,18 +92,73 @@ class ClothingFloorTest extends TestCase
             'stock_qty' => 20,
         ])->assertCreated()->json('id');
 
+        $numbers = [];
         for ($i = 0; $i < 4; $i++) {
-            $this->postJson('/api/retail-sales', [
+            $numbers[] = $this->postJson('/api/retail-sales', [
                 'items' => [['product_id' => $productId, 'quantity' => 1]],
-            ])->assertCreated();
+            ])->assertCreated()->json('bill.bill_number');
         }
 
-        $all = $this->getJson('/api/bills?per_page=50')->assertOk()->json('total');
-        $half = $this->getJson('/api/bills?per_page=50&half_view=1')->assertOk()->json('total');
+        $shop = str_pad((string) $tenant->id, 2, '0', STR_PAD_LEFT);
+        $this->assertSame(["CL-{$shop}-0001", "CL-{$shop}-0002", "CL-{$shop}-0003", "CL-{$shop}-0004"], $numbers);
 
-        $this->assertSame(4, $all);
-        $this->assertSame(2, $half);
-        $this->assertSame(4, \App\Models\Bill::query()->count());
+        $this->post('/api/tenant/profile', ['half_view' => '1'])->assertOk();
+        $this->post('/api/tenant/profile', [
+            'bill_prefix' => 'NEW',
+            'lock_bill_numbers' => '1',
+        ])->assertStatus(422);
+
+        $listed = collect($this->getJson('/api/bills?per_page=50')->assertOk()->json('data'))->pluck('bill_number')->sort()->values()->all();
+        $this->assertSame($numbers, $listed);
+        $tenant->refresh();
+        $this->assertTrue((bool) $tenant->half_view);
+        $this->assertSame('CL', $tenant->bill_prefix);
+        $this->assertSame(4, (int) $tenant->bill_sequence);
+    }
+
+    public function test_catalog_item_can_take_an_image_category_and_subcategory(): void
+    {
+        [, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $categoryId = $this->postJson('/api/product-categories', ['name' => 'Men'])->assertCreated()->json('id');
+        $this->postJson("/api/product-categories/{$categoryId}/subcategories", ['name' => 'Shirts'])->assertCreated();
+
+        $product = $this->post('/api/products', [
+            'name' => 'Oxford Shirt',
+            'category' => 'Men',
+            'subcategory' => 'Shirts',
+            'price' => 4500,
+            'stock_qty' => 2,
+            'images' => [\Illuminate\Http\UploadedFile::fake()->image('oxford.jpg')],
+        ])->assertCreated();
+
+        $this->postJson('/api/products', [
+            'name' => 'Grey Selvedge Jeans',
+            'price' => 100,
+            'size_scale' => 'jeans',
+            'size_quantities' => ['34' => 5, '36' => 2],
+        ])->assertCreated();
+        $this->postJson('/api/products', [
+            'name' => 'Oxford Shirt',
+            'price' => 80,
+            'size_scale' => 'apparel',
+            'size_quantities' => ['S' => 4, 'M' => 7, 'L' => 1, 'XL' => 3],
+        ])->assertCreated();
+
+        $this->assertSame(8, Product::query()->where('name', 'Grey Selvedge Jeans')->count());
+        $this->assertSame(5, (int) Product::query()->where('name', 'Grey Selvedge Jeans')->where('size', '34')->value('stock_qty'));
+        $this->assertSame(0, (int) Product::query()->where('name', 'Grey Selvedge Jeans')->where('size', '28')->value('stock_qty'));
+
+        $stock = $this->getJson('/api/products/size-stock')->assertOk();
+        $this->assertSame(5, collect($stock->json('jeans'))->firstWhere('size', '34')['qty']);
+        $this->assertSame(2, collect($stock->json('jeans'))->firstWhere('size', '36')['qty']);
+        $this->assertSame(7, collect($stock->json('apparel'))->firstWhere('size', 'M')['qty']);
+        $this->assertSame(3, collect($stock->json('apparel'))->firstWhere('size', 'XL')['qty']);
+
+        $this->assertSame('Men', $product->json('category'));
+        $this->assertSame('Shirts', $product->json('subcategory'));
+        $this->assertNotEmpty($product->json('image_urls'));
     }
 
     public function test_customer_display_is_closed_until_super_admin_enables_it(): void
@@ -124,6 +219,49 @@ class ClothingFloorTest extends TestCase
         $this->assertEquals(100, $sale->json('bill.total_deductions'));
         $this->assertEquals(900, $sale->json('bill.amount_paid'));
         $this->assertEquals(9, Product::query()->find($productId)->stock_qty);
+    }
+
+    public function test_cash_tender_above_the_total_returns_the_balance_and_records_only_the_due(): void
+    {
+        [, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $productId = $this->postJson('/api/products', [
+            'name' => 'Camp Shirt',
+            'price' => 22492.05,
+            'cost_price' => 8000,
+            'stock_qty' => 4,
+        ])->assertCreated()->json('id');
+
+        $sale = $this->postJson('/api/retail-sales', [
+            'payment_method' => 'cash',
+            'cash_tendered' => 23000,
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+
+        $paid = round((float) $sale->json('bill.amount_paid'), 2);
+        $this->assertEquals(0, round((float) $sale->json('bill.balance_due'), 2));
+        $this->assertEqualsWithDelta(22492.05, $paid, 0.02);
+        $this->assertEqualsWithDelta(507.95, (float) $sale->json('change'), 0.02);
+        $this->assertEquals(3, Product::query()->find($productId)->stock_qty);
+
+        $larger = $this->postJson('/api/retail-sales', [
+            'payment_method' => 'cash',
+            'cash_tendered' => 25000,
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+
+        $paidAgain = round((float) $larger->json('bill.amount_paid'), 2);
+        $this->assertEqualsWithDelta(22492.05, $paidAgain, 0.02);
+        $this->assertEqualsWithDelta(2507.95, (float) $larger->json('change'), 0.02);
+
+        $this->postJson('/api/retail-sales', [
+            'payment_method' => 'cash',
+            'cash_tendered' => 20000,
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertStatus(422);
+
+        $this->assertEquals(2, Product::query()->find($productId)->stock_qty);
     }
 
     /**

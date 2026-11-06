@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'sku', 'barcode', 'category', 'size', 'color', 'badge', 'price', 'cost_price', 'stock_qty', 'images', 'description', 'active'])]
+#[Fillable(['name', 'sku', 'barcode', 'category', 'subcategory', 'size', 'color', 'badge', 'price', 'cost_price', 'stock_qty', 'images', 'description', 'active'])]
 class Product extends Model
 {
     use BelongsToTenant;
