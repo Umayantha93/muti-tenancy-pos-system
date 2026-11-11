@@ -70,6 +70,43 @@ class SuperAdminBillTest extends TestCase
         $this->assertSame(10, $part->fresh()->stock_qty);
     }
 
+    public function test_super_admin_can_page_and_filter_tenant_bills_by_date(): void
+    {
+        [$tenant, $owner, $admin] = $this->garageTenantWithAdmin();
+        Sanctum::actingAs($owner);
+
+        $older = $this->postJson('/api/bills', [
+            'customer_name' => 'Nimal Perera',
+            'customer_phone' => '0771234567',
+            'number_plate' => 'CAB-1234',
+        ])->assertCreated()->json('id');
+
+        $newer = $this->postJson('/api/bills', [
+            'customer_name' => 'Kamal Silva',
+            'customer_phone' => '0777654321',
+            'number_plate' => 'WP-9999',
+        ])->assertCreated()->json('id');
+
+        Bill::findOrFail($older)->update(['admission_date' => '2026-01-10']);
+        Bill::findOrFail($newer)->update(['admission_date' => '2026-03-20']);
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson("/api/super-admin/tenants/{$tenant->id}/bills?date_from=2026-03-01&date_to=2026-03-31")
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $newer)
+            ->assertJsonPath('data.0.admission_date', '2026-03-20');
+
+        $this->getJson("/api/super-admin/tenants/{$tenant->id}/bills?per_page=1&page=2")
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('current_page', 2)
+            ->assertJsonPath('last_page', 2)
+            ->assertJsonPath('total', 2)
+            ->assertJsonPath('data.0.id', $older);
+    }
+
     public function test_tenant_users_cannot_access_platform_invoice_tools(): void
     {
         [$tenant, $owner] = $this->garageTenantWithAdmin();
