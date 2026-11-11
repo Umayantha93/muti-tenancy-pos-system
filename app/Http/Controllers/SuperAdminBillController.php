@@ -31,6 +31,8 @@ class SuperAdminBillController extends Controller
         $data = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'max:50'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
@@ -49,6 +51,8 @@ class SuperAdminBillController extends Controller
                     ->orWhereHas('vehicle', fn ($vehicle) => $vehicle->where('number_plate', 'like', $search))
                     ->orWhereHas('customer', fn ($customer) => $customer->where('name', 'like', $search)));
             })
+            ->when(! empty($data['date_from']), fn ($query) => $query->whereDate('admission_date', '>=', $data['date_from']))
+            ->when(! empty($data['date_to']), fn ($query) => $query->whereDate('admission_date', '<=', $data['date_to']))
             ->latest('admission_date')
             ->orderByDesc('id')
             ->paginate($data['per_page'] ?? 30);

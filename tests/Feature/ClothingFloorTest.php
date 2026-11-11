@@ -197,6 +197,29 @@ class ClothingFloorTest extends TestCase
             ->assertJsonPath('business_name', $tenant->business_name);
     }
 
+    public function test_new_sale_does_not_add_vat_to_the_bill(): void
+    {
+        [$tenant, $owner] = $this->tenant();
+        $tenant->update(['vat_registered' => true, 'vat_rate' => 18]);
+        Sanctum::actingAs($owner);
+
+        $productId = $this->postJson('/api/products', [
+            'name' => 'Navy Tee',
+            'price' => 1000,
+            'cost_price' => 400,
+            'stock_qty' => 5,
+        ])->assertCreated()->json('id');
+
+        $sale = $this->postJson('/api/retail-sales', [
+            'payment_method' => 'cash',
+            'items' => [['product_id' => $productId, 'quantity' => 1]],
+        ])->assertCreated();
+
+        $this->assertEquals(0, $sale->json('bill.vat_rate'));
+        $this->assertEquals(0, $sale->json('bill.vat_amount'));
+        $this->assertEquals(1000, $sale->json('bill.amount_paid'));
+    }
+
     public function test_sale_records_discount_vip_and_real_stock(): void
     {
         [, $owner] = $this->tenant();

@@ -82,6 +82,7 @@ class RetailSaleController extends Controller
                 'customer_id' => $customer->id,
                 'admission_date' => today(),
                 'notes' => $data['notes'] ?? null,
+                'vat_rate' => 0,
                 'source_type' => RetailSale::class,
                 'source_id' => $sale->id,
                 'created_by' => $request->user()->id,
