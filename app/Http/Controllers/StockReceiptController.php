@@ -25,23 +25,38 @@ class StockReceiptController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        return $this->receiptList($request, 'part');
+    }
+
+    public function products(Request $request): JsonResponse
+    {
+        return $this->receiptList($request, 'product');
+    }
+
+    private function receiptList(Request $request, string $kind): JsonResponse
+    {
         $term = trim((string) $request->input('search', ''));
         $like = '%'.addcslashes($term, '%_\\').'%';
         $perPage = min(max($request->integer('per_page', 20), 1), 100);
 
         $receipts = StockReceipt::query()
-            ->with([
+            ->with(array_filter([
                 'supplier:id,name',
-                'items' => fn ($query) => $query->where('item_type', 'part'),
-                'items.part:id,name,sku,barcode,stock_unit',
-            ])
-            ->whereNotNull('invoice_number')
-            ->where('invoice_number', '!=', '')
-            ->whereHas('items', fn ($query) => $query->where('item_type', 'part'))
+                'items' => fn ($query) => $query->where('item_type', $kind),
+                $kind === 'part' ? 'items.part:id,name,sku,barcode,stock_unit' : 'items.product:id,name,sku,size,color',
+            ]))
+            ->when($kind === 'part', fn ($query) => $query
+                ->whereNotNull('invoice_number')
+                ->where('invoice_number', '!=', ''))
+            ->whereHas('items', fn ($query) => $query->where('item_type', $kind))
             ->when($term !== '', fn ($query) => $query->where(fn ($nested) => $nested
                 ->where('invoice_number', 'like', $like)
                 ->orWhere('receipt_number', 'like', $like)
-                ->orWhereHas('supplier', fn ($supplier) => $supplier->where('name', 'like', $like))))
+                ->orWhereHas('supplier', fn ($supplier) => $supplier->where('name', 'like', $like))
+                ->when($kind === 'product', fn ($match) => $match->orWhereHas(
+                    'items.product',
+                    fn ($product) => $product->where('name', 'like', $like)->orWhere('size', 'like', $like),
+                ))))
             ->latest('received_at')
             ->latest('id')
             ->paginate($perPage);
@@ -57,16 +72,25 @@ class StockReceiptController extends Controller
             'total' => round((float) $receipt->items->sum(
                 fn (StockReceiptItem $item) => (float) $item->quantity * (float) $item->unit_cost
             ), 2),
-            'items' => $receipt->items->map(fn (StockReceiptItem $item) => [
-                'id' => $item->id,
-                'part_id' => $item->part_id,
-                'name' => $item->part?->name ?? 'Deleted item',
-                'sku' => $item->part?->sku,
-                'stock_unit' => $item->part?->stock_unit,
-                'quantity' => (float) $item->quantity,
-                'unit_cost' => $item->unit_cost,
-                'line_total' => round((float) $item->quantity * (float) $item->unit_cost, 2),
-            ])->values(),
+            'items' => $receipt->items->map(function (StockReceiptItem $item) use ($kind) {
+                $name = $kind === 'product'
+                    ? ($item->product?->name ?? 'Deleted item')
+                    : ($item->part?->name ?? 'Deleted item');
+
+                return [
+                    'id' => $item->id,
+                    'part_id' => $item->part_id,
+                    'product_id' => $item->product_id,
+                    'name' => $name,
+                    'sku' => $kind === 'product' ? $item->product?->sku : $item->part?->sku,
+                    'size' => $item->product?->size,
+                    'color' => $item->product?->color,
+                    'stock_unit' => $item->part?->stock_unit,
+                    'quantity' => (float) $item->quantity,
+                    'unit_cost' => $item->unit_cost,
+                    'line_total' => round((float) $item->quantity * (float) $item->unit_cost, 2),
+                ];
+            })->values(),
         ]);
 
         return $this->moneyJson($receipts);
