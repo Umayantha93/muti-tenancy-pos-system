@@ -298,6 +298,7 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::get('/products/import/template', [ProductController::class, 'importTemplate']);
             Route::post('/products/import', [ProductController::class, 'import']);
             Route::post('/products/restock/bulk', [ProductController::class, 'restockBulk']);
+            Route::get('/products/stock-receipts', [StockReceiptController::class, 'products']);
             Route::get('/products', [ProductController::class, 'index']);
             Route::post('/products', [ProductController::class, 'store']);
             Route::get('/products/{product}', [ProductController::class, 'show']);

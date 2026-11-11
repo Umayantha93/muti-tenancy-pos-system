@@ -95,9 +95,11 @@ class RetailSaleController extends Controller
             $subtotal = 0;
             foreach ($data['items'] as $line) {
                 $product = $products->get((int) $line['product_id']) ?? Product::query()->whereKey($line['product_id'])->lockForUpdate()->firstOrFail();
-                $qty = (float) $line['quantity'];
-                $needed = (int) ceil($qty);
-                if (BranchInventory::productQty($product->id) < $needed) {
+                $qty = (int) round((float) $line['quantity']);
+                if ($qty < 1) {
+                    abort(response()->json(['message' => 'Sell whole pieces only.'], 422));
+                }
+                if (BranchInventory::productQty($product->id) < $qty) {
                     abort(response()->json(['message' => "Insufficient stock for {$product->name}."], 422));
                 }
                 $lineTotal = round($product->price * $qty, 2);
@@ -110,7 +112,7 @@ class RetailSaleController extends Controller
                     'purchase_unit_cost' => $product->cost_price,
                     'line_total' => $lineTotal,
                 ]);
-                $product->takeStock($needed);
+                $product->takeStock($qty);
                 $subtotal += $lineTotal;
             }
 

@@ -29,12 +29,10 @@ class ClothingController extends Controller
         $units = 0;
         foreach ($products as $product) {
             $qty = (int) $product->stock_qty;
-            if ($halfStock) {
-                $qty = intdiv($qty, 2);
-            }
             $units += $qty;
-            $worth += $qty * (float) $product->price;
-            $income += $qty * (float) $product->cost_price;
+            $priced = $halfStock ? intdiv($qty, 2) : $qty;
+            $worth += $priced * (float) $product->price;
+            $income += $priced * (float) $product->cost_price;
         }
 
         $bills = Bill::query()

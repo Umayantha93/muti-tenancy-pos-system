@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\Expense;
 use App\Models\Feature;
 use App\Models\Product;
+use App\Models\StockReceipt;
+use App\Models\StockReceiptItem;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\BusinessTypes;
@@ -63,14 +66,14 @@ class ClothingFloorTest extends TestCase
         ])->assertCreated();
 
         $insights = $this->getJson('/api/clothing/insights')->assertOk();
-        $this->assertEquals(9, $insights->json('units'));
+        $this->assertEquals(18, $insights->json('units'));
         $this->assertEquals(900, $insights->json('worth'));
         $this->assertEquals(360, $insights->json('income'));
         $this->assertEquals(2, $insights->json('today_bills'));
         $this->assertEquals(200, $insights->json('today_sales'));
 
         $stock = $this->getJson('/api/products/size-stock')->assertOk();
-        $this->assertSame(9, collect($stock->json('apparel'))->firstWhere('size', 'M')['qty']);
+        $this->assertSame(18, collect($stock->json('apparel'))->firstWhere('size', 'M')['qty']);
         $this->assertSame(18, (int) Product::query()->find($productId)->stock_qty);
         $this->assertSame(18, (int) $this->getJson('/api/products?per_page=50')->json('data.0.stock_qty'));
     }
@@ -262,6 +265,111 @@ class ClothingFloorTest extends TestCase
         ])->assertStatus(422);
 
         $this->assertEquals(2, Product::query()->find($productId)->stock_qty);
+    }
+
+    public function test_one_barcode_covers_every_size_of_one_garment(): void
+    {
+        [, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $this->postJson('/api/products', [
+            'name' => 'Grey Selvedge Jeans',
+            'barcode' => '8901111000001',
+            'color' => 'Indigo',
+            'price' => 100,
+            'size_scale' => 'jeans',
+            'size_quantities' => ['32' => 4, '34' => 2],
+        ])->assertCreated();
+
+        $rows = Product::query()->where('barcode', '8901111000001')->get();
+        $this->assertSame(8, $rows->count());
+        $this->assertSame(4, (int) $rows->firstWhere('size', '32')->stock_qty);
+        $this->assertSame(2, (int) $rows->firstWhere('size', '34')->stock_qty);
+        $this->assertSame(0, (int) $rows->firstWhere('size', '28')->stock_qty);
+
+        $this->postJson('/api/products', [
+            'name' => 'Other Jean',
+            'barcode' => '8901111000001',
+            'price' => 80,
+            'size' => '32',
+        ])->assertStatus(422);
+
+        $id = $rows->firstWhere('size', '32')->id;
+        $this->post("/api/products/{$id}/restock", ['quantity' => 3])->assertOk();
+        $this->assertSame(7, (int) Product::query()->find($id)->stock_qty);
+
+        $this->putJson("/api/products/{$id}", [
+            'barcode' => '8901111000002',
+        ])->assertOk();
+        $this->assertSame(8, Product::query()->where('barcode', '8901111000002')->count());
+    }
+
+    public function test_selling_three_of_one_size_removes_three_from_stock(): void
+    {
+        [, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $productId = $this->postJson('/api/products', [
+            'name' => 'Linen Camp Collar Shirt',
+            'size' => 'L',
+            'color' => 'Sand',
+            'price' => 6290,
+            'stock_qty' => 16,
+        ])->assertCreated()->json('id');
+
+        $sale = $this->postJson('/api/retail-sales', [
+            'payment_method' => 'cash',
+            'cash_tendered' => 25000,
+            'items' => [['product_id' => $productId, 'quantity' => 3]],
+        ])->assertCreated();
+
+        $this->assertEquals(3, (float) $sale->json('bill.items.0.quantity'));
+        $this->assertSame(13, (int) Product::query()->find($productId)->stock_qty);
+
+        $listed = collect($this->getJson('/api/products?per_page=200')->json('data'))->firstWhere('id', $productId);
+        $this->assertSame(13, (int) $listed['stock_qty']);
+    }
+
+    public function test_bulk_restock_sets_one_selling_price_and_keeps_one_grn(): void
+    {
+        [, $owner] = $this->tenant();
+        Sanctum::actingAs($owner);
+
+        $this->postJson('/api/products', [
+            'name' => 'Slim Chambray Shirt',
+            'color' => 'Blue',
+            'category' => 'Men',
+            'price' => 100,
+            'cost_price' => 40,
+            'size_scale' => 'apparel',
+            'size_quantities' => ['M' => 4, 'L' => 2],
+        ])->assertCreated();
+
+        $rows = Product::query()->where('name', 'Slim Chambray Shirt')->get();
+        $medium = $rows->firstWhere('size', 'M');
+        $large = $rows->firstWhere('size', 'L');
+
+        $response = $this->postJson('/api/products/restock/bulk', [
+            'invoice_number' => 'INV-9',
+            'items' => [
+                ['product_id' => $medium->id, 'quantity' => 2, 'unit_cost' => 50, 'price' => 180],
+                ['product_id' => $large->id, 'quantity' => 1, 'unit_cost' => 50, 'price' => 180],
+            ],
+        ])->assertOk();
+
+        $this->assertSame(1, StockReceipt::query()->count());
+        $this->assertSame(2, StockReceiptItem::query()->count());
+        $this->assertSame(1, Expense::query()->count());
+        $this->assertSame(150.0, (float) Expense::query()->value('amount'));
+        $this->assertSame('GRN-0001', $response->json('receipt.receipt_number'));
+        $this->assertSame(6, (int) Product::query()->find($medium->id)->stock_qty);
+        $this->assertSame(3, (int) Product::query()->find($large->id)->stock_qty);
+        $this->assertEquals(180, (float) Product::query()->where('size', 'XS')->value('price'));
+
+        $list = $this->getJson('/api/products/stock-receipts')->assertOk();
+        $this->assertSame('INV-9', $list->json('data.0.invoice_number'));
+        $this->assertCount(2, $list->json('data.0.items'));
+        $this->assertSame('M', collect($list->json('data.0.items'))->firstWhere('product_id', $medium->id)['size']);
     }
 
     /**
