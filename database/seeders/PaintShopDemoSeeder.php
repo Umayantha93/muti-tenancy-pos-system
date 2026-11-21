@@ -152,18 +152,18 @@ class PaintShopDemoSeeder extends Seeder
     private function seedStock(Tenant $tenant): array
     {
         $catalog = [
-            ['name' => '2K primer grey', 'brand' => 'Shop stock', 'type' => 'Primer', 'price' => 22, 'cost_price' => 12, 'stock_qty' => 12000, 'description' => 'Stocked in millilitres'],
-            ['name' => 'HS clear coat', 'brand' => 'Shop stock', 'type' => 'Clear', 'price' => 38, 'cost_price' => 20, 'stock_qty' => 15000, 'description' => 'Stocked in millilitres'],
-            ['name' => 'Thinner 2K', 'brand' => 'Shop stock', 'type' => 'Thinner', 'price' => 8, 'cost_price' => 4, 'stock_qty' => 20000, 'description' => 'Stocked in millilitres'],
-            ['name' => '2K hardener', 'brand' => 'Shop stock', 'type' => 'Hardener', 'price' => 18, 'cost_price' => 10, 'stock_qty' => 8000, 'description' => 'Stocked in millilitres'],
-            ['name' => 'White 2K base', 'brand' => 'Nippon', 'type' => 'Base', 'price' => 28, 'cost_price' => 16, 'stock_qty' => 10000, 'description' => 'Solid white tinter, millilitres'],
-            ['name' => 'Black 2K base', 'brand' => 'Nippon', 'type' => 'Base', 'price' => 26, 'cost_price' => 15, 'stock_qty' => 9000, 'description' => 'Solid black tinter, millilitres'],
-            ['name' => 'Silver metallic', 'brand' => 'Sikkens', 'type' => 'Base', 'price' => 42, 'cost_price' => 24, 'stock_qty' => 6000, 'description' => 'Metallic silver, millilitres'],
-            ['name' => 'Candy red', 'brand' => 'Sikkens', 'type' => 'Base', 'price' => 48, 'cost_price' => 28, 'stock_qty' => 4500, 'description' => 'Candy red tinter, millilitres'],
-            ['name' => 'Body filler', 'brand' => '3M', 'type' => 'Filler', 'price' => 6, 'cost_price' => 3, 'stock_qty' => 8000, 'description' => 'Polyester putty, millilitres'],
-            ['name' => 'Plastic bumper primer', 'brand' => 'Shop stock', 'type' => 'Primer', 'price' => 20, 'cost_price' => 11, 'stock_qty' => 4000, 'description' => 'Adhesion primer, millilitres'],
-            ['name' => 'Masking tape 24mm', 'brand' => '3M', 'type' => 'Consumable', 'price' => 180, 'cost_price' => 90, 'stock_qty' => 80, 'description' => 'Rolls'],
-            ['name' => 'P80 sandpaper', 'brand' => 'Mirka', 'type' => 'Consumable', 'price' => 45, 'cost_price' => 18, 'stock_qty' => 200, 'description' => 'Sheets'],
+            ['name' => '2K primer grey', 'brand' => 'Shop stock', 'type' => 'Primer', 'price' => 22, 'cost_price' => 12, 'stock_qty' => 12000, 'stock_unit' => 'ml', 'description' => 'Stocked in millilitres'],
+            ['name' => 'HS clear coat', 'brand' => 'Shop stock', 'type' => 'Clear', 'price' => 38, 'cost_price' => 20, 'stock_qty' => 15000, 'stock_unit' => 'ml', 'description' => 'Stocked in millilitres'],
+            ['name' => 'Thinner 2K', 'brand' => 'Shop stock', 'type' => 'Thinner', 'price' => 8, 'cost_price' => 4, 'stock_qty' => 20000, 'stock_unit' => 'ml', 'description' => 'Stocked in millilitres'],
+            ['name' => '2K hardener', 'brand' => 'Shop stock', 'type' => 'Hardener', 'price' => 18, 'cost_price' => 10, 'stock_qty' => 8000, 'stock_unit' => 'ml', 'description' => 'Stocked in millilitres'],
+            ['name' => 'White 2K base', 'brand' => 'Nippon', 'type' => 'Base', 'price' => 28, 'cost_price' => 16, 'stock_qty' => 10000, 'stock_unit' => 'ml', 'description' => 'Solid white tinter, millilitres'],
+            ['name' => 'Black 2K base', 'brand' => 'Nippon', 'type' => 'Base', 'price' => 26, 'cost_price' => 15, 'stock_qty' => 9000, 'stock_unit' => 'ml', 'description' => 'Solid black tinter, millilitres'],
+            ['name' => 'Silver metallic', 'brand' => 'Sikkens', 'type' => 'Base', 'price' => 42, 'cost_price' => 24, 'stock_qty' => 6000, 'stock_unit' => 'ml', 'description' => 'Metallic silver, millilitres'],
+            ['name' => 'Candy red', 'brand' => 'Sikkens', 'type' => 'Base', 'price' => 48, 'cost_price' => 28, 'stock_qty' => 4500, 'stock_unit' => 'ml', 'description' => 'Candy red tinter, millilitres'],
+            ['name' => 'Body filler', 'brand' => '3M', 'type' => 'Filler', 'price' => 6, 'cost_price' => 3, 'stock_qty' => 8000, 'stock_unit' => 'ml', 'description' => 'Polyester putty, millilitres'],
+            ['name' => 'Plastic bumper primer', 'brand' => 'Shop stock', 'type' => 'Primer', 'price' => 20, 'cost_price' => 11, 'stock_qty' => 4000, 'stock_unit' => 'ml', 'description' => 'Adhesion primer, millilitres'],
+            ['name' => 'Masking tape 24mm', 'brand' => '3M', 'type' => 'Consumable', 'price' => 180, 'cost_price' => 90, 'stock_qty' => 80, 'stock_unit' => 'qty', 'description' => 'Rolls'],
+            ['name' => 'P80 sandpaper', 'brand' => 'Mirka', 'type' => 'Consumable', 'price' => 45, 'cost_price' => 18, 'stock_qty' => 200, 'stock_unit' => 'qty', 'description' => 'Sheets'],
         ];
 
         $parts = [];

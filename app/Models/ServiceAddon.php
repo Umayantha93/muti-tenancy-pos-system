@@ -21,6 +21,7 @@ use Illuminate\Validation\ValidationException;
     'sort_order',
     'is_full_service',
     'active',
+    'catalog',
 ])]
 class ServiceAddon extends Model
 {
@@ -32,7 +33,7 @@ class ServiceAddon extends Model
             return;
         }
 
-        if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->exists()) {
+        if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->where('catalog', 'paint')->exists()) {
             return;
         }
 
@@ -40,6 +41,7 @@ class ServiceAddon extends Model
             $addon = new static;
             $addon->forceFill([
                 'tenant_id' => $tenantId,
+                'catalog' => 'paint',
                 'name' => $row['name'],
                 'price' => $row['price'],
                 'sort_order' => $row['sort_order'],
@@ -71,7 +73,7 @@ class ServiceAddon extends Model
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    public static function applyToItemPayload(array $data, int $tenantId, ?int $vehicleClassId = null): array
+    public static function applyToItemPayload(array $data, int $tenantId, ?int $vehicleClassId = null, ?string $catalog = null): array
     {
         if (empty($data['service_addon_id'])) {
             return $data;
@@ -88,8 +90,14 @@ class ServiceAddon extends Model
             ]);
         }
 
+        if ($catalog !== null && (string) ($addon->catalog ?? 'garage') !== $catalog) {
+            throw ValidationException::withMessages([
+                'service_addon_id' => ['This item is not on this job.'],
+            ]);
+        }
+
         $businessType = BusinessTypes::normalizeLegacy((string) Tenant::query()->whereKey($tenantId)->value('business_type'));
-        if ($businessType === BusinessTypes::GARAGE) {
+        if ($businessType === BusinessTypes::GARAGE && $addon->catalog !== 'paint') {
             $setting = $vehicleClassId
                 ? ServiceAddonPrice::withoutGlobalScopes()
                     ->where('service_addon_id', $addon->id)

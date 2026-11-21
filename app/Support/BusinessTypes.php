@@ -3,6 +3,8 @@
 namespace App\Support;
 
 use App\Models\Bill;
+use App\Models\LaborCategory;
+use App\Models\ServiceAddon;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
@@ -54,7 +56,7 @@ class BusinessTypes
 
         return [
             self::GARAGE => array_merge($garageFamily, [
-                'admit_repair', 'admit_service', 'admit_combined', 'admit_photos',
+                'admit_repair', 'admit_service', 'admit_combined', 'admit_paint', 'admit_photos',
                 'job_board', 'owner_bill_sms', 'job_photos', 'job_videos', 'job_commissions',
                 'free_service', 'show_bill_technicians',
                 'service_reminders', 'service_ops_report', 'station_consumables',
@@ -89,7 +91,7 @@ class BusinessTypes
             self::GARAGE => [
                 'owner_bill_sms', 'service_ops_report', 'job_photos', 'job_videos', 'job_commissions',
                 'free_service', 'show_bill_technicians', 'line_discounts', 'line_vat',
-                'admit_combined', 'admit_photos',
+                'admit_combined', 'admit_paint', 'admit_photos',
                 'job_board', 'job_bookings', 'service_reminders', 'station_consumables',
                 'expense_job_split', 'finance_report_export', 'owe_in_register', 'job_progress',
                 ...$inventoryExtras, 'cash_up', ...$whatsapp,
@@ -381,6 +383,7 @@ class BusinessTypes
             'admit_repair' => 'admit_vehicle',
             'admit_service' => 'admit_vehicle',
             'admit_combined' => 'admit_vehicle',
+            'admit_paint' => 'admit_vehicle',
             'admit_photos' => 'admit_vehicle',
             'job_board' => 'admit_vehicle',
             'owner_bill_sms' => 'admit_vehicle',
@@ -417,7 +420,7 @@ class BusinessTypes
     public static function requires(string $key): array
     {
         return match ($key) {
-            'admit_repair', 'admit_service', 'job_board', 'owner_bill_sms', 'admit_photos' => ['admit_vehicle'],
+            'admit_repair', 'admit_service', 'admit_paint', 'job_board', 'owner_bill_sms', 'admit_photos' => ['admit_vehicle'],
             'admit_combined' => ['admit_vehicle', 'admit_repair', 'admit_service'],
             'job_photos', 'job_videos', 'job_progress', 'bill_sms', 'job_commissions', 'free_service', 'show_bill_technicians', 'line_discounts', 'line_vat' => ['billing'],
             'service_reminders' => ['billing', 'bill_sms', 'admit_service'],
@@ -441,7 +444,9 @@ class BusinessTypes
         if ($type !== self::GARAGE || ! in_array('admit_vehicle', $enabled, true)) {
             return $enabled;
         }
-        if (! in_array('admit_repair', $enabled, true) && ! in_array('admit_service', $enabled, true)) {
+        if (! in_array('admit_repair', $enabled, true)
+            && ! in_array('admit_service', $enabled, true)
+            && ! in_array('admit_paint', $enabled, true)) {
             $enabled[] = 'admit_repair';
             $enabled[] = 'admit_service';
         }
@@ -461,7 +466,7 @@ class BusinessTypes
         $set = array_flip(array_values(array_intersect($enabled, $allowed)));
 
         if (! isset($set['admit_vehicle'])) {
-            unset($set['admit_repair'], $set['admit_service'], $set['admit_combined'], $set['admit_photos'], $set['job_board'], $set['owner_bill_sms']);
+            unset($set['admit_repair'], $set['admit_service'], $set['admit_combined'], $set['admit_paint'], $set['admit_photos'], $set['job_board'], $set['owner_bill_sms']);
         }
         if (! isset($set['admit_repair']) || ! isset($set['admit_service'])) {
             unset($set['admit_combined']);
@@ -491,9 +496,9 @@ class BusinessTypes
         }
 
         if ($rejectEmptyAdmit && $type === self::GARAGE && isset($set['admit_vehicle'])
-            && ! isset($set['admit_repair']) && ! isset($set['admit_service'])) {
+            && ! isset($set['admit_repair']) && ! isset($set['admit_service']) && ! isset($set['admit_paint'])) {
             throw ValidationException::withMessages([
-                'features' => ['Choose Repair, Service, or both.'],
+                'features' => ['Choose Repair, Service, or Paint.'],
             ]);
         }
 
@@ -510,7 +515,7 @@ class BusinessTypes
             return [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE];
         }
 
-        $attached = $user->tenant?->features()->whereIn('features.key', ['admit_repair', 'admit_service'])->pluck('features.key') ?? collect();
+        $attached = $user->tenant?->features()->whereIn('features.key', ['admit_repair', 'admit_service', 'admit_paint'])->pluck('features.key') ?? collect();
         if ($attached->isEmpty()) {
             return $user->canAccessFeature('admit_vehicle')
                 ? [Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE]
@@ -524,14 +529,53 @@ class BusinessTypes
         if ($user->canAccessFeature('admit_service')) {
             $kinds[] = Bill::JOB_KIND_SERVICE;
         }
+        if ($user->canAccessFeature('admit_paint')) {
+            $kinds[] = Bill::JOB_KIND_PAINT;
+        }
 
         return $kinds;
+    }
+
+    public static function usesPaintWorkspace(?string $businessType, ?string $jobKind): bool
+    {
+        $type = self::normalizeLegacy((string) $businessType);
+        if ($type === self::PAINT) {
+            return true;
+        }
+
+        return $type === self::GARAGE && $jobKind === Bill::JOB_KIND_PAINT;
+    }
+
+    public static function seedPaintWorkspace(int $tenantId): void
+    {
+        LaborCategory::seedDefaultsFor($tenantId, self::PAINT);
+        ServiceAddon::seedDefaultsFor($tenantId, self::PAINT);
+    }
+
+    public static function catalogFor(User $user, ?string $requested): string
+    {
+        $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+        if ($type === self::PAINT) {
+            return 'paint';
+        }
+        if ($requested === 'paint') {
+            abort_unless($user->canAccessFeature('admit_paint'), 403, 'Paint jobs are not enabled for this account.');
+
+            return 'paint';
+        }
+
+        return 'garage';
     }
 
     public static function jobKindAllowed(User $user, ?string $kind): bool
     {
         if ($kind === null || $kind === Bill::JOB_KIND_PARTS_SALE) {
             return true;
+        }
+        if ($kind === Bill::JOB_KIND_PAINT) {
+            $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));
+
+            return $type === self::GARAGE && $user->canAccessFeature('admit_paint');
         }
         if ($kind === Bill::JOB_KIND_BOTH) {
             $type = self::normalizeLegacy((string) ($user->tenant?->business_type ?? self::GARAGE));

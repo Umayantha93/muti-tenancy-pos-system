@@ -35,7 +35,7 @@ class BillShareController extends Controller
         ]);
 
         $bill->tenant?->setAppends(['logo_url']);
-        $isPaint = (string) $bill->tenant?->business_type === BusinessTypes::PAINT;
+        $isPaint = BusinessTypes::usesPaintWorkspace((string) $bill->tenant?->business_type, $bill->job_kind);
         $isGarage = (string) $bill->tenant?->business_type === BusinessTypes::GARAGE;
         $repairNote = $isGarage && $bill->isRepairNote();
         $showTechnicians = $this->tenantFeatureEnabled((int) $bill->tenant_id, 'show_bill_technicians');

@@ -63,7 +63,7 @@ class GarageAdmitSplitTest extends TestCase
 
         $this->putJson("/api/super-admin/tenants/{$tenantId}/features", ['features' => $features->all()])
             ->assertStatus(422)
-            ->assertJsonPath('errors.features.0', 'Choose Repair, Service, or both.');
+            ->assertJsonPath('errors.features.0', 'Choose Repair, Service, or Paint.');
     }
 
     public function test_service_only_garage_rejects_repair_jobs_with_403(): void

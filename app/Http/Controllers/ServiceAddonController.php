@@ -15,12 +15,14 @@ class ServiceAddonController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $catalog = BusinessTypes::catalogFor($request->user(), $request->string('catalog')->toString() ?: null);
         $tenant = $request->user()->tenant;
         if ($tenant && BusinessTypes::usesServiceAddonWorkspace($tenant->business_type)) {
-            ServiceAddon::seedDefaultsFor((int) $tenant->id, $tenant->business_type);
+            ServiceAddon::seedDefaultsFor((int) $tenant->id, $catalog === 'paint' ? BusinessTypes::PAINT : $tenant->business_type);
         }
 
         $addons = ServiceAddon::query()
+            ->where('catalog', $catalog)
             ->with(['inclusions', 'vehiclePrices:id,service_addon_id,service_vehicle_class_id,price,offered'])
             ->orderBy('sort_order')
             ->orderBy('id')
@@ -63,10 +65,12 @@ class ServiceAddonController extends Controller
         $included = $data['included_addon_ids'] ?? [];
         unset($data['included_addon_ids']);
 
+        $catalog = BusinessTypes::catalogFor($request->user(), $request->string('catalog')->toString() ?: null);
         $addon = ServiceAddon::create([
             ...$data,
+            'catalog' => $catalog,
             'price' => $data['price'] ?? 0,
-            'sort_order' => $data['sort_order'] ?? ((int) ServiceAddon::query()->max('sort_order') + 10),
+            'sort_order' => $data['sort_order'] ?? ((int) ServiceAddon::query()->where('catalog', $catalog)->max('sort_order') + 10),
             'active' => $data['active'] ?? true,
             'is_full_service' => false,
         ]);

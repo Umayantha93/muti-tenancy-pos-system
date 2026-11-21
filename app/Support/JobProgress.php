@@ -13,17 +13,44 @@ class JobProgress
     public static function tracks(string $businessType): array
     {
         $type = BusinessTypes::normalizeLegacy($businessType);
-        if ($type === BusinessTypes::PAINT) {
-            return [
-                ['key' => 'received', 'label' => 'Received'],
-                ['key' => 'preparing', 'label' => 'Preparing'],
-                ['key' => 'painting', 'label' => 'Painting'],
-                ['key' => 'drying', 'label' => 'Drying'],
-                ['key' => 'finishing', 'label' => 'Finishing'],
-                ['key' => 'complete', 'label' => 'Complete'],
-            ];
+
+        return $type === BusinessTypes::PAINT ? self::paintTracks() : self::garageTracks();
+    }
+
+    /**
+     * @return list<array{key: string, label: string}>
+     */
+    public static function tracksForBill(Bill $bill): array
+    {
+        $bill->loadMissing('tenant:id,business_type');
+        $type = BusinessTypes::normalizeLegacy((string) ($bill->tenant?->business_type ?? ''));
+        if ($type === BusinessTypes::PAINT || $bill->job_kind === Bill::JOB_KIND_PAINT) {
+            return self::paintTracks();
         }
 
+        return self::garageTracks();
+    }
+
+    /**
+     * @return list<array{key: string, label: string}>
+     */
+    private static function paintTracks(): array
+    {
+        return [
+            ['key' => 'received', 'label' => 'Received'],
+            ['key' => 'preparing', 'label' => 'Preparing'],
+            ['key' => 'painting', 'label' => 'Painting'],
+            ['key' => 'drying', 'label' => 'Drying'],
+            ['key' => 'finishing', 'label' => 'Finishing'],
+            ['key' => 'complete', 'label' => 'Complete'],
+        ];
+    }
+
+    /**
+     * @return list<array{key: string, label: string}>
+     */
+    private static function garageTracks(): array
+    {
         return [
             ['key' => 'received', 'label' => 'Received'],
             ['key' => 'inspecting', 'label' => 'Inspecting'],
@@ -42,13 +69,20 @@ class JobProgress
     }
 
     /**
+     * @return list<string>
+     */
+    public static function keysForBill(Bill $bill): array
+    {
+        return array_column(self::tracksForBill($bill), 'key');
+    }
+
+    /**
      * @return array{current_step: string, complete: bool, share_token: string, steps: list<array<string, mixed>>}
      */
     public static function present(Bill $bill): array
     {
         $bill->loadMissing(['tenant:id,business_type,business_name', 'items']);
-        $type = (string) ($bill->tenant?->business_type ?? '');
-        $tracks = self::tracks($type);
+        $tracks = self::tracksForBill($bill);
         $keys = array_column($tracks, 'key');
         $current = in_array($bill->progress_step, $keys, true) ? (string) $bill->progress_step : $tracks[0]['key'];
         $currentIndex = (int) array_search($current, $keys, true);

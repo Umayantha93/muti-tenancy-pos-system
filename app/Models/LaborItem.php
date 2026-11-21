@@ -34,7 +34,7 @@ class LaborItem extends Model
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    public static function applyToItemPayload(array $data, int $tenantId, ?self $item = null): array
+    public static function applyToItemPayload(array $data, int $tenantId, ?self $item = null, ?string $catalog = null): array
     {
         if (empty($data['labor_item_id'])) {
             return $data;
@@ -48,6 +48,15 @@ class LaborItem extends Model
             throw ValidationException::withMessages([
                 'labor_item_id' => ['This labor item is not available.'],
             ]);
+        }
+
+        if ($catalog !== null) {
+            $item->loadMissing('category');
+            if ((string) ($item->category?->catalog ?? 'garage') !== $catalog) {
+                throw ValidationException::withMessages([
+                    'labor_item_id' => ['This labor item is not on this job.'],
+                ]);
+            }
         }
 
         $data['type'] = 'labor';

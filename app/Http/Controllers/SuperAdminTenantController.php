@@ -167,6 +167,9 @@ class SuperAdminTenantController extends Controller
             if ($data['business_type'] === BusinessTypes::PAINT) {
                 PaintStockDefaults::seedFor((int) $tenant->id);
             }
+            if (in_array('admit_paint', $requested, true)) {
+                BusinessTypes::seedPaintWorkspace((int) $tenant->id);
+            }
 
             return $tenant;
         });
@@ -657,6 +660,9 @@ class SuperAdminTenantController extends Controller
         if (! empty($data['commission_type'])) {
             $tenant->update(['commission_type' => $data['commission_type']]);
         }
+        if (in_array('admit_paint', $normalized, true)) {
+            BusinessTypes::seedPaintWorkspace((int) $tenant->id);
+        }
         $this->audit($request, 'tenant.features_updated', $tenant, $data['features']);
 
         return $this->features($request, $tenant);
@@ -827,6 +833,9 @@ class SuperAdminTenantController extends Controller
         }
         if ($type === BusinessTypes::PAINT) {
             PaintStockDefaults::seedFor((int) $tenant->id);
+        }
+        if ($type === BusinessTypes::GARAGE && in_array('admit_paint', $next, true)) {
+            BusinessTypes::seedPaintWorkspace((int) $tenant->id);
         }
     }
 
