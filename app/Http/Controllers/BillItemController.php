@@ -86,8 +86,9 @@ class BillItemController extends Controller
 
         $data['section'] = $this->resolveSection($bill, $data);
         $this->assertAssignableTechnician($bill, (string) $data['type'], $data['employee_id'] ?? null);
-        $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id, $bill->service_vehicle_class_id);
-        $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id);
+        $lineCatalog = $this->lineCatalog($request, $bill);
+        $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id, $bill->service_vehicle_class_id, $lineCatalog);
+        $data = LaborItem::applyToItemPayload($data, (int) $request->user()->tenant_id, null, $lineCatalog);
         if (($data['type'] ?? '') === 'discount' || ! empty($data['discount_type_id'])) {
             $chargeSubtotal = (float) $bill->items()
                 ->get()
@@ -122,8 +123,12 @@ class BillItemController extends Controller
             : 'Closed bills cannot be edited.');
 
         $businessType = (string) ($request->user()->tenant?->business_type ?? BusinessTypes::GARAGE);
-        if ($businessType !== BusinessTypes::PAINT) {
-            abort(422, 'Panel groups are only available for paint shops.');
+        $paintJob = $businessType === BusinessTypes::PAINT
+            || ($businessType === BusinessTypes::GARAGE
+                && $bill->job_kind === Bill::JOB_KIND_PAINT
+                && $request->user()->canAccessFeature('admit_paint'));
+        if (! $paintJob) {
+            abort(422, 'Panel groups are only available on paint jobs.');
         }
 
         $tenantId = (int) $request->user()->tenant_id;
@@ -179,7 +184,7 @@ class BillItemController extends Controller
                     'description' => $row['description'] ?? null,
                     'unit_price' => $row['unit_price'] ?? null,
                     'quantity' => $row['quantity'],
-                ], $tenantId, $catalog);
+                ], $tenantId, $catalog, 'paint');
                 $payload['panel_group_id'] = $groupId;
                 $payload['panel_name'] = $panelName;
                 if (empty($payload['labor_item_id'])) {
@@ -378,6 +383,16 @@ class BillItemController extends Controller
         $assigned = $bill->employees()->where('employees.id', $employeeId)->first();
 
         return $assigned?->pivot->commission_deducted_at !== null;
+    }
+
+    private function lineCatalog(Request $request, Bill $bill): string
+    {
+        $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? ''));
+        if ($type === BusinessTypes::PAINT || $bill->job_kind === Bill::JOB_KIND_PAINT) {
+            return 'paint';
+        }
+
+        return 'garage';
     }
 
     private function resolveSection(Bill $bill, array $data): string

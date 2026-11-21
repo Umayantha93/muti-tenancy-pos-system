@@ -13,12 +13,14 @@ class LaborCatalogController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $catalog = BusinessTypes::catalogFor($request->user(), $request->string('catalog')->toString() ?: null);
         $tenant = $request->user()->tenant;
         if ($tenant && BusinessTypes::usesLaborCatalog($tenant->business_type)) {
-            LaborCategory::seedDefaultsFor((int) $tenant->id, $tenant->business_type);
+            LaborCategory::seedDefaultsFor((int) $tenant->id, $catalog === 'paint' ? BusinessTypes::PAINT : $tenant->business_type);
         }
 
         $categories = LaborCategory::query()
+            ->where('catalog', $catalog)
             ->with(['items' => fn ($query) => $query->orderBy('sort_order')->orderBy('name')])
             ->orderBy('sort_order')
             ->orderBy('name')
@@ -35,9 +37,11 @@ class LaborCatalogController extends Controller
             'sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
 
+        $catalog = BusinessTypes::catalogFor($request->user(), $request->string('catalog')->toString() ?: null);
         $category = LaborCategory::create([
             'name' => $data['name'],
-            'sort_order' => $data['sort_order'] ?? ((int) LaborCategory::query()->max('sort_order') + 10),
+            'catalog' => $catalog,
+            'sort_order' => $data['sort_order'] ?? ((int) LaborCategory::query()->where('catalog', $catalog)->max('sort_order') + 10),
         ]);
 
         return $this->moneyJson($category->load('items'), 201);

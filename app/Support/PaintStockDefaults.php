@@ -9,7 +9,7 @@ class PaintStockDefaults
     /**
      * Starter color-stock rows in millilitres. Not a car-color catalog.
      *
-     * @return list<array{name: string, brand: string, type: string, price: float, cost_price: float, stock_qty: int, description: string}>
+     * @return list<array{name: string, brand: string, type: string, price: float, cost_price: float, stock_qty: int, stock_unit: string, description: string}>
      */
     public static function catalog(): array
     {
@@ -21,6 +21,7 @@ class PaintStockDefaults
                 'price' => 22,
                 'cost_price' => 12,
                 'stock_qty' => 3200,
+                'stock_unit' => 'ml',
                 'description' => 'Stocked in millilitres',
             ],
             [
@@ -30,6 +31,7 @@ class PaintStockDefaults
                 'price' => 38,
                 'cost_price' => 20,
                 'stock_qty' => 5000,
+                'stock_unit' => 'ml',
                 'description' => 'Stocked in millilitres',
             ],
             [
@@ -39,6 +41,7 @@ class PaintStockDefaults
                 'price' => 8,
                 'cost_price' => 4,
                 'stock_qty' => 8000,
+                'stock_unit' => 'ml',
                 'description' => 'Stocked in millilitres',
             ],
             [
@@ -48,6 +51,7 @@ class PaintStockDefaults
                 'price' => 18,
                 'cost_price' => 10,
                 'stock_qty' => 2000,
+                'stock_unit' => 'ml',
                 'description' => 'Stocked in millilitres',
             ],
         ];
