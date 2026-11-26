@@ -28,7 +28,7 @@ class JobProgressController extends Controller
     {
         $this->assertTrackable($bill);
         abort_if($bill->isClosed(), 422, 'Closed jobs cannot change progress.');
-        $keys = JobProgress::keys($this->type($bill));
+        $keys = JobProgress::keysForBill($bill);
         $data = $request->validate([
             'step' => ['required', Rule::in($keys)],
         ]);
@@ -41,7 +41,7 @@ class JobProgressController extends Controller
     {
         $this->assertTrackable($bill);
         abort_if($bill->isClosed(), 422, 'Closed jobs cannot change progress.');
-        $keys = JobProgress::keys($this->type($bill));
+        $keys = JobProgress::keysForBill($bill);
         $request->validate([
             'step' => ['required', Rule::in($keys)],
             'photo' => ['required', 'file', 'max:12288', 'mimes:jpeg,jpg,png,webp,gif'],

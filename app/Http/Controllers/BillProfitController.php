@@ -16,7 +16,7 @@ class BillProfitController extends Controller
         $data = $request->validate([
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PARTS_SALE])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PAINT, Bill::JOB_KIND_PARTS_SALE])],
             'search' => ['nullable', 'string', 'max:255'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);

@@ -33,7 +33,7 @@ class BillController extends Controller
             'closed_kind' => ['nullable', Rule::in(['free', 'refunded'])],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PARTS_SALE])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PAINT, Bill::JOB_KIND_PARTS_SALE])],
             'assigned_to_me' => ['nullable', 'boolean'],
             'open_only' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
@@ -102,7 +102,8 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PAINT])],
+            'paint_mode' => ['nullable', Rule::in([Bill::PAINT_MODE_PANEL, Bill::PAINT_MODE_PACKAGE])],
             'tyre_size' => ['nullable', 'string', 'max:40'],
             'axle' => ['nullable', 'string', 'max:40'],
             'imei' => ['nullable', 'string', 'max:40'],
@@ -178,7 +179,8 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             'admission_date' => ['nullable', 'date'],
-            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH])],
+            'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PAINT])],
+            'paint_mode' => ['nullable', Rule::in([Bill::PAINT_MODE_PANEL, Bill::PAINT_MODE_PACKAGE])],
             ...$this->employeeIdsRules($request),
         ]);
 
@@ -736,6 +738,9 @@ class BillController extends Controller
         if (! BusinessTypes::jobKindAllowed($request->user(), $jobKind)) {
             abort(403, 'This job kind is not enabled for this account.');
         }
+        $paintMode = $jobKind === Bill::JOB_KIND_PAINT
+            ? ($data['paint_mode'] ?? Bill::PAINT_MODE_PANEL)
+            : null;
         $prefix = BusinessTypes::usesStoreCounter($type) && $jobKind === Bill::JOB_KIND_REPAIR
             ? 'REP'
             : BusinessTypes::billPrefix($type);
@@ -759,6 +764,7 @@ class BillController extends Controller
             'next_service_due_on' => $data['next_service_due_on'] ?? null,
             'notes' => $data['notes'] ?? null,
             'job_kind' => $jobKind,
+            'paint_mode' => $paintMode,
             'floor_status' => $data['floor_status'] ?? 'waiting',
             'internal_notes' => $data['internal_notes'] ?? null,
             'additional_note_color' => $data['additional_note_color'] ?? null,

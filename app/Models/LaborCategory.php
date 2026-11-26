@@ -9,19 +9,20 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'sort_order'])]
+#[Fillable(['name', 'sort_order', 'catalog'])]
 class LaborCategory extends Model
 {
     use BelongsToTenant;
 
     public static function seedDefaultsFor(int $tenantId, ?string $businessType = null): void
     {
-        if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->exists()) {
+        $catalogKey = $businessType === BusinessTypes::PAINT ? 'paint' : 'garage';
+        if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->where('catalog', $catalogKey)->exists()) {
             return;
         }
 
         $rate = LaborCatalogDefaults::hourlyRate();
-        $catalog = $businessType === BusinessTypes::PAINT
+        $catalog = $catalogKey === 'paint'
             ? LaborCatalogDefaults::paintCatalog()
             : LaborCatalogDefaults::catalog();
 
@@ -29,6 +30,7 @@ class LaborCategory extends Model
             $row = new static;
             $row->forceFill([
                 'tenant_id' => $tenantId,
+                'catalog' => $catalogKey,
                 'name' => $category['name'],
                 'sort_order' => ($categoryIndex + 1) * 10,
             ])->save();

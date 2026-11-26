@@ -48,6 +48,7 @@ class BillProfitAnalyzer
                 Bill::JOB_KIND_SERVICE => Bill::JOB_KIND_SERVICE,
                 Bill::JOB_KIND_PARTS_SALE => Bill::JOB_KIND_PARTS_SALE,
                 Bill::JOB_KIND_BOTH => Bill::JOB_KIND_BOTH,
+                Bill::JOB_KIND_PAINT => Bill::JOB_KIND_PAINT,
                 default => Bill::JOB_KIND_REPAIR,
             },
             ...$activity,

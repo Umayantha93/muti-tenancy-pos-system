@@ -36,6 +36,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'warranty_until',
     'status',
     'job_kind',
+    'paint_mode',
     'service_vehicle_class_id',
     'floor_status',
     'progress_step',
@@ -71,6 +72,12 @@ class Bill extends Model
     public const JOB_KIND_PARTS_SALE = 'parts_sale';
 
     public const JOB_KIND_BOTH = 'both';
+
+    public const JOB_KIND_PAINT = 'paint';
+
+    public const PAINT_MODE_PANEL = 'panel';
+
+    public const PAINT_MODE_PACKAGE = 'package';
 
     protected $appends = [
         'has_pending_cheque',
