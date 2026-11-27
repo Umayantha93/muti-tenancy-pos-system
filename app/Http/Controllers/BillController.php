@@ -458,6 +458,10 @@ class BillController extends Controller
             'internal_notes' => ['nullable', 'string'],
             'additional_note_color' => ['nullable', Rule::in(['blue', 'red'])],
             ...$this->driverRules(),
+            'customer_id' => [
+                'sometimes', 'nullable', 'integer',
+                Rule::exists('customers', 'id')->where('tenant_id', $request->user()->tenant_id),
+            ],
             'customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'customer_phone' => ['sometimes', 'nullable', 'regex:/^[0-9+() -]{7,20}$/'],
             'customer_address' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -495,7 +499,7 @@ class BillController extends Controller
 
         $staffOnly = collect($data)->except([
             'notes', 'internal_notes', 'additional_note_color', 'hide_amounts',
-            'driver_name', 'driver_phone', 'customer_name', 'customer_phone', 'customer_address',
+            'driver_name', 'driver_phone', 'customer_id', 'customer_name', 'customer_phone', 'customer_address',
             'number_plate', 'chassis_number', 'make', 'model', 'year',
             'appliance_type', 'fault_description', 'service_place',
         ])->isEmpty();
@@ -517,7 +521,7 @@ class BillController extends Controller
         $this->keepExistingDetail($data, 'mileage', $bill->mileage, 'The mileage cannot be removed.');
         $this->keepExistingDetail($data, 'next_service_mileage', $bill->next_service_mileage, 'The next service km cannot be removed.');
         $this->keepExistingDetail($data, 'next_service_due_on', $bill->next_service_due_on, 'The next service date cannot be removed.');
-        if (collect(['customer_name', 'customer_phone', 'customer_address'])->contains(fn (string $key) => array_key_exists($key, $data))) {
+        if (collect(['customer_id', 'customer_name', 'customer_phone', 'customer_address'])->contains(fn (string $key) => array_key_exists($key, $data))) {
             $this->correctCustomer($bill, $data);
         }
         $hasVehicleIdentity = collect(['chassis_number', 'make', 'model', 'year', 'appliance_type', 'fault_description'])
@@ -535,6 +539,7 @@ class BillController extends Controller
             $data['year'],
             $data['appliance_type'],
             $data['fault_description'],
+            $data['customer_id'],
             $data['customer_name'],
             $data['customer_phone'],
             $data['customer_address'],
@@ -899,12 +904,54 @@ class BillController extends Controller
     }
 
     /**
+     * Point this job at another company, or correct the company already on it.
+     * A shared company (other vehicles or job cards) is never renamed in place.
+     *
      * @param  array<string, mixed>  $data
      */
     private function correctCustomer(Bill $bill, array $data): void
     {
         $customer = $bill->customer;
         abort_unless($customer, 422, 'This job has no customer to change.');
+
+        $explicitId = ! empty($data['customer_id']);
+        $target = null;
+        $keepTargetContact = false;
+
+        if ($explicitId) {
+            $target = Customer::query()->find($data['customer_id']);
+            abort_unless($target, 422, 'That customer was not found.');
+        } elseif (array_key_exists('customer_name', $data)) {
+            $name = trim((string) ($data['customer_name'] ?? ''));
+            if ($name !== '' && strcasecmp($name, trim((string) $customer->name)) !== 0) {
+                $matches = Customer::query()
+                    ->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])
+                    ->whereKeyNot($customer->id)
+                    ->get();
+                if ($matches->count() > 1) {
+                    abort(422, 'More than one customer uses that name. Pick the customer from the list.');
+                }
+                if ($matches->count() === 1) {
+                    $target = $matches->first();
+                    $keepTargetContact = true;
+                } elseif ($this->customerIsShared($bill, $customer)) {
+                    $target = $this->customerForNewName($customer, $data, $name);
+                    $keepTargetContact = true;
+                }
+            }
+        }
+
+        if ($target && (int) $target->id !== (int) $customer->id) {
+            $bill->customer_id = $target->id;
+            if ($bill->vehicle && (int) $bill->vehicle->customer_id !== (int) $target->id) {
+                $bill->vehicle->update(['customer_id' => $target->id]);
+            }
+            $customer = $target;
+            if ($keepTargetContact) {
+                return;
+            }
+        }
+
         $updates = [];
         if (array_key_exists('customer_name', $data)) {
             $name = trim((string) ($data['customer_name'] ?? ''));
@@ -930,6 +977,45 @@ class BillController extends Controller
         if ($updates !== []) {
             $customer->update($updates);
         }
+    }
+
+    private function customerIsShared(Bill $bill, Customer $customer): bool
+    {
+        $otherBills = Bill::query()->where('customer_id', $customer->id)->whereKeyNot($bill->id)->exists();
+        $otherVehicles = Vehicle::query()
+            ->where('customer_id', $customer->id)
+            ->when($bill->vehicle_id, fn ($query) => $query->whereKeyNot($bill->vehicle_id))
+            ->exists();
+
+        return $otherBills || $otherVehicles;
+    }
+
+    /**
+     * A new company name on a shared customer opens a separate customer for this job only.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function customerForNewName(Customer $customer, array $data, string $name): Customer
+    {
+        $phone = trim((string) ($data['customer_phone'] ?? ''));
+        if ($phone !== '' && $phone === trim((string) $customer->phone)) {
+            $phone = '';
+        }
+        if ($phone !== '') {
+            abort_if(
+                Customer::query()->where('phone', $phone)->exists(),
+                422,
+                'That phone is already used by another customer.',
+            );
+        }
+
+        return Customer::create([
+            'name' => $name,
+            'phone' => $phone !== '' ? $phone : null,
+            'address' => array_key_exists('customer_address', $data)
+                ? $this->nullableText($data['customer_address'])
+                : $customer->address,
+        ]);
     }
 
     /**
