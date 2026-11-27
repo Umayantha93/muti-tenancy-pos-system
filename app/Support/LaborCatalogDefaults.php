@@ -292,10 +292,33 @@ class LaborCatalogDefaults
     }
 
     /**
-     * Paint labor is hours × hourly rate, same engine as garage. Owner edits rates.
+     * A/C repair labor is hours × hourly rate. Owner edits rates.
      *
      * @return list<array{name: string, items: list<array{name: string, hours: float}>}>
      */
+    public static function acCatalog(): array
+    {
+        return [
+            [
+                'name' => 'Gas and leak',
+                'items' => [
+                    ['name' => 'Gas charge', 'hours' => 1.0],
+                    ['name' => 'Leak test', 'hours' => 1.0],
+                    ['name' => 'Vacuum and recharge', 'hours' => 1.5],
+                ],
+            ],
+            [
+                'name' => 'Unit repair',
+                'items' => [
+                    ['name' => 'Compressor replacement', 'hours' => 3.0],
+                    ['name' => 'Fan motor replacement', 'hours' => 1.5],
+                    ['name' => 'PCB repair', 'hours' => 1.5],
+                    ['name' => 'Filter clean', 'hours' => 0.5],
+                ],
+            ],
+        ];
+    }
+
     public static function paintCatalog(): array
     {
         return [

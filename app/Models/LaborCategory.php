@@ -16,15 +16,21 @@ class LaborCategory extends Model
 
     public static function seedDefaultsFor(int $tenantId, ?string $businessType = null): void
     {
-        $catalogKey = $businessType === BusinessTypes::PAINT ? 'paint' : 'garage';
+        $catalogKey = match ($businessType) {
+            BusinessTypes::PAINT => 'paint',
+            BusinessTypes::AC_SERVICE => 'ac',
+            default => 'garage',
+        };
         if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->where('catalog', $catalogKey)->exists()) {
             return;
         }
 
         $rate = LaborCatalogDefaults::hourlyRate();
-        $catalog = $catalogKey === 'paint'
-            ? LaborCatalogDefaults::paintCatalog()
-            : LaborCatalogDefaults::catalog();
+        $catalog = match ($catalogKey) {
+            'paint' => LaborCatalogDefaults::paintCatalog(),
+            'ac' => LaborCatalogDefaults::acCatalog(),
+            default => LaborCatalogDefaults::catalog(),
+        };
 
         foreach ($catalog as $categoryIndex => $category) {
             $row = new static;

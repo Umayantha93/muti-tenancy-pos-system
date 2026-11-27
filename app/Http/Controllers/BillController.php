@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ApplianceType;
 use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BillPayment;
@@ -34,6 +35,7 @@ class BillController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PAINT, Bill::JOB_KIND_PARTS_SALE])],
+            'subject' => ['nullable', Rule::in(['vehicle', 'appliance'])],
             'assigned_to_me' => ['nullable', 'boolean'],
             'open_only' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
@@ -54,6 +56,10 @@ class BillController extends Controller
             ->when(($data['status'] ?? null) === 'closed' && ($data['closed_kind'] ?? null) === 'free', fn ($query) => $query->where('is_free', true))
             ->when(($data['status'] ?? null) === 'closed' && ($data['closed_kind'] ?? null) === 'refunded', fn ($query) => $query->where('amount_refunded', '>', 0))
             ->when(! empty($data['job_kind']), fn ($query) => $query->where('job_kind', $data['job_kind']))
+            ->when(($data['subject'] ?? null) === 'appliance', fn ($query) => $query->whereHas('vehicle', fn ($vehicle) => $vehicle->where('asset_kind', 'appliance')))
+            ->when(($data['subject'] ?? null) === 'vehicle', fn ($query) => $query->where(function ($nested) {
+                $nested->whereDoesntHave('vehicle', fn ($vehicle) => $vehicle->where('asset_kind', 'appliance'));
+            }))
             ->when($request->boolean('assigned_to_me'), function ($query) use ($request) {
                 $employeeId = $request->user()->employee_id;
                 abort_unless($employeeId, 422, 'This login is not linked to a team member.');
@@ -108,9 +114,15 @@ class BillController extends Controller
             'axle' => ['nullable', 'string', 'max:40'],
             'imei' => ['nullable', 'string', 'max:40'],
             'fault_description' => ['nullable', 'string', 'max:255'],
-            'asset_kind' => ['nullable', Rule::in(['vehicle', 'device'])],
+            'asset_kind' => ['nullable', Rule::in(['vehicle', 'device', 'appliance'])],
+            'appliance_type' => ['nullable', 'string', 'max:40'],
+            'service_place' => ['nullable', Rule::in(['workshop', 'on_site'])],
             ...$this->employeeIdsRules($request),
         ]);
+        $this->guardApplianceAdmit($request, $type, $data['asset_kind'] ?? 'vehicle', $data['appliance_type'] ?? null);
+        if (($data['asset_kind'] ?? 'vehicle') === 'appliance' && empty($data['service_place'])) {
+            $data['service_place'] = 'workshop';
+        }
 
         $bill = DB::transaction(function () use ($data, $request) {
             $customer = Customer::resolveFromIntake(
@@ -122,13 +134,15 @@ class BillController extends Controller
             $chassisRaw = isset($data['chassis_number']) ? strtoupper(trim((string) $data['chassis_number'])) : '';
             $chassis = $chassisRaw !== '' ? $chassisRaw : null;
             $plate = strtoupper($data['number_plate']);
+            $assetKind = $data['asset_kind'] ?? 'vehicle';
             $vehicleAttrs = [
                 'customer_id' => $customer->id,
                 'number_plate' => $plate,
                 'make' => $data['make'] ?? null,
                 'model' => $data['model'] ?? null,
                 'year' => $data['year'] ?? null,
-                'asset_kind' => $data['asset_kind'] ?? 'vehicle',
+                'asset_kind' => $assetKind,
+                'appliance_type' => $assetKind === 'appliance' ? ($data['appliance_type'] ?? null) : null,
                 'imei' => $data['imei'] ?? null,
                 'tyre_size' => $data['tyre_size'] ?? null,
                 'axle' => $data['axle'] ?? null,
@@ -144,6 +158,7 @@ class BillController extends Controller
                 $vehicle = Vehicle::query()
                     ->where('number_plate', $plate)
                     ->where('customer_id', $customer->id)
+                    ->where('asset_kind', $assetKind)
                     ->first();
 
                 if ($vehicle) {
@@ -181,10 +196,17 @@ class BillController extends Controller
             'admission_date' => ['nullable', 'date'],
             'job_kind' => ['nullable', Rule::in([Bill::JOB_KIND_REPAIR, Bill::JOB_KIND_SERVICE, Bill::JOB_KIND_BOTH, Bill::JOB_KIND_PAINT])],
             'paint_mode' => ['nullable', Rule::in([Bill::PAINT_MODE_PANEL, Bill::PAINT_MODE_PACKAGE])],
+            'service_place' => ['nullable', Rule::in(['workshop', 'on_site'])],
             ...$this->employeeIdsRules($request),
         ]);
 
         $vehicle = Vehicle::with('customer')->findOrFail($data['vehicle_id']);
+        if ($vehicle->asset_kind === 'appliance') {
+            $this->guardApplianceAdmit($request, $this->jobType($request), 'appliance', $vehicle->appliance_type);
+            if (empty($data['service_place'])) {
+                $data['service_place'] = 'workshop';
+            }
+        }
         if (! empty($data['job_kind']) && ! BusinessTypes::jobKindAllowed($request->user(), $data['job_kind'])) {
             abort(403, 'This job kind is not enabled for this account.');
         }
@@ -444,6 +466,9 @@ class BillController extends Controller
             'make' => ['sometimes', 'nullable', 'string', 'max:100'],
             'model' => ['sometimes', 'nullable', 'string', 'max:100'],
             'year' => ['sometimes', 'nullable', 'integer', 'between:1900,'.(now()->year + 1)],
+            'appliance_type' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'fault_description' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'service_place' => ['sometimes', 'nullable', Rule::in(['workshop', 'on_site'])],
             'odometer' => ['nullable', 'integer', 'min:0'],
             'mileage' => ['nullable', 'integer', 'min:0'],
             'next_service_mileage' => ['nullable', 'integer', 'min:0'],
@@ -472,6 +497,7 @@ class BillController extends Controller
             'notes', 'internal_notes', 'additional_note_color', 'hide_amounts',
             'driver_name', 'driver_phone', 'customer_name', 'customer_phone', 'customer_address',
             'number_plate', 'chassis_number', 'make', 'model', 'year',
+            'appliance_type', 'fault_description', 'service_place',
         ])->isEmpty();
         if ($bill->isClosed()) {
             abort(422, 'Closed bills cannot be edited.');
@@ -494,7 +520,7 @@ class BillController extends Controller
         if (collect(['customer_name', 'customer_phone', 'customer_address'])->contains(fn (string $key) => array_key_exists($key, $data))) {
             $this->correctCustomer($bill, $data);
         }
-        $hasVehicleIdentity = collect(['chassis_number', 'make', 'model', 'year'])
+        $hasVehicleIdentity = collect(['chassis_number', 'make', 'model', 'year', 'appliance_type', 'fault_description'])
             ->contains(fn (string $key) => array_key_exists($key, $data));
         if ($hasVehicleIdentity) {
             $this->correctVehicleIdentity($bill, $data);
@@ -507,6 +533,8 @@ class BillController extends Controller
             $data['make'],
             $data['model'],
             $data['year'],
+            $data['appliance_type'],
+            $data['fault_description'],
             $data['customer_name'],
             $data['customer_phone'],
             $data['customer_address'],
@@ -738,6 +766,7 @@ class BillController extends Controller
         if (! BusinessTypes::jobKindAllowed($request->user(), $jobKind)) {
             abort(403, 'This job kind is not enabled for this account.');
         }
+        $this->guardAcVehicleJob($type, $jobKind, $vehicleId);
         $paintMode = $jobKind === Bill::JOB_KIND_PAINT
             ? ($data['paint_mode'] ?? Bill::PAINT_MODE_PANEL)
             : null;
@@ -764,6 +793,7 @@ class BillController extends Controller
             'next_service_due_on' => $data['next_service_due_on'] ?? null,
             'notes' => $data['notes'] ?? null,
             'job_kind' => $jobKind,
+            'service_place' => $data['service_place'] ?? null,
             'paint_mode' => $paintMode,
             'floor_status' => $data['floor_status'] ?? 'waiting',
             'internal_notes' => $data['internal_notes'] ?? null,
@@ -784,7 +814,7 @@ class BillController extends Controller
     {
         abort_unless($bill->vehicle, 422, 'This job has no vehicle number to change.');
         $plate = strtoupper(trim($numberPlate));
-        abort_if($plate === '', 422, 'Enter the vehicle number.');
+        abort_if($plate === '', 422, $bill->vehicle->asset_kind === 'appliance' ? 'Enter the serial.' : 'Enter the vehicle number.');
         if (strcasecmp((string) $bill->vehicle->number_plate, $plate) === 0) {
             return;
         }
@@ -815,7 +845,7 @@ class BillController extends Controller
 
         if (array_key_exists('number_plate', $data)) {
             $plate = strtoupper(trim((string) $data['number_plate']));
-            abort_if($plate === '', 422, 'Enter the vehicle number.');
+            abort_if($plate === '', 422, $vehicle->asset_kind === 'appliance' ? 'Enter the serial.' : 'Enter the vehicle number.');
             $updates['number_plate'] = $plate;
         }
         if (array_key_exists('chassis_number', $data)) {
@@ -842,6 +872,19 @@ class BillController extends Controller
             $year = $data['year'] === null || $data['year'] === '' ? null : (int) $data['year'];
             $this->refuseCleared($vehicle->year, $year, 'The vehicle year cannot be removed.');
             $updates['year'] = $year;
+        }
+        if (array_key_exists('appliance_type', $data)) {
+            $applianceType = $data['appliance_type'] ?: null;
+            if ($vehicle->asset_kind === 'appliance' && $applianceType === null) {
+                abort(422, 'Choose the appliance.');
+            }
+            if ($applianceType !== null) {
+                ApplianceType::assertAllowed((int) $bill->tenant_id, $applianceType);
+            }
+            $updates['appliance_type'] = $applianceType;
+        }
+        if (array_key_exists('fault_description', $data)) {
+            $updates['fault_description'] = $this->nullableText($data['fault_description']);
         }
         if ($updates !== []) {
             $vehicle->update($updates);
@@ -967,6 +1010,39 @@ class BillController extends Controller
                 ]];
             })->all()
         );
+    }
+
+    private function guardAcVehicleJob(string $type, string $jobKind, ?int $vehicleId): void
+    {
+        if ($type !== BusinessTypes::AC_SERVICE || $jobKind !== Bill::JOB_KIND_SERVICE || ! $vehicleId) {
+            return;
+        }
+        $assetKind = Vehicle::query()->whereKey($vehicleId)->value('asset_kind');
+        if ($assetKind === 'appliance') {
+            return;
+        }
+        throw ValidationException::withMessages([
+            'job_kind' => ['Vehicle jobs are repairs only.'],
+        ]);
+    }
+
+    private function guardApplianceAdmit(Request $request, string $type, string $assetKind, ?string $applianceType): void
+    {
+        if ($assetKind !== 'appliance') {
+            return;
+        }
+        if ($type !== BusinessTypes::AC_SERVICE) {
+            throw ValidationException::withMessages([
+                'asset_kind' => ['Appliance admissions are only for A/C repair shops.'],
+            ]);
+        }
+        abort_unless($request->user()->canAccessFeature('admit_appliance'), 403, 'Appliance admissions are not enabled for this account.');
+        if ($applianceType === null || $applianceType === '') {
+            throw ValidationException::withMessages([
+                'appliance_type' => ['Choose the appliance.'],
+            ]);
+        }
+        ApplianceType::assertAllowed((int) $request->user()->tenant_id, $applianceType);
     }
 
     private function jobType(Request $request): string

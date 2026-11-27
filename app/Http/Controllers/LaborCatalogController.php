@@ -124,7 +124,7 @@ class LaborCatalogController extends Controller
         $type = (string) $request->user()->tenant?->business_type;
         if (! BusinessTypes::usesLaborCatalog($type)) {
             throw ValidationException::withMessages([
-                'business_type' => ['Labor catalog is only available for garages and paint shops.'],
+                'business_type' => ['Labor catalog is only available for garages, paint shops, and A/C repair shops.'],
             ]);
         }
     }
