@@ -14,6 +14,7 @@ use Illuminate\Validation\ValidationException;
  * Garages: the service blueprint shared by every vehicle type. Each type can switch a service off
  * or set its own price (ServiceAddonPrice); staff may type a different price on the job card.
  * Paint shops: priced package buttons.
+ * A/C shops: priced home-air-conditioner visits. Vehicle jobs do not use them.
  */
 #[Fillable([
     'name',
@@ -29,19 +30,25 @@ class ServiceAddon extends Model
 
     public static function seedDefaultsFor(int $tenantId, ?string $businessType = null): void
     {
-        if ($businessType !== BusinessTypes::PAINT) {
+        $catalog = match ($businessType) {
+            BusinessTypes::PAINT => 'paint',
+            BusinessTypes::AC_SERVICE => 'ac',
+            default => null,
+        };
+        if ($catalog === null) {
             return;
         }
 
-        if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->where('catalog', 'paint')->exists()) {
+        if (static::withoutGlobalScopes()->where('tenant_id', $tenantId)->where('catalog', $catalog)->exists()) {
             return;
         }
 
-        foreach (static::paintCatalog() as $row) {
+        $rows = $catalog === 'paint' ? static::paintCatalog() : static::acCatalog();
+        foreach ($rows as $row) {
             $addon = new static;
             $addon->forceFill([
                 'tenant_id' => $tenantId,
-                'catalog' => 'paint',
+                'catalog' => $catalog,
                 'name' => $row['name'],
                 'price' => $row['price'],
                 'sort_order' => $row['sort_order'],
@@ -63,6 +70,23 @@ class ServiceAddon extends Model
             ['name' => 'Full body — metallic', 'price' => 120000, 'sort_order' => 40],
             ['name' => 'Alloy refurb', 'price' => 8500, 'sort_order' => 50],
             ['name' => 'Interior spray', 'price' => 18000, 'sort_order' => 60],
+        ];
+    }
+
+    /**
+     * Home air-conditioner visits. One price per unit; gas and repairs on a car stay on the labor catalog.
+     *
+     * @return list<array{name: string, price: float, sort_order: int}>
+     */
+    public static function acCatalog(): array
+    {
+        return [
+            ['name' => 'General service', 'price' => 3500, 'sort_order' => 10],
+            ['name' => 'Jet service', 'price' => 6500, 'sort_order' => 20],
+            ['name' => 'Gas top-up', 'price' => 4500, 'sort_order' => 30],
+            ['name' => 'Full service', 'price' => 9500, 'sort_order' => 40],
+            ['name' => 'Installation', 'price' => 12000, 'sort_order' => 50],
+            ['name' => 'Uninstall', 'price' => 4500, 'sort_order' => 60],
         ];
     }
 

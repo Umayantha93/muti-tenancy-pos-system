@@ -64,7 +64,15 @@ class DashboardController extends Controller
             'features' => $user->accessibleFeatureKeys(),
             'business_type' => $type,
             'today_income' => $todayIncome,
-            'open_bills' => $billing ? BranchQuery::constrain(Bill::query())->whereIn('status', ['open', 'partially_paid', 'owe_in'])->count() : null,
+            'open_bills' => $billing ? $this->openJobs()->count() : null,
+            'open_vehicle_jobs' => $billing && $type === BusinessTypes::AC_SERVICE
+                ? $this->openJobs()->where(function ($query) {
+                    $query->whereDoesntHave('vehicle', fn ($vehicle) => $vehicle->where('asset_kind', 'appliance'));
+                })->count()
+                : null,
+            'open_appliance_jobs' => $billing && $type === BusinessTypes::AC_SERVICE
+                ? $this->openJobs()->whereHas('vehicle', fn ($vehicle) => $vehicle->where('asset_kind', 'appliance'))->count()
+                : null,
             'low_stock_parts' => $inventory ? $lowStock : null,
             'upcoming_bookings' => $user->canAccessFeature('photo_bookings')
                 ? $view->transform(
@@ -91,6 +99,11 @@ class DashboardController extends Controller
             'monthly_profit' => $finance ? round((float) $monthlyIncome - (float) $monthlyExpenses, 2) : null,
             'recent_bills' => $view->transform($recentBills),
         ]);
+    }
+
+    private function openJobs()
+    {
+        return BranchQuery::constrain(Bill::query())->whereIn('status', ['open', 'partially_paid', 'owe_in']);
     }
 
     private function periodIncome(MonetaryView $view, ?int $year, ?int $month, $day): float

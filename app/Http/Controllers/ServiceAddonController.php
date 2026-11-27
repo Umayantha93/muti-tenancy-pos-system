@@ -159,7 +159,7 @@ class ServiceAddonController extends Controller
         $type = (string) $request->user()->tenant?->business_type;
         if (! BusinessTypes::usesServiceAddonWorkspace($type)) {
             throw ValidationException::withMessages([
-                'business_type' => ['Service addons are only available for garages and paint shops.'],
+                'business_type' => ['Service addons are only available for garages, paint shops, and A/C repair shops.'],
             ]);
         }
     }

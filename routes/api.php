@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ApplianceTypeController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BalanceSheetController;
@@ -177,6 +178,8 @@ Route::middleware(['auth:sanctum', 'user.active', 'tenant.active', 'branch.conte
             Route::delete('/bills/{bill}/payments/{payment}', [BillPaymentController::class, 'destroy']);
             Route::get('/bills/{bill}/refunds', [BillRefundController::class, 'index']);
             Route::post('/bills/{bill}/refunds', [BillRefundController::class, 'store']);
+            Route::get('/appliance-types', [ApplianceTypeController::class, 'index']);
+            Route::post('/appliance-types', [ApplianceTypeController::class, 'store']);
             Route::get('/service-addons', [ServiceAddonController::class, 'index']);
             Route::get('/service-vehicle-classes', [ServiceVehicleClassController::class, 'index']);
             Route::get('/discount-types', [DiscountTypeController::class, 'index']);

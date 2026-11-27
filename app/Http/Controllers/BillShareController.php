@@ -20,7 +20,7 @@ class BillShareController extends Controller
     {
         $bill = $this->resolveBill($token, [
             'customer' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'name', 'phone', 'address']),
-            'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind']),
+            'vehicle' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'tenant_id', 'number_plate', 'make', 'model', 'chassis_number', 'imei', 'tyre_size', 'axle', 'fault_description', 'asset_kind', 'appliance_type']),
             'items' => fn ($query) => $query->withoutGlobalScopes()->select([
                 'id', 'bill_id', 'type', 'description', 'included_services', 'quantity', 'unit_price', 'line_discount', 'line_total', 'is_free',
                 'panel_group_id', 'panel_name', 'employee_id', 'warranty_months', 'warranty_starts_on', 'warranty_until',
@@ -35,6 +35,7 @@ class BillShareController extends Controller
         ]);
 
         $bill->tenant?->setAppends(['logo_url']);
+        $bill->vehicle?->makeHidden(['tenant_id']);
         $isPaint = BusinessTypes::usesPaintWorkspace((string) $bill->tenant?->business_type, $bill->job_kind);
         $isGarage = (string) $bill->tenant?->business_type === BusinessTypes::GARAGE;
         $repairNote = $isGarage && $bill->isRepairNote();

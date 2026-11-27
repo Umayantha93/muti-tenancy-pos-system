@@ -36,6 +36,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
     'warranty_until',
     'status',
     'job_kind',
+    'service_place',
     'paint_mode',
     'service_vehicle_class_id',
     'floor_status',

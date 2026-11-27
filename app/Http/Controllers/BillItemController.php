@@ -85,6 +85,7 @@ class BillItemController extends Controller
         }
 
         $data['section'] = $this->resolveSection($bill, $data);
+        $this->guardAcServiceAddon($bill, $data);
         $this->assertAssignableTechnician($bill, (string) $data['type'], $data['employee_id'] ?? null);
         $lineCatalog = $this->lineCatalog($request, $bill);
         $data = ServiceAddon::applyToItemPayload($data, (int) $request->user()->tenant_id, $bill->service_vehicle_class_id, $lineCatalog);
@@ -286,9 +287,10 @@ class BillItemController extends Controller
             ]);
         }
 
-        $garageService = $item->type === 'service_addon'
-            && BusinessTypes::normalizeLegacy((string) $bill->tenant?->business_type) === BusinessTypes::GARAGE;
-        if ($item->type !== 'labor' && ! $garageService) {
+        $shopType = BusinessTypes::normalizeLegacy((string) $bill->tenant?->business_type);
+        $editableService = $item->type === 'service_addon'
+            && in_array($shopType, [BusinessTypes::GARAGE, BusinessTypes::AC_SERVICE], true);
+        if ($item->type !== 'labor' && ! $editableService) {
             abort(422, 'Only labor lines can be updated on this bill.');
         }
 
@@ -391,8 +393,32 @@ class BillItemController extends Controller
         if ($type === BusinessTypes::PAINT || $bill->job_kind === Bill::JOB_KIND_PAINT) {
             return 'paint';
         }
+        if ($type === BusinessTypes::AC_SERVICE) {
+            return 'ac';
+        }
 
         return 'garage';
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function guardAcServiceAddon(Bill $bill, array $data): void
+    {
+        if (($data['type'] ?? '') !== 'service_addon' || empty($data['service_addon_id'])) {
+            return;
+        }
+        $type = BusinessTypes::normalizeLegacy((string) ($bill->tenant?->business_type ?? ''));
+        if ($type !== BusinessTypes::AC_SERVICE) {
+            return;
+        }
+        $bill->loadMissing('vehicle');
+        if ($bill->job_kind === Bill::JOB_KIND_SERVICE && $bill->vehicle?->asset_kind === 'appliance') {
+            return;
+        }
+        throw ValidationException::withMessages([
+            'service_addon_id' => ['Home AC services are only for appliance service jobs.'],
+        ]);
     }
 
     private function resolveSection(Bill $bill, array $data): string
