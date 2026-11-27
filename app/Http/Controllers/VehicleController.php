@@ -2,16 +2,24 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ApplianceType;
 use App\Models\Vehicle;
+use App\Support\BusinessTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class VehicleController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
         return response()->json(Vehicle::with('customer')->withCount('bills')
+            ->when($request->filled('asset_kind'), function ($query) use ($request) {
+                $kind = $request->string('asset_kind')->toString();
+                abort_unless(in_array($kind, ['vehicle', 'device', 'appliance'], true), 422, 'Unknown subject.');
+                $query->where('asset_kind', $kind);
+            })
             ->when($request->filled('search'), fn ($query) => $query->where(fn ($nested) => $nested
                 ->where('number_plate', 'like', '%'.$request->string('search').'%')
                 ->orWhere('chassis_number', 'like', '%'.$request->string('search').'%')))
@@ -49,7 +57,8 @@ class VehicleController extends Controller
             'make' => ['nullable', 'string', 'max:100'],
             'model' => ['nullable', 'string', 'max:100'],
             'year' => ['nullable', 'integer', 'between:1900,'.(now()->year + 1)],
-            'asset_kind' => ['nullable', Rule::in(['vehicle', 'device'])],
+            'asset_kind' => ['nullable', Rule::in(['vehicle', 'device', 'appliance'])],
+            'appliance_type' => ['nullable', 'string', 'max:40'],
             'imei' => ['nullable', 'string', 'max:40'],
             'tyre_size' => ['nullable', 'string', 'max:40'],
             'axle' => ['nullable', 'string', 'max:40'],
@@ -64,6 +73,18 @@ class VehicleController extends Controller
 
         if (! empty($data['number_plate'])) {
             $data['number_plate'] = strtoupper(trim($data['number_plate']));
+        }
+
+        if (($data['asset_kind'] ?? null) === 'appliance') {
+            $type = BusinessTypes::normalizeLegacy((string) ($request->user()->tenant?->business_type ?? ''));
+            if ($type !== BusinessTypes::AC_SERVICE) {
+                throw ValidationException::withMessages([
+                    'asset_kind' => ['Appliance admissions are only for A/C repair shops.'],
+                ]);
+            }
+            if (! empty($data['appliance_type'])) {
+                ApplianceType::assertAllowed((int) $request->user()->tenant_id, $data['appliance_type']);
+            }
         }
 
         return $data;
